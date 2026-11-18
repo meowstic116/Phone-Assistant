@@ -114,6 +114,25 @@ class OverlayService : Service(), PropHost {
         fun toysOnStage(): String = instance?.let { Toys.summary(it) } ?: ""
 
         /**
+         * The live numbers for the diagnostics screen: what the keyboard reports, where he is
+         * against it, and what is out. Null when the service is not running.
+         */
+        data class Status(
+            val imeReportedPx: Int,
+            val keyboardUp: Boolean,
+            val rememberedPx: Int,
+            val ceilingPx: Int,
+            val petY: Int,
+            val petHeightPx: Int,
+            val props: List<String>,
+            val screenWidthPx: Int,
+            val screenHeightPx: Int,
+            val bottomInsetPx: Int
+        )
+
+        fun status(): Status? = instance?.status()
+
+        /**
          * Toy business for a message sent from the history screen, so asking him there does
          * exactly what asking him in the bubble does. Returns the note for his prompt.
          */
@@ -326,6 +345,20 @@ class OverlayService : Service(), PropHost {
      * remembered from the last time it was measured.
      */
     private fun imeHeight(): Int = ImeWatch.heightPx
+
+    /** Read by the diagnostics screen; every number here is one the app actually uses. */
+    private fun status(): Status = Status(
+        imeReportedPx = imeHeight(),
+        keyboardUp = keyboardUp,
+        rememberedPx = keyboardHeightPx,
+        ceilingPx = keyboardCeiling().toInt(),
+        petY = posY.toInt(),
+        petHeightPx = petH,
+        props = props.toList().map { prop -> prop.javaClass.simpleName },
+        screenWidthPx = screenW,
+        screenHeightPx = screenH,
+        bottomInsetPx = bottomInset
+    )
 
     /** Called when the accessibility service sees a keyboard appear, move or go. */
     private fun onImeChanged(ime: Int) {
@@ -643,7 +676,15 @@ class OverlayService : Service(), PropHost {
 
         // Toys animate and run their own physics whether or not he is paying attention.
         if (props.isNotEmpty()) {
-            props.toList().forEach { prop -> runCatching { prop.onFrame() } }
+            // Caught rather than left to crash the tick, but recorded: a toy throwing every
+            // frame used to freeze that toy silently, with nothing anywhere saying why.
+            props.toList().forEach { prop ->
+                try {
+                    prop.onFrame()
+                } catch (t: Throwable) {
+                    Diag.caught(prop.javaClass.simpleName + ".onFrame", t)
+                }
+            }
             retireIfStale()
         }
 

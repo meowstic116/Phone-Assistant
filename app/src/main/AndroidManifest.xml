@@ -58,6 +58,10 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
 
+        <activity
+            android:name=".DiagnosticsActivity"
+            android:exported="false" />
+
         <!-- Tells the overlay where the keyboard is, whichever app it belongs to. Window
              bounds only: no window contents are ever read. -->
         <service

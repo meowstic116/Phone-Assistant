@@ -30,8 +30,12 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
 - A **Personality** screen shows the full prompt that defines him, and lets you rewrite it.
 - A **Memory** screen lists the facts he keeps between conversations, and lets you add or
   delete them.
-- It knows which app you are in (via Usage Access) and can reference it. It never reads
-  screen contents.
+- A **Diagnostics** screen shows, live, exactly what Android tells the app rather than what
+  it should: the keyboard height the accessibility service reports, whether that service is
+  switched on, whether a keyboard is up, where he is sitting against it, what is on the
+  stage, and the last two failures — the most recent refused request and the most recent
+  exception that was swallowed to keep the overlay alive. Nothing is written to disk or sent
+  anywhere.
 - Drag it anywhere. It lives in a foreground service with a persistent notification.
 
 ## Toys
@@ -131,7 +135,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.56-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.57-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
@@ -144,6 +148,8 @@ Tagged builds are also published as GitHub Releases by
    recommended: it is the only way Pip can see a keyboard opened in another app, since a
    floating overlay is never told about a keyboard it did not raise itself. It reads window
    type and bounds only — never what is typed or shown — and is used for nothing else.
+   **Diagnostics** on the main screen shows whether it is reporting a height at all, which is
+   the quickest way to tell a working service from a switched-off one.
 3. Paste an API key. The defaults point at Gemini's free tier
    (`https://generativelanguage.googleapis.com/v1beta/openai` with
    `gemini-3.5-flash-lite`), and a key from https://aistudio.google.com/apikey costs

@@ -1,8 +1,12 @@
 package com.phoneassistant
 
 import android.accessibilityservice.AccessibilityService
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.graphics.Rect
+import android.os.SystemClock
+import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 
@@ -71,9 +75,34 @@ object ImeWatch {
     @Volatile var heightPx = 0
         private set
 
+    /**
+     * The last keyboard height that was not zero, and when it was seen. A keyboard closes as
+     * soon as you leave the app it was open in, so without this the number is gone by the time
+     * it can be read; this keeps it until the next one.
+     */
+    @Volatile var lastSeenPx = 0
+        private set
+
+    @Volatile var lastSeenAt = 0L
+        private set
+
     @Volatile var onChange: ((Int) -> Unit)? = null
 
+    /** Whether the user has switched the service on in Settings. */
+    fun enabled(ctx: Context): Boolean {
+        val services = Settings.Secure.getString(
+            ctx.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+        val me = ComponentName(ctx, ImeWatcher::class.java)
+        return services.split(':').any { ComponentName.unflattenFromString(it) == me }
+    }
+
     fun publish(height: Int) {
+        if (height > 0) {
+            lastSeenPx = height
+            lastSeenAt = SystemClock.elapsedRealtime()
+        }
         if (height == heightPx) return
         heightPx = height
         onChange?.invoke(height)

@@ -71,6 +71,10 @@ object AssistantBrain {
             val result = try {
                 request(config, systemPrompt, history)
             } catch (t: Throwable) {
+                Diag.apiFailed(
+                    "did not finish",
+                    "${t.javaClass.simpleName}: ${t.message.orEmpty()}"
+                )
                 false to "I can't reach my brain right now. (${t.javaClass.simpleName})"
             }
             onDone(result.first, result.second)
@@ -87,6 +91,7 @@ object AssistantBrain {
         history: List<Memory.Msg>
     ): Pair<Boolean, String> {
         if (config.apiKey.isBlank()) {
+            Diag.apiFailed("no API key", "add one on the setup screen")
             return false to "I need an API key before I can think. Add one on the setup screen."
         }
 
@@ -122,6 +127,8 @@ object AssistantBrain {
 
             if (code !in 200..299) {
                 val detail = raw.replace("\n", " ").take(160)
+                // The status code is the useful part; the body says which quota or field.
+                Diag.apiFailed("HTTP $code", detail)
                 return false to "My brain said no ($code). $detail"
             }
 
@@ -132,6 +139,7 @@ object AssistantBrain {
                 .getString("content")
                 .trim()
 
+            Diag.apiOk()
             return true to text.ifBlank { "(silence)" }
         } finally {
             connection.disconnect()

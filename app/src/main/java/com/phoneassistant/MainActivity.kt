@@ -3,7 +3,6 @@ package com.phoneassistant
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -87,6 +86,10 @@ class MainActivity : Activity() {
 
         findViewById<Button>(R.id.memoryButton).setOnClickListener {
             startActivity(Intent(this, MemoryActivity::class.java))
+        }
+
+        findViewById<Button>(R.id.diagnosticsButton).setOnClickListener {
+            startActivity(Intent(this, DiagnosticsActivity::class.java))
         }
 
         breakRow = findViewById(R.id.breakRow)
@@ -262,19 +265,9 @@ class MainActivity : Activity() {
         addPermissionRow("Notifications", notificationsGranted()) { askForNotifications() }
         // Optional: without it he still keeps clear of his own keyboard, but not of one
         // opened in another app, which is the only way to see that keyboard at all.
-        addPermissionRow("Keyboard awareness (accessibility)", accessibilityGranted()) {
+        addPermissionRow("Keyboard awareness (accessibility)", ImeWatch.enabled(this)) {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
-    }
-
-    /** Whether the keyboard-watching service has been switched on in Settings. */
-    private fun accessibilityGranted(): Boolean {
-        val enabled = Settings.Secure.getString(
-            contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-        val me = ComponentName(this, ImeWatcher::class.java)
-        return enabled.split(':').any { ComponentName.unflattenFromString(it) == me }
     }
 
     private fun addPermissionRow(title: String, granted: Boolean, onGrant: () -> Unit) {
