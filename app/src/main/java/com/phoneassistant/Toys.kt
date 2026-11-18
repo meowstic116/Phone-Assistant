@@ -56,10 +56,26 @@ object Toys {
         "stop playing", "tidy up", "put it all away", "away please"
     )
 
-    private val quietPhrases = listOf(
-        "no toys", "no games", "not now", "not right now", "take a break", "leave me alone",
-        "peace and quiet", "quiet please", "don't play", "dont play", "give me a minute",
-        "chill out", "settle down", "sit still", "stop playing"
+    /** Unambiguously about his toys, so they count however the sentence is phrased. */
+    private val quietCores = listOf(
+        "no toys", "no games", "no more toys", "no more games", "no playing",
+        "stop playing", "put your toys", "toys away", "stop the toys"
+    )
+
+    /**
+     * Only counts when it is aimed at him. "I need a break from work" is about their day,
+     * not a request to pack the lemonade stand away.
+     */
+    private val quietSoft = listOf(
+        "take a break", "not now", "not right now", "leave me alone", "peace and quiet",
+        "quiet please", "don't play", "dont play", "give me a minute", "chill out",
+        "settle down", "sit still"
+    )
+
+    /** Ways a sentence starts when the person is talking about themselves, not at Pip. */
+    private val selfWords = setOf(
+        "i", "i'm", "im", "i've", "ive", "i'd", "id", "my", "me", "we", "we're",
+        "weve", "we've", "our"
     )
 
     private val resumePhrases = listOf(
@@ -108,8 +124,19 @@ object Toys {
     }
 
     fun asksForQuiet(raw: String): Boolean {
-        val text = raw.lowercase()
-        return quietPhrases.any { text.contains(it) }
+        val text = raw.lowercase().trim()
+        if (quietCores.any { text.contains(it) }) return true
+        if (quietSoft.none { text.contains(it) }) return false
+
+        // "can you chill out", "leave me alone for ten minutes"
+        if (text.contains("you") || text.contains("your") || text.contains("pip")) return true
+        if (text.contains("please")) return true
+
+        // A bare instruction ("take a break", "not now") is aimed at him; "I need to
+        // chill out" is not.
+        val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val first = words.firstOrNull()?.trim(',', '.', '!', '?')
+        return words.size <= 8 && first !in selfWords
     }
 
     fun asksToResume(raw: String): Boolean {
@@ -341,20 +368,34 @@ object Toys {
     private fun notesText(notes: List<String>): String? =
         if (notes.isEmpty()) null else notes.joinToString(" ")
 
-    /** What Pip knows about his own things, for the prompt. */
+    /** What Pip knows about his own things and his break, for the prompt. */
     fun summary(host: OverlayService): String {
+        val blocks = mutableListOf<String>()
+
+        val left = Quiet.remaining(host.stageContext())
+        if (left > 0L) {
+            blocks += "YOU ARE ON A TOY BREAK\n" +
+                "- They asked you to lay off the toys, and there is about " +
+                describeDuration(left) + " of that break left before you may get one out " +
+                "again. If they ask about it, tell them how long is left and sulk about it. " +
+                "Don't offer to start a game, pour a lemonade or paint anything until it's over."
+        }
+
         val lines = host.propsOnScreen()
             .map { it.describe() }
             .filter { it.isNotBlank() }
             .distinct()
-        if (lines.isEmpty()) return ""
-        return buildString {
-            append("WHAT YOU HAVE OUT ON THEIR SCREEN (you put it there, it is yours)\n")
-            lines.forEach { append("- ").append(it).append('\n') }
-            append("They can drag any of it anywhere, tap it to use it, and hold it to put it ")
-            append("away. Talk about it when it comes up, brag about it, or complain when they ")
-            append("mess with it.")
-        }.trimEnd()
+        if (lines.isNotEmpty()) {
+            blocks += buildString {
+                append("WHAT YOU HAVE OUT ON THEIR SCREEN (you put it there, it is yours)\n")
+                lines.forEach { append("- ").append(it).append('\n') }
+                append("They can drag any of it anywhere and tap it to use it, and they can ask ")
+                append("you to put one away. Talk about it when it comes up, brag about it, or ")
+                append("complain when they mess with it.")
+            }
+        }
+
+        return blocks.joinToString("\n\n")
     }
 
     /** Pip starts something by himself when the screen has been empty for a while. */

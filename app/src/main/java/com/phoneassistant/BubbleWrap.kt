@@ -103,7 +103,4 @@ class BubbleWrap(host: PropHost) : Prop(host) {
 
     override fun describe(): String =
         "a sheet of bubble wrap with $count of $total bubbles popped (by you)"
-
-    override fun putAwayLine(): String =
-        "putting the bubble wrap away. with bubbles left. unpopped. a tragedy."
 }

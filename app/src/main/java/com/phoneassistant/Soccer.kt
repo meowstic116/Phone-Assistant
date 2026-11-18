@@ -208,16 +208,6 @@ class SoccerGame(private val host: PropHost) {
         ui.postDelayed({ clear() }, 4500L)
     }
 
-    /** The user shoved the pitch in their pocket mid-game. He notices, and he says so. */
-    fun abandon(reason: String) {
-        if (over) return
-        over = true
-        paused = true
-        clear()
-        host.feel(PetView.Mood.ANNOYED, 3200L)
-        host.say(reason)
-    }
-
     /** Packs the whole game away. */
     fun clear() {
         host.propsOnScreen().forEach { prop ->
@@ -263,11 +253,6 @@ class Goal(host: PropHost, private val game: SoccerGame, val pipDefends: Boolean
             if (pipDefends) "that's my goal. it stays where I put it. that's the rule I just invented."
             else "your goal. it's not supposed to move. that's not me being a sore loser, that's the law."
         )
-    }
-
-    override fun onPutAway(): Boolean {
-        game.abandon("putting the goal away is the same as forfeiting. I win by default.")
-        return true
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -436,11 +421,6 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
     }
 
     override fun describe(): String = "the soccer ball"
-
-    override fun onPutAway(): Boolean {
-        game.abandon("putting the ball away. bold strategy. you were still losing.")
-        return true
-    }
 }
 
 /** The little score pill, which is also the referee's clock. */
@@ -479,9 +459,4 @@ class ScoreBoard(host: PropHost, private val game: SoccerGame) : Prop(host) {
 
     override fun describe(): String =
         "a soccer scoreboard showing you ${game.youScore}, Pip ${game.pipScore}"
-
-    override fun onPutAway(): Boolean {
-        game.abandon("fine. whole pitch is going away. I was winning and now nobody wins.")
-        return true
-    }
 }

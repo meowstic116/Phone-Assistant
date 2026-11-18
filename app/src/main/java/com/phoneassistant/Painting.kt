@@ -237,9 +237,6 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
     override fun describe(): String =
         "\"${style.title}\", a painting on a canvas — ${style.blurb}"
 
-    override fun putAwayLine(): String =
-        "you're putting my art away. I'll remember this, and I have a very good memory."
-
     companion object {
         val TAP_LINES = listOf(
             "careful. that's a limited edition. one of one. literally.",

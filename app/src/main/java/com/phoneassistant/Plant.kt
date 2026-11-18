@@ -154,9 +154,6 @@ class Plant(host: PropHost) : Prop(host) {
         if (stage >= maxStage) "a fully grown plant on your screen, covered in flowers"
         else "a pot plant at stage $stage of $maxStage that you were watering"
 
-    override fun putAwayLine(): String =
-        "putting the plant away. it was thirsty anyway. I'll water it myself, like always."
-
     companion object {
         val GROW_LINES = listOf(
             "*peers at the pot* it's doing something. I can tell.",

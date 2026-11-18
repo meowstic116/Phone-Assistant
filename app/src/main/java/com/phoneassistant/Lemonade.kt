@@ -100,9 +100,6 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         serve()
     }
 
-    override fun putAwayLine(): String =
-        "putting the stand away. this business was doomed anyway. no one was paying."
-
     override fun describe(): String {
         val glasses = host.propsOnScreen().count { it is LemonadeGlass }
         return "your lemonade stand (glasses out right now: $glasses)"
@@ -214,9 +211,6 @@ class LemonadeGlass(host: PropHost) : Prop(host) {
 
     override fun describe(): String =
         if (drunk) "an empty lemonade glass" else "a full glass of Pip's lemonade"
-
-    override fun putAwayLine(): String =
-        if (drunk) "fine, I'll take the glass back." else "you're wasting my lemonade. noted. deeply noted."
 
     companion object {
         val SIP_LINES = listOf(
