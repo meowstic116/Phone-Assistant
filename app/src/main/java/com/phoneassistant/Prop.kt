@@ -50,6 +50,12 @@ interface PropHost {
      */
     fun petIsNear(x: Float, y: Float, within: Float): Boolean
 
+    /**
+     * Pip's middle in screen pixels, or null when he is not on screen. Props that want to
+     * face him read this rather than assuming where he is.
+     */
+    fun petCentre(): Pair<Float, Float>?
+
     /** Pip walks until his centre sits on (x, y), then runs [done]. */
     fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?)
 

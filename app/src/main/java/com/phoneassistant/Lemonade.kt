@@ -5,6 +5,8 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import kotlin.math.sin
 
 /**
  * A little lemonade stand. Tap it and Pip pours you a glass; the glass is a separate
@@ -61,11 +63,15 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         panel(canvas, RectF(dp(2f), dp(96f), w - dp(2f), dp(112f)), 2f, woodEdge, wood)
 
         // The sign, which is the entire marketing strategy, hanging on the counter front,
-        // below where he stands rather than across his face.
+        // below where he stands rather than across his face. It swings from its top edge,
+        // the way anything hung on one nail would.
         val board = RectF(dp(14f), dp(115f), w - dp(14f), dp(137f))
+        canvas.save()
+        canvas.rotate(signSway(), board.centerX(), board.top)
         panel(canvas, board, 3f, woodEdge, cream)
         centred(canvas, "LEMONADE", board.centerX(), board.centerY() - dp(4f), signInk)
         centred(canvas, "50c or a compliment", board.centerX(), board.centerY() + dp(7f), tiny)
+        canvas.restore()
 
         // Striped awning, a canopy over his antenna with a couple of dp to spare.
         val awnTop = dp(2f)
@@ -83,6 +89,20 @@ class LemonadeStand(host: PropHost) : Prop(host) {
             i += 2
         }
         canvas.restore()
+    }
+
+    /**
+     * The board's angle this instant: two slow sines, so it never repeats on an obvious
+     * beat, and never swings far enough to look like it is falling off.
+     */
+    private fun signSway(): Float {
+        val t = (SystemClock.uptimeMillis() - bornAt) / 1000f
+        return sin(t * 1.7f) * 1.2f + sin(t * 3.1f + 0.8f) * 0.4f
+    }
+
+    override fun onFrame() {
+        // The sign is the only thing moving on an idle stand, so it has to be redrawn.
+        invalidate()
     }
 
     /**

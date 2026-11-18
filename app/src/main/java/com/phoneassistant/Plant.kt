@@ -3,6 +3,7 @@ package com.phoneassistant
 import android.graphics.Canvas
 import android.graphics.Path
 import android.os.SystemClock
+import kotlin.math.abs
 
 /**
  * A pot plant. Tap to water it and it grows a stage at a time; tap it too fast and Pip
@@ -20,6 +21,9 @@ class Plant(host: PropHost) : Prop(host) {
     private var growAt = 0L
     private var warnedFlood = false
     private var dropUntil = 0L
+
+    /** Degrees of lean toward Pip, eased rather than set, so a step is a sway and not a jump. */
+    private var lean = 0f
 
     private val pot = fill(0xFFC46B4B.toInt())
     private val potEdge = stroke(0xFF8B4530.toInt(), 1.2f)
@@ -65,8 +69,26 @@ class Plant(host: PropHost) : Prop(host) {
         invalidate()
     }
 
+    /**
+     * Plants turn toward the light, and here the light is a small phone-shaped creature
+     * standing somewhere on the same screen.
+     */
+    private fun leanTowardsPip() {
+        val pip = host.petCentre()
+        val target = if (pip == null) {
+            0f
+        } else {
+            ((pip.first - centreX) / dp(240f)).coerceIn(-1f, 1f) * 8f
+        }
+        val next = lean + (target - lean) * 0.08f
+        if (abs(next - lean) < 0.02f) return
+        lean = next
+        invalidate()
+    }
+
     override fun onFrame() {
         val now = SystemClock.uptimeMillis()
+        leanTowardsPip()
         if (dropUntil > 0L && now > dropUntil) {
             dropUntil = 0L
             invalidate()
@@ -108,6 +130,8 @@ class Plant(host: PropHost) : Prop(host) {
         val growth = stage / maxStage.toFloat()
         val stemTop = if (stage == 0) potTop - dp(4f) else potTop - dp(10f) - dp(46f) * growth
         if (stage > 0) {
+            canvas.save()
+            canvas.rotate(lean, cx, potTop)
             path.reset()
             path.moveTo(cx, potTop)
             path.quadTo(cx + dp(6f), (potTop + stemTop) / 2f, cx, stemTop)
@@ -122,9 +146,12 @@ class Plant(host: PropHost) : Prop(host) {
                 path.quadTo(cx + side * dp(14f), ly + dp(4f), cx, ly)
                 canvas.drawPath(path, leaf)
             }
+            canvas.restore()
         }
 
         if (stage >= maxStage) {
+            canvas.save()
+            canvas.rotate(lean, cx, potTop)
             for (i in 0 until 5) {
                 val angle = Math.toRadians((i * 72).toDouble())
                 canvas.drawCircle(
@@ -134,6 +161,7 @@ class Plant(host: PropHost) : Prop(host) {
                 )
             }
             canvas.drawCircle(cx, stemTop, dp(4f), centre)
+            canvas.restore()
         }
 
         // The pot itself, wider at the top.

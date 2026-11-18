@@ -1,10 +1,16 @@
 package com.phoneassistant
 
 import android.graphics.Canvas
+import android.graphics.LinearGradient
+import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Shader
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import kotlin.math.PI
+import kotlin.math.sin
 import kotlin.random.Random
 
 /**
@@ -53,10 +59,25 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
     private val scratch = RectF()
     private val path = Path()
 
+    /** Width of the highlight, in its own coordinates so the canvas can carry it around. */
+    private val sheenBand = dp(52f)
+
+    private val sheen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = LinearGradient(
+            0f, 0f, sheenBand, 0f,
+            intArrayOf(0x00FFFFFF, 0x22FFFFFF, 0x00FFFFFF),
+            floatArrayOf(0f, 0.45f, 1f),
+            Shader.TileMode.CLAMP
+        )
+    }
+
     override fun onFrame() {
-        if (brush >= 1f) return
-        brush = (brush + 0.008f).coerceAtMost(1f)
-        if (brush >= 1f) finished = true
+        if (brush < 1f) {
+            brush = (brush + 0.008f).coerceAtMost(1f)
+            if (brush >= 1f) finished = true
+        }
+        // The canvas is never quite dry, so it keeps catching the light after the last
+        // stroke: this is the one thing that keeps a finished painting alive.
         invalidate()
     }
 
@@ -89,11 +110,34 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
         drawArt(canvas)
         canvas.restore()
 
+        drawSheen(canvas)
+
         canvas.drawRect(artArea, clothEdge)
         if (finished) {
             val signature = text(0xFF6B5B45.toInt(), 6.5f)
             centred(canvas, "- pip", artArea.right - dp(16f), artArea.bottom - dp(1f), signature)
         }
+    }
+
+    /**
+     * A slow highlight crossing the wet paint every few seconds, clipped to the part that
+     * has actually been painted. Paint takes a while to dry, so it keeps going afterwards.
+     */
+    private fun drawSheen(canvas: Canvas) {
+        val phase = ((SystemClock.uptimeMillis() - bornAt) % SHEEN_PERIOD_MS).toFloat() /
+            SHEEN_PERIOD_MS
+        if (phase > SHEEN_SWEEP) return
+        val through = phase / SHEEN_SWEEP
+        val paintedRight = artArea.left + artArea.width() * brush
+        val x = artArea.left - sheenBand + through * (artArea.width() + sheenBand * 2f)
+
+        sheen.alpha = (sin(through * PI) * 255.0).toInt().coerceIn(0, 255)
+        canvas.save()
+        canvas.clipRect(artArea.left, artArea.top, paintedRight, artArea.bottom)
+        canvas.rotate(-16f, artArea.centerX(), artArea.centerY())
+        canvas.translate(x, artArea.top)
+        canvas.drawRect(0f, -dp(30f), sheenBand, artArea.height() + dp(60f), sheen)
+        canvas.restore()
     }
 
     private fun drawArt(canvas: Canvas) {
@@ -425,6 +469,11 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
         "\"${style.title}\", a painting on a canvas — ${style.blurb}"
 
     companion object {
+        private const val SHEEN_PERIOD_MS = 7_200L
+
+        /** The sheen is only on screen for this fraction of each cycle. */
+        private const val SHEEN_SWEEP = 0.42f
+
         val WET_LINES = listOf(
             "give it a minute. still wet.",
             "still drying. patience.",

@@ -435,6 +435,9 @@ class OverlayService : Service(), PropHost {
     override fun petIsNear(x: Float, y: Float, within: Float): Boolean =
         hypot(posX + petW / 2f - x, posY + petH / 2f - y) <= within
 
+    override fun petCentre(): Pair<Float, Float>? =
+        if (pet == null) null else (posX + petW / 2f) to (posY + petH / 2f)
+
     /** Heads for the post; whatever is waiting there runs on arrival. */
     private fun approachPost(x: Float, y: Float) {
         petWalkTo(x, y) { firePostArrival() }
