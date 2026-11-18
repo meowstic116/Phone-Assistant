@@ -10,7 +10,8 @@ your other apps, and talks back.
 - Tap it to open a small input box under his feet. He stops to listen, shows animated
   thinking dots, then answers in a speech bubble that follows him around and flips below
   him near the top of the screen. The box leaves as soon as you send, or when you press
-  back. He steps clear of the keyboard using its measured height, not a guess. Replies
+  back. He steps straight up clear of the keyboard using its measured height, not a guess,
+  keeping his place across the screen instead of jumping to a corner. Replies
   come from any OpenAI-compatible API.
 - A **Chat history** screen shows the whole conversation and lets you keep talking from
   there; replies still appear in his overlay bubble, which floats above the chat.
@@ -23,7 +24,7 @@ your other apps, and talks back.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.10-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.11-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

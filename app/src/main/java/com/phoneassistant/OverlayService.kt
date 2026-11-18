@@ -104,6 +104,7 @@ class OverlayService : Service() {
     /** Measured height of the keyboard in pixels, 0 until it has been seen. */
     private var keyboardHeightPx = 0
     private var probeSamples = 0
+    private var keyboardAttempts = 0
 
     private val handler = Handler(Looper.getMainLooper())
     private val rnd = Random(System.currentTimeMillis())
@@ -613,7 +614,7 @@ class OverlayService : Service() {
         }
 
         field.requestFocus()
-        handler.postDelayed({ showKeyboard() }, 80L)
+        showKeyboard()
         walkClearOfKeyboard()
         startKeyboardProbe()
         // The keyboard animates in after this, and showing it can interrupt the walk,
@@ -662,20 +663,20 @@ class OverlayService : Service() {
     }
 
     /**
-     * If the bar would sit under the keyboard, send him walking up and to one side so
-     * the box stays visible — the bar follows him, so it arrives with him.
+     * If the bar would sit under the keyboard, he walks straight up until the box clears
+     * it. He keeps his column: the bar follows him and is kept on screen on its own, so
+     * there is nothing to be gained by sliding sideways — and re-targeting on every probe
+     * sample used to drag him into a corner.
      */
     private fun walkClearOfKeyboard() {
         val ceiling = keyboardCeiling()
-        val barBottom = posY + petH + dp(6f) + dp(62f)
-        if (barBottom <= ceiling) return
+        val barHeight = inputBar?.height?.toFloat()?.takeIf { it > 0f } ?: dp(62f)
+        val neededY = ceiling - petH - dp(6f) - barHeight
+        if (neededY >= posY) return
 
-        val nextY = (ceiling - petH - dp(70f)).coerceAtLeast(topInset + dp(8f))
-        val spread = dp(60f) + rnd.nextFloat() * dp(110f)
-        val direction = if (rnd.nextBoolean()) 1f else -1f
-
-        targetX = (posX + spread * direction).coerceIn(0f, (screenW - petW).toFloat())
-        targetY = nextY.coerceIn(topInset + dp(8f), (screenH - petH - bottomInset).toFloat())
+        targetX = posX
+        targetY = neededY.coerceAtLeast(topInset + dp(8f))
+        if (abs(targetY - posY) < 1f) return
         walking = true
         relocating = true
     }
@@ -701,6 +702,8 @@ class OverlayService : Service() {
 
     private fun removeInputBar() {
         handler.removeCallbacks(keyboardProbe)
+        handler.removeCallbacks(showKeyboardRetry)
+        keyboardAttempts = 0
         inputBar?.let { bar -> runCatching { windowManager.removeView(bar) } }
         inputBar = null
         inputField = null
@@ -738,14 +741,38 @@ class OverlayService : Service() {
 
     private fun typing(): Boolean = inputField?.text?.isNotEmpty() == true
 
+    /**
+     * Asks for the keyboard, and keeps asking for a moment. A window that was only just
+     * added often has no input connection yet, so the first request is silently dropped
+     * and the field needs a second tap — these retries stand in for that tap.
+     */
     private fun showKeyboard() {
-        val field = inputField ?: return
-        field.requestFocus()
-        val imm = getSystemService(InputMethodManager::class.java)
-        imm?.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT)
+        keyboardAttempts = 0
+        handler.removeCallbacks(showKeyboardRetry)
+        handler.postDelayed(showKeyboardRetry, 80L)
+    }
+
+    private val showKeyboardRetry = object : Runnable {
+        override fun run() {
+            val field = inputField ?: return
+            if (keyboardUp()) return
+            field.requestFocus()
+            val imm = getSystemService(InputMethodManager::class.java)
+            imm?.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT)
+            if (keyboardAttempts++ < 4) handler.postDelayed(this, 220L)
+        }
+    }
+
+    /** Whether the keyboard is actually up, as far as the bar's display frame shows. */
+    private fun keyboardUp(): Boolean {
+        val bar = inputBar ?: return false
+        val frame = Rect()
+        bar.getWindowVisibleDisplayFrame(frame)
+        return screenH - frame.bottom > bottomInset + dpInt(80f)
     }
 
     private fun hideKeyboard() {
+        handler.removeCallbacks(showKeyboardRetry)
         val field = inputField ?: return
         val imm = getSystemService(InputMethodManager::class.java)
         imm?.hideSoftInputFromWindow(field.windowToken, 0)
