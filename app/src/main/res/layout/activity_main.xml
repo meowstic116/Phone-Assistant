@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Phone Assistant"
+            android:textColor="@color/text"
+            android:textSize="30sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="A little phone-shaped creature that walks around your screen and talks back."
+            android:textColor="@color/textDim"
+            android:textSize="15sp" />
+
+        <TextView
+            style="@style/SectionHeader"
+            android:text="PERMISSIONS" />
+
+        <LinearLayout
+            android:id="@+id/permissionList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <Button
+            android:id="@+id/startButton"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="20dp"
+            android:backgroundTint="@color/accent"
+            android:text="Start assistant"
+            android:textColor="@color/onAccent"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/chatButton"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/surfaceAlt"
+            android:text="Open chat"
+            android:textColor="@color/text" />
+
+        <TextView
+            style="@style/SectionHeader"
+            android:text="BRAIN" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Defaults to Gemini's free tier, which needs no credit card. Any OpenAI-compatible endpoint works too — OpenAI, OpenRouter, Groq, or Ollama on your network. The key is stored only on this phone."
+            android:textColor="@color/textDim"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/keyLink"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="12dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:text="Get a free Gemini API key →"
+            android:textColor="@color/accent"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/baseUrlField"
+            style="@style/Field"
+            android:hint="API base URL"
+            android:inputType="textUri" />
+
+        <EditText
+            android:id="@+id/apiKeyField"
+            style="@style/Field"
+            android:layout_marginTop="8dp"
+            android:hint="API key"
+            android:inputType="textPassword" />
+
+        <EditText
+            android:id="@+id/modelField"
+            style="@style/Field"
+            android:layout_marginTop="8dp"
+            android:hint="Model"
+            android:inputType="text" />
+
+        <Button
+            android:id="@+id/saveButton"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="@color/surfaceAlt"
+            android:text="Save"
+            android:textColor="@color/text" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:layout_marginBottom="16dp"
+            android:text="Pip knows which app is open, never what is on the screen. No Accessibility access is used, so it cannot read your messages or tap anything for you."
+            android:textColor="@color/textDim"
+            android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>
