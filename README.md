@@ -33,6 +33,16 @@ that reason.
    your network.
 4. Press **Start assistant**.
 
+## Signing
+
+`signing/phone-assistant.jks` is committed and used for both debug and release builds, so
+every build shares one signature and updates install straight over the top. Password
+`android`, alias `androiddebugkey`.
+
+That key is public and self-signed — completely fine for sideloading on your own phone,
+but never acceptable for Play Store distribution or for anything you actually want to
+protect from impersonation.
+
 ## Changing the character
 
 - Personality, name and rules: `app/src/main/java/com/phoneassistant/Persona.kt`
