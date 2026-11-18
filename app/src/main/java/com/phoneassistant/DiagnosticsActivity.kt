@@ -3,11 +3,12 @@ package com.phoneassistant
 import android.app.Activity
 import android.graphics.Typeface
 import android.os.Bundle
-import android.os.SystemClock
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 
 /**
  * What Pip actually sees, live, twice a second.
@@ -24,6 +25,7 @@ import android.widget.TextView
 class DiagnosticsActivity : Activity() {
 
     private lateinit var readout: TextView
+    private lateinit var floatButton: Button
 
     /** Keeps the numbers live while the screen is open, and stops when it is not. */
     private val ticker = object : Runnable {
@@ -45,6 +47,31 @@ class DiagnosticsActivity : Activity() {
             setLineSpacing(dp(3f).toFloat(), 1f)
         }
 
+        // The panel has to be asked for from somewhere, and this is the screen about the
+        // numbers it shows. It lives in the overlay, so it outlives this activity.
+        floatButton = Button(this).apply {
+            text = floatLabel()
+            setPadding(0, dp(6f), 0, dp(12f))
+            setOnClickListener {
+                if (!OverlayService.running) {
+                    // One of his windows: with no overlay running there is nothing to hang
+                    // it on, and saying so beats a button that silently does nothing.
+                    Toast.makeText(
+                        this@DiagnosticsActivity,
+                        "Start Pip first — the panel lives in his overlay.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@setOnClickListener
+                }
+                if (OverlayService.diagnosticsHudShowing()) {
+                    OverlayService.hideDiagnosticsHud()
+                } else {
+                    OverlayService.showDiagnosticsHud()
+                }
+                text = floatLabel()
+            }
+        }
+
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20f), dp(24f), dp(20f), dp(24f))
@@ -62,6 +89,13 @@ class DiagnosticsActivity : Activity() {
                 setPadding(0, dp(6f), 0, dp(18f))
             })
             addView(
+                floatButton,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+            addView(
                 readout,
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -78,8 +112,15 @@ class DiagnosticsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Came back from a trip to another app: he may have been stopped, and the panel with
+        // him, while this screen was hidden.
+        if (::floatButton.isInitialized) floatButton.text = floatLabel()
         readout.post(ticker)
     }
+
+    private fun floatLabel(): String =
+        if (OverlayService.diagnosticsHudShowing()) "Hide floating panel"
+        else "Float over other apps"
 
     override fun onPause() {
         readout.removeCallbacks(ticker)
@@ -120,7 +161,7 @@ class DiagnosticsActivity : Activity() {
             "last non-zero",
             if (ImeWatch.lastSeenPx == 0) "none seen yet" else
                 "${ImeWatch.lastSeenPx}px · ${asDp(ImeWatch.lastSeenPx, density)}dp · " +
-                    ago(ImeWatch.lastSeenAt)
+                    Diag.ago(ImeWatch.lastSeenAt)
         )
 
         if (status == null) {
@@ -167,10 +208,10 @@ class DiagnosticsActivity : Activity() {
             line("last API error", "none since the app started")
         } else {
             val halves = failure.text.split(" · ", limit = 2)
-            line("last API error", "${halves[0]} · ${ago(failure.at)}")
+            line("last API error", "${halves[0]} · ${Diag.ago(failure.at)}")
             halves.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { detail(it) }
         }
-        line("last good reply", ago(Diag.lastApiOkAt))
+        line("last good reply", Diag.ago(Diag.lastApiOkAt))
 
         section("LAST SWALLOWED EXCEPTION")
         val caught = Diag.lastCaught
@@ -178,23 +219,11 @@ class DiagnosticsActivity : Activity() {
             line("exception", "none — nothing has been hidden")
         } else {
             val times = if (caught.count > 1) " · ×${caught.count}" else ""
-            line("exception", ago(caught.at) + times)
+            line("exception", Diag.ago(caught.at) + times)
             detail(caught.text)
         }
 
         return out.toString()
-    }
-
-    /** "just now", "8s ago", "3m ago" — enough to tell a live fault from an old one. */
-    private fun ago(at: Long): String {
-        if (at <= 0L) return "never"
-        val ms = SystemClock.elapsedRealtime() - at
-        return when {
-            ms < 1_500L -> "just now"
-            ms < 60_000L -> "${ms / 1000}s ago"
-            ms < 3_600_000L -> "${ms / 60_000}m ago"
-            else -> "${ms / 3_600_000}h ago"
-        }
     }
 
     private fun asDp(px: Int, density: Float): Int =

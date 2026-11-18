@@ -57,6 +57,21 @@ object Diag {
         }
     }
 
+    /**
+     * "just now", "8s ago", "3m ago" — enough to tell a live fault from an old one. Shared
+     * with the floating readout, which has to show the same age for the same event.
+     */
+    fun ago(at: Long): String {
+        if (at <= 0L) return "never"
+        val ms = SystemClock.elapsedRealtime() - at
+        return when {
+            ms < 1_500L -> "just now"
+            ms < 60_000L -> "${ms / 1000}s ago"
+            ms < 3_600_000L -> "${ms / 60_000}m ago"
+            else -> "${ms / 3_600_000}h ago"
+        }
+    }
+
     private fun describe(what: String, t: Throwable): String {
         val name = t.javaClass.simpleName.ifEmpty { t.javaClass.name.substringAfterLast('.') }
         val message = t.message?.replace("\n", " ")?.trim()?.take(140).orEmpty()

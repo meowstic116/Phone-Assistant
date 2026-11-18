@@ -35,7 +35,10 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   switched on, whether a keyboard is up, where he is sitting against it, what is on the
   stage, and the last two failures — the most recent refused request and the most recent
   exception that was swallowed to keep the overlay alive. Nothing is written to disk or sent
-  anywhere.
+  anywhere. A **floating readout** can be turned on from that screen: a small panel, draggable
+  and closable with its ×, that stays over other apps so the keyboard height and where he is
+  against it can be watched live while you type somewhere else. (The panel is one of his own
+  windows, so it needs him running.)
 - Drag it anywhere. It lives in a foreground service with a persistent notification.
 
 ## Toys
@@ -135,7 +138,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.57-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.58-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

@@ -113,24 +113,20 @@ class OverlayService : Service(), PropHost {
         /** What is out on the screen right now, for the prompt. Empty when nothing is. */
         fun toysOnStage(): String = instance?.let { Toys.summary(it) } ?: ""
 
-        /**
-         * The live numbers for the diagnostics screen: what the keyboard reports, where he is
-         * against it, and what is out. Null when the service is not running.
-         */
-        data class Status(
-            val imeReportedPx: Int,
-            val keyboardUp: Boolean,
-            val rememberedPx: Int,
-            val ceilingPx: Int,
-            val petY: Int,
-            val petHeightPx: Int,
-            val props: List<String>,
-            val screenWidthPx: Int,
-            val screenHeightPx: Int,
-            val bottomInsetPx: Int
-        )
+        /** How often the floating readout repaints. Fast enough to watch a keyboard arrive. */
+        private const val HUD_REFRESH_MS = 250L
 
         fun status(): Status? = instance?.status()
+
+        /**
+         * The compact readout, as a window of the overlay so it stays over other apps. False
+         * when he is not running: the panel is one of his windows, not a separate app.
+         */
+        fun showDiagnosticsHud(): Boolean = instance?.let { it.showHud(); true } ?: false
+
+        fun hideDiagnosticsHud(): Boolean = instance?.let { it.hideHud(); true } ?: false
+
+        fun diagnosticsHudShowing(): Boolean = instance?.hud != null
 
         /**
          * Toy business for a message sent from the history screen, so asking him there does
@@ -168,6 +164,23 @@ class OverlayService : Service(), PropHost {
         }
     }
 
+    /**
+     * The live numbers for the diagnostics screen and its floating panel: what the keyboard
+     * reports, where he is against it, and what is out. Null when he is not running.
+     */
+    data class Status(
+        val imeReportedPx: Int,
+        val keyboardUp: Boolean,
+        val rememberedPx: Int,
+        val ceilingPx: Int,
+        val petY: Int,
+        val petHeightPx: Int,
+        val props: List<String>,
+        val screenWidthPx: Int,
+        val screenHeightPx: Int,
+        val bottomInsetPx: Int
+    )
+
     private lateinit var windowManager: WindowManager
     private lateinit var petParams: WindowManager.LayoutParams
     private var pet: PetView? = null
@@ -182,6 +195,16 @@ class OverlayService : Service(), PropHost {
     private var inputBar: LinearLayout? = null
     private var inputField: EditText? = null
     private var inputParams: WindowManager.LayoutParams? = null
+
+    /** The floating diagnostics readout, while it has been asked for. */
+    private var hud: DiagHud? = null
+    private var hudParams: WindowManager.LayoutParams? = null
+
+    /** Where the panel was when the finger went down, so a drag follows it exactly. */
+    private var hudDownX = 0f
+    private var hudDownY = 0f
+    private var hudLeft = 0
+    private var hudTop = 0
 
     /** Measured height of the keyboard in pixels, 0 until it has been seen. */
     private var keyboardHeightPx = 0
@@ -360,6 +383,96 @@ class OverlayService : Service(), PropHost {
         bottomInsetPx = bottomInset
     )
 
+    // ------------------------------------------------------- floating diagnostics
+
+    /**
+     * Small, live, and over everything. The Diagnostics screen is an activity, so it can only
+     * be read while it is in front — and the keyboard it is describing closes as soon as you
+     * leave the app that owns it. This panel is a window of the overlay itself, so it keeps
+     * reading while you type somewhere else.
+     */
+    private fun showHud() {
+        if (hud != null) return
+        val view = DiagHud(this).apply { onClose = { hideHud() } }
+        val width = dpInt(190f)
+        val params = WindowManager.LayoutParams(
+            width,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            // Touchable so it can be dragged, but never focusable: it must not take the
+            // keyboard away from the app whose keyboard it is measuring.
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            // Top right, where it covers the least of a keyboard in progress.
+            x = (screenW - width - dpInt(10f)).coerceAtLeast(0)
+            y = topInset + dpInt(10f)
+        }
+        view.setOnTouchListener(hudTouch)
+        if (!runCatching { windowManager.addView(view, params) }.isSuccess) return
+        hud = view
+        hudParams = params
+        // Painted straight away, so it never appears hollow for a quarter of a second.
+        renderHud()
+        handler.postDelayed(hudTicker, HUD_REFRESH_MS)
+    }
+
+    private fun hideHud() {
+        handler.removeCallbacks(hudTicker)
+        hud?.let { view -> runCatching { windowManager.removeView(view) } }
+        hud = null
+        hudParams = null
+    }
+
+    private val hudTicker = object : Runnable {
+        override fun run() {
+            if (hud == null) return
+            renderHud()
+            handler.postDelayed(this, HUD_REFRESH_MS)
+        }
+    }
+
+    private fun renderHud() {
+        hud?.render(status(), ImeWatch.enabled(this), ImeWatch.lastSeenPx, ImeWatch.lastSeenAt)
+    }
+
+    /**
+     * Dragging is measured from where the finger went down rather than by adding each move, so
+     * a dropped frame cannot make the panel drift away from the finger that is holding it. A
+     * tap that goes nowhere is not a click: the only clickable part is the × in the header.
+     */
+    private val hudTouch = View.OnTouchListener { _, event ->
+        val params = hudParams ?: return@OnTouchListener false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                hudDownX = event.rawX
+                hudDownY = event.rawY
+                hudLeft = params.x
+                hudTop = params.y
+                true
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                // The window has no height until it is laid out; its real one is only known
+                // after the first frame.
+                val height = hud?.height?.takeIf { it > 0 } ?: params.height
+                params.x = (hudLeft + (event.rawX - hudDownX)).toInt()
+                    .coerceIn(0, (screenW - params.width).coerceAtLeast(0))
+                params.y = (hudTop + (event.rawY - hudDownY)).toInt()
+                    .coerceIn(topInset, (screenH - height - bottomInset).coerceAtLeast(topInset))
+                hud?.let { view -> runCatching { windowManager.updateViewLayout(view, params) } }
+                true
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
+
+            else -> false
+        }
+    }
+
     /** Called when the accessibility service sees a keyboard appear, move or go. */
     private fun onImeChanged(ime: Int) {
         keyboardUp = ime > 0
@@ -386,6 +499,10 @@ class OverlayService : Service(), PropHost {
         hideBubble()
         hideThinking()
         removeInputBar()
+        // The panel is its own window and nothing else owns it, so it goes with the service.
+        hud?.let { view -> runCatching { windowManager.removeView(view) } }
+        hud = null
+        hudParams = null
         props.toList().forEach { prop -> runCatching { windowManager.removeView(prop) } }
         props.clear()
         fading.forEach { view -> runCatching { windowManager.removeView(view) } }
