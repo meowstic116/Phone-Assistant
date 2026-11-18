@@ -340,8 +340,8 @@ object Toys {
                 BubbleWrap(host).bring(host.stageWidth() * 0.52f, host.stageHeight() * 0.22f) ->
                     Outcome(
                         true,
-                        "you put a sheet of bubble wrap on their screen. it is very poppable " +
-                            "and you are keeping count."
+                        "you put a sheet of bubble wrap on their screen and are pressing a " +
+                            "few of the bubbles yourself. they can pop the rest by tapping."
                     )
                 else -> Outcome(
                     false,

@@ -76,8 +76,11 @@ from work" leaves the lemonade stand alone.
   he walks over and kicks it back at yours. First to three or ninety seconds, and he
   announces the result either way. The goals are draggable, which he notices: he calls it
   cheating (cheerfully), and three goalpost moves and he calls the game off.
-- **Bubble wrap** — a sheet of 35 bubbles. Pop them; he counts and gets competitive. Pop
-  all of them and he clears it away, impressed against his will.
+- **Bubble wrap** — a sheet of 35 domed bubbles on a sheet of plastic, each with its own
+  highlight, popped ones left as creases with a small burst as they go. No header and no
+  counter: the sheet itself shows how far along you are. He joins in — walks over, presses
+  three himself with a dry line about it, and leaves you the rest. Pop every one and he
+  clears the sheet away.
 - **Plant** — tap to water it, three waterings per stage and it grows through four stages
   to a flower. Water it too fast and he accuses you of drowning it.
 
@@ -113,7 +116,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.42-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.43-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
