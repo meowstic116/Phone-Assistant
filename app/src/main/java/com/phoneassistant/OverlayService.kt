@@ -104,7 +104,6 @@ class OverlayService : Service() {
     /** Measured height of the keyboard in pixels, 0 until it has been seen. */
     private var keyboardHeightPx = 0
     private var probeSamples = 0
-    private var keyboardAttempts = 0
 
     private val handler = Handler(Looper.getMainLooper())
     private val rnd = Random(System.currentTimeMillis())
@@ -596,8 +595,10 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
+            // The window asks for the keyboard itself, so it opens together with the bar
+            // rather than depending on a request that can arrive before the IME connects.
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN or
-                WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
         }
 
         inputParams = params
@@ -702,8 +703,7 @@ class OverlayService : Service() {
 
     private fun removeInputBar() {
         handler.removeCallbacks(keyboardProbe)
-        handler.removeCallbacks(showKeyboardRetry)
-        keyboardAttempts = 0
+        handler.removeCallbacks(showKeyboardNudge)
         inputBar?.let { bar -> runCatching { windowManager.removeView(bar) } }
         inputBar = null
         inputField = null
@@ -742,37 +742,25 @@ class OverlayService : Service() {
     private fun typing(): Boolean = inputField?.text?.isNotEmpty() == true
 
     /**
-     * Asks for the keyboard, and keeps asking for a moment. A window that was only just
-     * added often has no input connection yet, so the first request is silently dropped
-     * and the field needs a second tap — these retries stand in for that tap.
+     * The window already declares SOFT_INPUT_STATE_ALWAYS_VISIBLE, so the keyboard comes
+     * up with the bar; this single nudge only covers an IME that connects late.
      */
     private fun showKeyboard() {
-        keyboardAttempts = 0
-        handler.removeCallbacks(showKeyboardRetry)
-        handler.postDelayed(showKeyboardRetry, 80L)
+        handler.removeCallbacks(showKeyboardNudge)
+        handler.postDelayed(showKeyboardNudge, 120L)
     }
 
-    private val showKeyboardRetry = object : Runnable {
+    private val showKeyboardNudge = object : Runnable {
         override fun run() {
             val field = inputField ?: return
-            if (keyboardUp()) return
             field.requestFocus()
-            val imm = getSystemService(InputMethodManager::class.java)
-            imm?.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT)
-            if (keyboardAttempts++ < 4) handler.postDelayed(this, 220L)
+            getSystemService(InputMethodManager::class.java)
+                ?.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT)
         }
     }
 
-    /** Whether the keyboard is actually up, as far as the bar's display frame shows. */
-    private fun keyboardUp(): Boolean {
-        val bar = inputBar ?: return false
-        val frame = Rect()
-        bar.getWindowVisibleDisplayFrame(frame)
-        return screenH - frame.bottom > bottomInset + dpInt(80f)
-    }
-
     private fun hideKeyboard() {
-        handler.removeCallbacks(showKeyboardRetry)
+        handler.removeCallbacks(showKeyboardNudge)
         val field = inputField ?: return
         val imm = getSystemService(InputMethodManager::class.java)
         imm?.hideSoftInputFromWindow(field.windowToken, 0)
