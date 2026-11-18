@@ -3,6 +3,8 @@ package com.phoneassistant
 import android.graphics.Canvas
 import android.graphics.Path
 import android.graphics.RectF
+import android.os.Handler
+import android.os.Looper
 import kotlin.random.Random
 
 /**
@@ -29,6 +31,11 @@ class LemonadeStand(host: PropHost) : Prop(host) {
 
     /** Glasses promised and not yet poured, capped at what the stand can hold. */
     private var owed = 0
+
+    private val ui = Handler(Looper.getMainLooper())
+
+    /** Runs the next owed pour, a beat after the last one. */
+    private val pourNext = Runnable { pourPending() }
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
@@ -181,12 +188,21 @@ class LemonadeStand(host: PropHost) : Prop(host) {
             owed = 0
             return
         }
-        if (owed > 0 && hasRoom()) pourPending()
+        if (owed == 0) return
+        if (!hasRoom()) {
+            owed = 0
+            return
+        }
+        // Two requests in a row get two glasses a beat apart, rather than both landing on
+        // the same frame and looking like one glass appearing twice.
+        ui.removeCallbacks(pourNext)
+        ui.postDelayed(pourNext, POUR_GAP_MS)
     }
 
     /** Off the screen: let him wander again, and forget anything still owed. */
     override fun onDetachedFromWindow() {
         owed = 0
+        ui.removeCallbacks(pourNext)
         // The service clears posts itself when it stops, and its pet may already be gone by
         // the time the last window comes off, so only reach back while still attached.
         if (isAttachedToWindow) host.petRelease()
@@ -203,6 +219,9 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     }
 
     companion object {
+        /** Long enough to read as two pours, short enough not to feel like a pause. */
+        private const val POUR_GAP_MS = 800L
+
         val POST_LINES = listOf(
             "*dusts the counter* right. my spot. where were we.",
             "back behind the counter. the queue starts here, and it is you.",
