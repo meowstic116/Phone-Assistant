@@ -64,6 +64,14 @@ class SoccerGame(private val host: PropHost) {
     private val ui = Handler(Looper.getMainLooper())
     private val rnd = Random(SystemClock.uptimeMillis())
 
+    /**
+     * The pitch: the stage, or only the part of it above a keyboard. Fixed for the game, so
+     * a goal line cannot shift out from under a ball in flight; the one exception is the
+     * re-fit below, which only happens before anyone has touched the ball.
+     */
+    private var pitchTop = 0f
+    private var pitchBottom = 0f
+
     private var paused = false
     private var cheats = 0
     private var startedAt = 0L
@@ -79,16 +87,40 @@ class SoccerGame(private val host: PropHost) {
         bottomGoal = Goal(host, this, pipDefends = true)
         ball = Ball(host, this)
 
+        fitPitch()
         layOut()
+        // His own chat box's keyboard may still be on its way out, which would leave the
+        // pitch short. Fit it again once that has gone — but only while the ball is still
+        // where it was put, so no goal line can move under a ball in play.
+        ui.postDelayed({
+            if (!over && ball.atRest() && youScore == 0 && pipScore == 0) refitPitch()
+        }, 800L)
 
         host.say("first to three. tap the ball at my goal. I'll defend, badly.")
         host.feel(PetView.Mood.SMUG, 2600L)
     }
 
+    /** The whole stage, or just what sits above a keyboard someone is typing on. */
+    private fun fitPitch() {
+        pitchTop = host.stageTop().toFloat()
+        pitchBottom = host.toysFloor()
+    }
+
+    /** Grows the pitch back to the full stage if the keyboard that shortened it has gone. */
+    private fun refitPitch() {
+        val floor = host.toysFloor()
+        if (floor <= pitchBottom) return
+        pitchBottom = floor
+        layOut()
+    }
+
+    fun pitchTop(): Float = pitchTop
+    fun pitchFloor(): Float = pitchBottom
+
     private fun layOut() {
         val w = host.stageWidth().toFloat()
-        val top = host.stageTop().toFloat()
-        val bottom = (host.stageHeight() - host.stageBottom()).toFloat()
+        val top = pitchTop
+        val bottom = pitchBottom
 
         board.bring(host.px(10f), top + host.px(10f))
         topGoal.bring(w / 2f - topGoal.windowW / 2f, top + host.px(4f))
@@ -291,7 +323,7 @@ class Goal(host: PropHost, private val game: SoccerGame, val pipDefends: Boolean
     }
 
     override fun describe(): String =
-        if (pipDefends) "Pip's goal at the bottom of the screen" else "your goal at the top"
+        if (pipDefends) "Pip's goal at the bottom of the pitch" else "your goal at the top"
 }
 
 /** The ball. Tap to boot it downwards at Pip's goal; he kicks it back up at yours. */
@@ -325,7 +357,7 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
     fun reset() {
         moveTo(
             host.stageWidth() / 2f - windowW / 2f,
-            (host.stageTop() + host.stageHeight() - host.stageBottom()) / 2f - windowH / 2f
+            (game.pitchTop() + game.pitchFloor()) / 2f - windowH / 2f
         )
         vx = 0f
         vy = 0f
@@ -393,8 +425,8 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
             return
         }
 
-        val topEdge = host.stageTop().toFloat()
-        val floorY = (host.stageHeight() - host.stageBottom() - windowH).toFloat()
+        val topEdge = game.pitchTop()
+        val floorY = game.pitchFloor() - windowH
         if (ny <= topEdge) {
             ny = topEdge
             vy = -vy * 0.7f
