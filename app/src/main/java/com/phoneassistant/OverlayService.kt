@@ -249,7 +249,9 @@ class OverlayService : Service() {
             val dx = targetX - posX
             val dy = targetY - posY
             val distance = hypot(dx, dy)
-            val perFrame = speed * frameMs / 1000f
+            // Getting clear of the keyboard is urgent, so he hurries for that walk.
+            val rate = if (relocating) speed * 4f else speed
+            val perFrame = rate * frameMs / 1000f
 
             if (distance <= perFrame || distance < 0.5f) {
                 posX = targetX
@@ -541,7 +543,11 @@ class OverlayService : Service() {
             setBackgroundResource(R.drawable.overlay_panel)
         }
 
-        val field = EditText(this).apply {
+        val field = PipEditText(this).apply {
+            onBackPressed = {
+                closeChat()
+                true
+            }
             hint = "Say something…"
             setSingleLine(false)
             maxLines = 3
@@ -603,6 +609,11 @@ class OverlayService : Service() {
         field.requestFocus()
         handler.postDelayed({ showKeyboard() }, 80L)
         walkClearOfKeyboard()
+        // The keyboard animates in after this, and showing it can interrupt the walk,
+        // so check again once it has settled.
+        handler.postDelayed({
+            if (inputBar != null && !walking) walkClearOfKeyboard()
+        }, 500L)
     }
 
     /**
@@ -610,11 +621,13 @@ class OverlayService : Service() {
      * the box stays visible — the bar follows him, so it arrives with him.
      */
     private fun walkClearOfKeyboard() {
-        val keyboardTop = screenH * 0.45f
+        // Keyboards reach a long way up a tall phone, so the bar has to sit in the
+        // top half: anything below ~52% is fair game for a tall keyboard.
+        val ceiling = screenH * 0.52f
         val barBottom = posY + petH + dp(6f) + dp(62f)
-        if (barBottom <= keyboardTop) return
+        if (barBottom <= ceiling) return
 
-        val nextY = (keyboardTop - petH - dp(70f)).coerceAtLeast(topInset + dp(8f))
+        val nextY = (ceiling - petH - dp(70f)).coerceAtLeast(topInset + dp(8f))
         val spread = dp(60f) + rnd.nextFloat() * dp(110f)
         val direction = if (rnd.nextBoolean()) 1f else -1f
 
