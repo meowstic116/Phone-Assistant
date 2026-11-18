@@ -75,11 +75,18 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
         if (brush < 1f) {
             brush = (brush + 0.008f).coerceAtMost(1f)
             if (brush >= 1f) finished = true
+            invalidate()
+            return
         }
-        // The canvas is never quite dry, so it keeps catching the light after the last
-        // stroke: this is the one thing that keeps a finished painting alive.
-        invalidate()
+        // Finished, so the sheen is the only thing still moving. Redraw while it is on
+        // screen and leave the rest of its cycle as a still frame: a canvas this detailed
+        // is the most expensive thing on the screen to repaint for no reason.
+        if (sheenPhase() <= SHEEN_SWEEP) invalidate()
     }
+
+    /** How far through the light's slow cycle the canvas is, 0 to 1. */
+    private fun sheenPhase(): Float =
+        ((SystemClock.uptimeMillis() - bornAt) % SHEEN_PERIOD_MS).toFloat() / SHEEN_PERIOD_MS
 
     override fun onTap(x: Float, y: Float) {
         val wasFinished = finished
@@ -124,8 +131,7 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
      * has actually been painted. Paint takes a while to dry, so it keeps going afterwards.
      */
     private fun drawSheen(canvas: Canvas) {
-        val phase = ((SystemClock.uptimeMillis() - bornAt) % SHEEN_PERIOD_MS).toFloat() /
-            SHEEN_PERIOD_MS
+        val phase = sheenPhase()
         if (phase > SHEEN_SWEEP) return
         val through = phase / SHEEN_SWEEP
         val paintedRight = artArea.left + artArea.width() * brush

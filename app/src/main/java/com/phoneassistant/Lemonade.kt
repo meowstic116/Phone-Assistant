@@ -67,7 +67,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         // the way anything hung on one nail would.
         val board = RectF(dp(14f), dp(115f), w - dp(14f), dp(137f))
         canvas.save()
-        canvas.rotate(signSway(), board.centerX(), board.top)
+        canvas.rotate(signSway(SystemClock.uptimeMillis()), board.centerX(), board.top)
         panel(canvas, board, 3f, woodEdge, cream)
         centred(canvas, "LEMONADE", board.centerX(), board.centerY() - dp(4f), signInk)
         centred(canvas, "50c or a compliment", board.centerX(), board.centerY() + dp(7f), tiny)
@@ -95,13 +95,16 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      * The board's angle this instant: two slow sines, so it never repeats on an obvious
      * beat, and never swings far enough to look like it is falling off.
      */
-    private fun signSway(): Float {
-        val t = (SystemClock.uptimeMillis() - bornAt) / 1000f
+    private fun signSway(now: Long): Float {
+        val t = (now - bornAt) / 1000f
         return sin(t * 1.7f) * 1.2f + sin(t * 3.1f + 0.8f) * 0.4f
     }
 
     override fun onFrame() {
-        // The sign is the only thing moving on an idle stand, so it has to be redrawn.
+        // The sign moves every frame, so this redraws every frame. That is affordable: a
+        // stand is a dozen rects, one arc and two lines of text in a 112×148dp window, less
+        // drawing than PetView does at twice the rate. Throttling it to 20fps would step a
+        // 1.2° swing visibly, which is a worse trade than the saving.
         invalidate()
     }
 

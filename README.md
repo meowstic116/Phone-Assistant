@@ -12,8 +12,9 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   when it goes, a prop lifts slightly under your finger while you drag it, and the speech
   bubble eases in, then drifts out. A line stays up for as long as it takes to read.
 - And nothing sits still once it is down: the stand's sign swings on its nail, the plant
-  leans toward wherever he is standing, and the painting keeps catching the light as the
-  paint dries.
+  leans toward wherever he is standing, the painting keeps catching the light as the paint
+  dries, and the bubble wrap sheet glints between pops. None of it redraws while it isn't
+  moving, so an idle screen stays cheap.
 - Tap it to open a small input box under his feet. He stops to listen, shows animated
   thinking dots, then answers in a speech bubble that follows him around and flips below
   him near the top of the screen. The box leaves as soon as you send, or when you press
@@ -130,7 +131,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.52-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.53-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
