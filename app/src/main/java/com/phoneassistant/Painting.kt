@@ -510,8 +510,9 @@ class PaintingScene(private val host: PropHost, private val style: Painting.Styl
 
     private fun finish(art: Painting) {
         host.petSit(false)
-        // Tidied away mid-painting: there is nothing to present, so he just gets up.
-        if (!art.isAttachedToWindow) return
+        // Tidied away mid-painting: there is nothing to present, so he just gets up. The
+        // window outlives the prop by the length of its fade, so leaving counts too.
+        if (!art.isAttachedToWindow || art.leaving) return
         host.feel(PetView.Mood.HAPPY, 3200L)
         host.say(
             "done. it's \"${art.style.title}\". *holds it out* still wet, and I'm " +

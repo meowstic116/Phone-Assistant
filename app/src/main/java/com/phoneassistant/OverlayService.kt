@@ -455,6 +455,8 @@ class OverlayService : Service(), PropHost {
         work()
     }
 
+    override fun isPostOwner(prop: Prop): Boolean = prop === postOwner
+
     override fun petRelease() {
         postOwner = null
         post = null
@@ -542,6 +544,10 @@ class OverlayService : Service(), PropHost {
 
     override fun dropProp(prop: Prop) {
         if (!props.remove(prop)) return
+        // Released here rather than when the window finally detaches: the fade takes 170ms,
+        // and a new stand summoned in that window would have its post wiped by the old one
+        // leaving.
+        if (prop === postOwner) petRelease()
         // Gone from the logic at once, so nothing reacts to a toy that has left, but off the
         // screen gently: it shrinks away instead of blinking out.
         prop.fadeAway()
@@ -980,6 +986,9 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun sayAloud(text: String) {
+        // A reply can land after the overlay has been stopped, and a bubble added to a dead
+        // service is a window nothing will ever take down again.
+        if (!running) return
         hideThinking()
         // Speaking is a pause, not attention. Attention belongs to the chat bar and to sitting
         // at his easel; claiming it here is what used to root him to the spot, because nothing
@@ -1142,8 +1151,11 @@ class OverlayService : Service(), PropHost {
         targetX = posX
         targetY = neededY.coerceAtLeast(topInset + dp(8f))
         if (abs(targetY - posY) < 1f) return
-        // He drops whatever a toy sent him to do: the keyboard wins.
+        // He drops whatever a toy sent him on: the keyboard wins. A post is the exception —
+        // he has to go back behind the counter once the keyboard is gone, so its arrival is
+        // kept owed rather than thrown away with the walk.
         arrive = null
+        if (post != null && postArrival == null) postArrival = {}
         walking = true
         toyWalk = false
         relocating = true
@@ -1195,7 +1207,9 @@ class OverlayService : Service(), PropHost {
      */
     private fun keepBarClear() {
         val params = inputParams ?: return
-        val barHeight = (inputBar?.height ?: 0).coerceAtLeast(dpInt(48f))
+        // The bar has no height until it is laid out, and this can be the only pass it gets
+        // if he stands still afterwards, so the usual size is the floor.
+        val barHeight = (inputBar?.height ?: 0).coerceAtLeast(dpInt(62f))
         val left = params.x.toFloat()
         val right = left + params.width
         val top = params.y.toFloat()

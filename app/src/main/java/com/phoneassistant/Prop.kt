@@ -72,6 +72,9 @@ interface PropHost {
 
     /** Ends a post taken with [petHoldAt], so he goes back to wandering. */
     fun petRelease()
+
+    /** Whether [prop] is the prop he is currently posted at. */
+    fun isPostOwner(prop: Prop): Boolean
     fun petSit(sitting: Boolean)
 
     fun addProp(prop: Prop): Boolean
@@ -109,6 +112,14 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
         private set
 
     lateinit var params: WindowManager.LayoutParams
+
+    /**
+     * True from the moment this prop has left the stage, while its window is still fading.
+     * The window is gone for good 170ms later, so anything still holding this prop has to
+     * treat it as gone from here rather than from the detach.
+     */
+    var leaving = false
+        private set
 
     /** When this prop appeared, so a toy can outstay its welcome and be packed away. */
     val bornAt: Long = SystemClock.uptimeMillis()
@@ -216,6 +227,10 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
 
     /** Shrinks and fades away, for a prop that has already left the stage. */
     fun fadeAway() {
+        leaving = true
+        // A prop on its way out must not answer a last tap, and must not be picked up by a
+        // finger mid-fade and made opaque again for 170ms.
+        setOnTouchListener(null)
         if (!isAttachedToWindow) return
         animate().cancel()
         animate()

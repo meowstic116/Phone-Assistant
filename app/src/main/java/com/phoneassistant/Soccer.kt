@@ -115,8 +115,17 @@ class SoccerGame(private val host: PropHost) {
         pitchBottom = host.toysFloor()
     }
 
+    /**
+     * Whether the game's windows have already been packed away. They outlive the game by the
+     * length of their fade, so a timer that fires in that window must not rebuild them.
+     */
+    private fun packedAway(): Boolean = board.leaving || !board.isAttachedToWindow
+
     /** Grows the pitch back to the full stage if the keyboard that shortened it has gone. */
     private fun refitPitch() {
+        // layOut() re-brings every prop, which would put a game that has been tidied away
+        // back on the screen.
+        if (over || packedAway()) return
         val floor = host.toysFloor()
         if (floor <= pitchBottom) return
         pitchBottom = floor
@@ -229,7 +238,7 @@ class SoccerGame(private val host: PropHost) {
     }
 
     private fun finish() {
-        if (over) return
+        if (over || packedAway()) return
         over = true
         paused = true
         val youWon = youScore > pipScore
@@ -246,6 +255,8 @@ class SoccerGame(private val host: PropHost) {
 
     /** Packs the whole game away. */
     fun clear() {
+        // Over first: nothing queued may rebuild a pitch that is being packed away.
+        over = true
         host.propsOnScreen().forEach { prop ->
             if (prop is Goal || prop is Ball || prop is ScoreBoard) host.dropProp(prop)
         }

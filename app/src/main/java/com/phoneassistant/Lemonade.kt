@@ -135,6 +135,9 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      * line twice in a row.
      */
     fun serve(announce: Boolean = true): Boolean {
+        // A stand that has left the stage cannot pour for it: its window is only still on
+        // the screen while it fades.
+        if (leaving) return false
         if (!hasRoom()) {
             if (announce) {
                 host.say(Lines.pick(NO_ROOM_LINES))
@@ -179,6 +182,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      * empty, so the stand takes a post he holds until it is taken off the screen.
      */
     fun takePost(say: Boolean = false) {
+        if (leaving) return
         host.petHoldAt(this, centreX, behindCounterY()) {
             if (say) host.say(Lines.pick(POST_LINES))
             // Whatever is owed is poured on arrival, so a later takePost — the stand being
@@ -234,7 +238,9 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     override fun onDetachedFromWindow() {
         owed = 0
         ui.removeCallbacks(pourNext)
-        host.petRelease()
+        // The host releases the post as soon as the stand leaves the stage, which is before
+        // this runs. Releasing again here would free a new stand's post instead.
+        if (host.isPostOwner(this)) host.petRelease()
         super.onDetachedFromWindow()
     }
 
