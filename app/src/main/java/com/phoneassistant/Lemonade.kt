@@ -127,6 +127,11 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         serve()
     }
 
+    /** Dragged somewhere else: he walks back round behind it instead of being left behind. */
+    override fun onDragFinished() {
+        host.petWalkTo(centreX, behindCounterY(), null)
+    }
+
     override fun describe(): String {
         val glasses = host.propsOnScreen().count { it is LemonadeGlass }
         return "your lemonade stand, with you standing behind the counter " +
