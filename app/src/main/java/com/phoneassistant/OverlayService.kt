@@ -321,8 +321,8 @@ class OverlayService : Service(), PropHost {
         if (imeProbe != null) return
         val view = View(this)
         val params = WindowManager.LayoutParams(
-            1,
-            1,
+            4,
+            4,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
@@ -336,16 +336,40 @@ class OverlayService : Service(), PropHost {
         if (runCatching { windowManager.addView(view, params) }.isSuccess) imeProbe = view
     }
 
-    /** Height of the keyboard, whether it is ours or another app's. Zero when none is up. */
+    /**
+     * Height of the keyboard, whether it is ours or another app's. Zero when none is up.
+     *
+     * This is the only place the keyboard is measured, but the system will not tell a
+     * floating overlay directly, so it asks the two things that can answer: the insets sent
+     * to the probe window, and the display frame of his own chat bar, which the IME pans.
+     * The tallest plausible answer wins; anything the size of the nav strip is not a
+     * keyboard.
+     */
     private fun imeHeight(): Int {
-        val view = imeProbe ?: return 0
-        val insets = runCatching { view.rootWindowInsets }.getOrNull() ?: return 0
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            return insets.getInsets(WindowInsets.Type.ime()).bottom
+        var ime = 0
+
+        imeProbe?.let { view ->
+            val insets = runCatching { view.rootWindowInsets }.getOrNull()
+            if (insets != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                ime = insets.getInsets(WindowInsets.Type.ime()).bottom
+            }
+            if (ime == 0) {
+                // Older releases, and the ones that hide the inset: read the window's frame
+                // instead, which is inset too when the keyboard is up.
+                val frame = Rect()
+                view.getWindowVisibleDisplayFrame(frame)
+                ime = screenH - frame.bottom
+            }
         }
-        val frame = Rect()
-        view.getWindowVisibleDisplayFrame(frame)
-        return (screenH - frame.bottom).coerceAtLeast(0)
+
+        inputBar?.let { bar ->
+            val frame = Rect()
+            bar.getWindowVisibleDisplayFrame(frame)
+            ime = maxOf(ime, screenH - frame.bottom)
+        }
+
+        val plausible = ime > bottomInset + dpInt(80f) && ime < screenH * 0.72f
+        return if (plausible) ime else 0
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -1068,9 +1092,8 @@ class OverlayService : Service(), PropHost {
      */
     private fun watchKeyboard() {
         val ime = imeHeight()
-        val plausible = ime > bottomInset + dpInt(80f) && ime < screenH * 0.72f
-        keyboardUp = plausible
-        if (!plausible) return
+        keyboardUp = ime > 0
+        if (ime == 0) return
         if (abs(ime - keyboardHeightPx) > dpInt(2f)) {
             keyboardHeightPx = ime
             Keyboard.remember(this, ime)
@@ -1087,8 +1110,13 @@ class OverlayService : Service(), PropHost {
     private fun walkClearOfKeyboard() {
         val ceiling = keyboardCeiling()
         // With his own box open the box has to clear the keyboard; on somebody else's
-        // keyboard he only has to keep himself out of it.
-        val barHeight = inputBar?.height?.toFloat()?.takeIf { it > 0f } ?: dp(8f)
+        // keyboard he only has to keep himself out of it. The bar has no height on the
+        // frame it is added, so fall back to its usual size rather than under-clearing.
+        val barHeight = if (inputBar == null) {
+            dp(8f)
+        } else {
+            inputBar?.height?.toFloat()?.takeIf { it > 0f } ?: dp(62f)
+        }
         val neededY = ceiling - petH - dp(6f) - barHeight
         if (neededY >= posY) return
 
