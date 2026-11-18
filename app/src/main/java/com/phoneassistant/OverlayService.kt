@@ -1142,11 +1142,13 @@ class OverlayService : Service(), PropHost {
         Memory.append(this, "user", text)
         // His answer takes priority from this moment on, so the toys' own lines stay quiet.
         beginReply()
+        // Thinking comes before the toys act. The other way round, thinking cancelled the
+        // walk a toy had just started — and with it the arrival callback — so a pour or a
+        // painting never began at all.
+        startThinking()
         // Some things are done, not said: stands get opened, games get started, and
         // criticism gets taken personally.
         val event = Toys.reactTo(this, text)
-        attentive = true
-        startThinking()
 
         AssistantBrain.reply(this, currentAppLabel, Toys.summary(this), event) { ok, reply ->
             handler.post {

@@ -4,10 +4,9 @@ package com.phoneassistant
 enum class Toy(val label: String, private val words: List<String>) {
     LEMONADE(
         "Lemonade stand",
-        listOf(
-            "lemonade", "lemonade stand", "lemon drink", "a drink", "fifty cents",
-            "lemon", "a glass", "glass of", "thirsty", "refill", "the stand", "your stand"
-        )
+        // Names of the thing itself. "a glass", "the stand" and "thirsty" were too loose:
+        // they turned up in sentences that had nothing to do with him.
+        listOf("lemonade", "lemonade stand", "lemon drink", "lemon", "fifty cents")
     ),
     PAINTING(
         "Canvas",
@@ -15,10 +14,7 @@ enum class Toy(val label: String, private val words: List<String>) {
     ),
     SOCCER(
         "Soccer",
-        listOf(
-            "soccer", "football", "kickabout", "kick a ball", "ball", "goal", "penalty",
-            "a game"
-        )
+        listOf("soccer", "football", "kickabout", "kick a ball", "ball", "goal", "penalty")
     ),
     BUBBLES(
         "Bubble wrap",
@@ -67,12 +63,17 @@ object Toys {
 
     private val awayPhrases = listOf(
         "put it away", "put that away", "put everything away", "clean that up",
-        "clean this up", "clean it up", "clean up", "clear it", "clear the stand",
-        "clear your stand", "get rid of it", "get rid of the", "pack it up", "pack away",
-        "take it away", "take it down", "take the stand down", "stop playing", "tidy up",
-        "put it all away", "away please", "bin it", "chuck it", "close the stand",
-        "shut the stand", "no more stand", "off the screen"
+        "clean this up", "clean it up", "clear it", "clear the stand", "clear your stand",
+        "get rid of it", "pack it up", "take it away", "take it down",
+        "take the stand down", "stop playing", "tidy up", "put it all away", "away please",
+        "bin it", "chuck it", "close the stand", "shut the stand"
     )
+
+    /**
+     * What a cleanup verb has to point at before it counts. "clean up" on its own is usually
+     * about their kitchen; a bare "clean up your room" must not empty his toy box either.
+     */
+    private val cleanTargets = Regex("\\b(everything|toys?|them|stand|counter)\\b")
 
     /** Unambiguously about his toys, so they count however the sentence is phrased. */
     private val quietCores = listOf(
@@ -124,6 +125,13 @@ object Toys {
             val asking = requestVerbs.any { text.contains(it) } || words <= 2
             if (asking) return toy
         }
+        // "open your stand", "set up the stand": an imperative aimed at him, naming it the way
+        // people do. Scoped to the verbs that mean putting it there, so "move the stand" or
+        // "fix the stand" is not a lemonade request.
+        val setsUp = Regex("\\b(open|set up|bring out|put out)\\b").containsMatchIn(text)
+        if (setsUp && (text.contains("your stand") || text.contains("the stand"))) {
+            return Toy.LEMONADE
+        }
         return null
     }
 
@@ -137,9 +145,26 @@ object Toys {
         val text = raw.lowercase()
         if (awayPhrases.any { text.contains(it) }) return true
         // "put the plant away", "pack the goals away": any putting verb plus "away".
-        return text.contains("away") &&
+        if (text.contains("away") &&
             Regex("\\b(put|pack|take|clear|tidy|shove|hide)\\b").containsMatchIn(text)
+        ) {
+            return true
+        }
+        // "clean up your stand", "tidy the toys": a cleanup verb aimed at something of his.
+        val cleaning = Regex("\\b(clean|tidy|bin|chuck|close|shut)\\b").containsMatchIn(text)
+        return cleaning && cleanTargets.containsMatchIn(text)
     }
+
+    /**
+     * Which toy a cleanup is for: one it names, or the stand by its other names. Scoped to
+     * cleanup requests, so "the stand" stays useless as a reason to open one.
+     */
+    private fun awayTarget(text: String): Toy? =
+        toyNamedIn(text) ?: if (text.contains("stand") || text.contains("counter")) {
+            Toy.LEMONADE
+        } else {
+            null
+        }
 
     fun asksForQuiet(raw: String): Boolean {
         val text = raw.lowercase().trim()
@@ -393,7 +418,7 @@ object Toys {
             val props = host.propsOnScreen()
             if (props.isEmpty()) return notesText(notes)
 
-            val named = toyNamedIn(text)
+            val named = awayTarget(text)
             val doomed = if (named == null) props else props.filter { named.owns(it) }
             if (doomed.isEmpty()) {
                 notes += "they asked you to put ${named?.label?.lowercase()} away, but it " +
