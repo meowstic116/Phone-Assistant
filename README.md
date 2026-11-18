@@ -103,19 +103,20 @@ keeping your text — **bring my text back** puts your own wording straight back
 built-in text unchanged counts as choosing the built-in prompt, so nobody gets stuck on an
 old copy of the default by accident.
 
-Reactions to what you do with his toys are local canned lines, so they cost no API calls,
-and they are the fallback: while your message is being answered — and for a few seconds
+Reactions to what you do with his toys are local canned lines, so they cost no API calls
+and never repeat the one before: tap the same toy twice and he says two different things.
+They are also the fallback: while your message is being answered — and for a few seconds
 after the reply lands — those lines stay quiet, so his own answer always has the last word
 instead of the two talking over each other.
 Criticism and requests in chat go through the model with a note about what just happened,
-so his reply matches: tell him the lemonade was bad and he gets mock-indignant about it.
+so his reply matches: tell him the lemonade was bad and he takes it in good humour.
 Every reply also carries an exact list of what is on the screen, and he is told that the
 list is the only truth — if a toy is not on it, it is not there and he must not talk as if
 it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.36-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.37-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

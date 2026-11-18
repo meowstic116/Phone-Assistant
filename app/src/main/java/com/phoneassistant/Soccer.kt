@@ -36,6 +36,19 @@ class SoccerGame(private val host: PropHost) {
             "*stares at the ball* that happened. I'm fine.",
             "one for you. *slow clap* I'm being gracious."
         )
+        val MY_GOAL_TAP = listOf(
+            "that's my goal. it stays. I wrote that rule.",
+            "my goal. hands off. my rules."
+        )
+        val YOUR_GOAL_TAP = listOf(
+            "your goal. moving it is against the rules I wrote.",
+            "your goal. it stays put. my rules."
+        )
+        val SCORE_TAP = listOf(
+            "first to three. moving goals is cheating. I wrote that too.",
+            "still first to three, and I'm still refereeing."
+        )
+
         val PIP_KICK_LINES = listOf(
             "my turn. *scuffs it*",
             "*boots it* for the phones shaped like me.",
@@ -111,7 +124,9 @@ class SoccerGame(private val host: PropHost) {
         board.invalidate()
 
         host.feel(if (pipPoint) PetView.Mood.SMUG else PetView.Mood.ANNOYED, 1800L)
-        host.say(if (pipPoint) PIP_GOAL_LINES.random() else YOUR_GOAL_LINES.random())
+        host.say(
+            Lines.pick(if (pipPoint) PIP_GOAL_LINES else YOUR_GOAL_LINES)
+        )
 
         if (youScore >= TARGET || pipScore >= TARGET) {
             ui.postDelayed({ finish() }, 1500L)
@@ -134,7 +149,7 @@ class SoccerGame(private val host: PropHost) {
             host.say("three goal moves. that's the limit. *flops* rematch later.")
             ui.postDelayed({ clear() }, 3400L)
         } else {
-            host.say(CHEAT_LINES[(cheats - 1).coerceAtMost(CHEAT_LINES.size - 1)])
+            host.say(Lines.pick(CHEAT_LINES))
         }
     }
 
@@ -166,7 +181,7 @@ class SoccerGame(private val host: PropHost) {
             }
             host.feel(PetView.Mood.SMUG, 1600L)
             ball.kick(up = true, aim = rnd.nextFloat() * 1.8f - 0.9f, power = host.px(560f))
-            host.say(PIP_KICK_LINES.random())
+            host.say(Lines.pick(PIP_KICK_LINES))
             nextPipKick = SystemClock.uptimeMillis() + 2600L
         }
     }
@@ -242,8 +257,7 @@ class Goal(host: PropHost, private val game: SoccerGame, val pipDefends: Boolean
 
     override fun onTap(x: Float, y: Float) {
         host.say(
-            if (pipDefends) "that's my goal. it stays. I wrote that rule."
-            else "your goal. moving it is against the rules I wrote."
+            Lines.pick(if (pipDefends) SoccerGame.MY_GOAL_TAP else SoccerGame.YOUR_GOAL_TAP)
         )
     }
 
@@ -432,8 +446,7 @@ class ScoreBoard(host: PropHost, private val game: SoccerGame) : Prop(host) {
 
     override fun onTap(x: Float, y: Float) {
         host.say(
-            "PIP ${game.pipScore} — ${game.youScore} YOU. first to three. " +
-                "moving goals is cheating. I wrote that too."
+            "PIP ${game.pipScore} — ${game.youScore} YOU. " + Lines.pick(SoccerGame.SCORE_TAP)
         )
     }
 

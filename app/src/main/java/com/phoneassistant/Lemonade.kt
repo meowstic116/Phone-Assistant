@@ -5,7 +5,6 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
-import kotlin.random.Random
 
 /**
  * A little lemonade stand. Tap it and Pip pours you a glass; the glass is a separate
@@ -27,7 +26,6 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     private val tiny = text(0xFF6B4A2C.toInt(), 6.5f)
     private val slicePaint = fill(0xFFFFF1A8.toInt())
 
-    private var lineIndex = 0
 
     /** Glasses promised and not yet poured, capped at what the stand can hold. */
     private var owed = 0
@@ -117,7 +115,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     fun serve(announce: Boolean = true): Boolean {
         if (!hasRoom()) {
             if (announce) {
-                host.say("two glasses. I'm not made of lemons.")
+                host.say(Lines.pick(NO_ROOM_LINES))
             }
             return false
         }
@@ -135,7 +133,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         if (!glass.bring(x, y)) return false
 
         host.feel(PetView.Mood.HAPPY, 2200L)
-        if (announce) host.say(next(SERVE_LINES))
+        if (announce) host.say(Lines.pick(SERVE_LINES))
         return true
     }
 
@@ -160,7 +158,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      */
     fun takePost(say: Boolean = false) {
         host.petHoldAt(this, centreX, behindCounterY()) {
-            if (say) host.say(POST_LINES.random())
+            if (say) host.say(Lines.pick(POST_LINES))
             // Whatever is owed is poured on arrival, so a later takePost — the stand being
             // dragged while a glass is still promised, say — cannot drop that pour.
             pourPending()
@@ -233,14 +231,15 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         }
     }
 
-    private fun next(lines: List<String>): String {
-        lineIndex = (lineIndex + Random.nextInt(1, lines.size)) % lines.size
-        return lines[lineIndex]
-    }
-
     companion object {
         /** Long enough to read as two pours, short enough not to feel like a pause. */
         private const val POUR_GAP_MS = 800L
+
+        val NO_ROOM_LINES = listOf(
+            "two glasses. I'm not made of lemons.",
+            "that's the glass limit. the jug is doing its best.",
+            "no more glasses. drink the ones you have."
+        )
 
         val POST_LINES = listOf(
             "*dusts the counter* right. back to it.",
@@ -283,10 +282,10 @@ class LemonadeGlass(host: PropHost) : Prop(host) {
             wobble = 1f
             invalidate()
             host.feel(PetView.Mood.HAPPY, 1800L)
-            host.say(SIP_LINES.random())
+            host.say(Lines.pick(SIP_LINES))
         } else {
             host.dropProp(this)
-            host.say(CLEAR_LINES.random())
+            host.say(Lines.pick(CLEAR_LINES))
         }
     }
 

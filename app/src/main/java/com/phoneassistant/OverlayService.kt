@@ -63,6 +63,9 @@ class OverlayService : Service(), PropHost {
         /** How long a model reply keeps the floor after it lands, over any toy line. */
         private const val REPLY_HOLD_MS = 4_000L
 
+        /** How long a spoken line keeps him standing there before he gets on with things. */
+        private const val SPEAKING_HOLD_MS = 3_500L
+
         /** How long a toy stays out before he has had enough of it. */
         private const val TOY_LIFE_MS = 4 * 60_000L
 
@@ -175,6 +178,21 @@ class OverlayService : Service(), PropHost {
     private var awaitingReply = false
     private var replyAskedAt = 0L
     private var replyUntil = 0L
+
+    /** True while the pause after a spoken line is his own, not a chat bar or a painting's. */
+    private var speakingHold = false
+
+    /**
+     * Ends the pause a line claimed. Skipped when something else is holding his attention: a
+     * chat bar he is sitting under, or a canvas he is sitting at.
+     */
+    private val endSpeakingHold = Runnable {
+        speakingHold = false
+        if (inputBar == null && pet?.sitting != true) {
+            attentive = false
+            idleUntil = SystemClock.uptimeMillis() + 1200L
+        }
+    }
 
     /**
      * One-shot work waiting at that post — a lemonade to pour. Kept here rather than on the
@@ -499,7 +517,7 @@ class OverlayService : Service(), PropHost {
     private fun announceBreakOver() {
         // Marked first: a restart mid-sentence must not repeat him forever.
         Quiet.markSaid(this)
-        sayAloud(Toys.BREAK_OVER_LINES.random())
+        sayAloud(Lines.pick(Toys.BREAK_OVER_LINES))
         feel(PetView.Mood.HAPPY, 3000L)
         // Give it a moment before he bounces into something on his own.
         initiativeIn = 90_000L + rnd.nextLong(90_000L)
@@ -823,7 +841,15 @@ class OverlayService : Service(), PropHost {
 
     private fun sayAloud(text: String) {
         hideThinking()
-        attentive = true
+        // He stands still for the line, then gets on with his own business. This pause used
+        // to be permanent, so any toy line or break line left him rooted to the spot until
+        // something else happened to move him.
+        if (!attentive) {
+            attentive = true
+            speakingHold = true
+        }
+        handler.removeCallbacks(endSpeakingHold)
+        if (speakingHold) handler.postDelayed(endSpeakingHold, SPEAKING_HOLD_MS)
         // A walk a toy sent him on survives the line he says on the way, so a reply cannot
         // pull him out from behind the lemonade stand. Ordinary wandering still stops here:
         // he should not be scampering off while he is talking to you.

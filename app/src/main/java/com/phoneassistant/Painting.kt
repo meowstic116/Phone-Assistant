@@ -65,9 +65,9 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
         host.feel(PetView.Mood.HAPPY, 2200L)
         host.say(
             if (!wasFinished) {
-                "give it a minute. still wet."
+                Lines.pick(WET_LINES)
             } else {
-                TAP_LINES.random()
+                Lines.pick(TAP_LINES)
             }
         )
     }
@@ -425,6 +425,12 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
         "\"${style.title}\", a painting on a canvas — ${style.blurb}"
 
     companion object {
+        val WET_LINES = listOf(
+            "give it a minute. still wet.",
+            "still drying. patience.",
+            "not yet. the paint's still deciding."
+        )
+
         val TAP_LINES = listOf(
             "careful. one of one, literally.",
             "the dog in that one owes me twenty.",

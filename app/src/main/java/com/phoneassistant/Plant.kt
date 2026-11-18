@@ -44,7 +44,7 @@ class Plant(host: PropHost) : Prop(host) {
                 warnedFlood = true
                 water = 0
                 host.feel(PetView.Mood.ANNOYED, 2400L)
-                host.say("ease off. you're drowning it.")
+                host.say(Lines.pick(OVERWATER_LINES))
             }
             invalidate()
             return
@@ -52,7 +52,7 @@ class Plant(host: PropHost) : Prop(host) {
 
         if (stage >= maxStage) {
             host.feel(PetView.Mood.SMUG, 2000L)
-            host.say("that's full size. I'm a plant dad now.")
+            host.say(Lines.pick(FULL_LINES))
             return
         }
 
@@ -155,6 +155,18 @@ class Plant(host: PropHost) : Prop(host) {
         else "a pot plant at stage $stage of $maxStage that you were watering"
 
     companion object {
+        val OVERWATER_LINES = listOf(
+            "ease off. you're drowning it.",
+            "that's plenty. it's not a fish.",
+            "easy. the pot has limits."
+        )
+
+        val FULL_LINES = listOf(
+            "that's full size. I'm a plant dad now.",
+            "grown. that's as far as it goes.",
+            "nothing left to water. it's finished."
+        )
+
         val GROW_LINES = listOf(
             "*peers at the pot* something's happening. slowly.",
             "a new leaf. noted.",
