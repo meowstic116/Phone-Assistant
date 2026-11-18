@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Phone Assistant</string>
+    <string name="ime_watcher_description">Lets Pip see when a keyboard is on screen, so he can
+        keep out of its way. It reads only where windows are and what kind they are — never
+        what is typed or shown.</string>
 </resources>

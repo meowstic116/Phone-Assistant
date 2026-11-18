@@ -13,7 +13,6 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.Icon
 import android.os.Build
@@ -168,9 +167,6 @@ class OverlayService : Service(), PropHost {
     /** Measured height of the keyboard in pixels, 0 until it has been seen. */
     private var keyboardHeightPx = 0
 
-    /** A window kept only to read the IME inset; our real windows ignore layout insets. */
-    private var imeProbe: View? = null
-
     /** True while a keyboard is showing, in this app or any other. */
     private var keyboardUp = false
     private var keyboardWatch = 0L
@@ -307,69 +303,30 @@ class OverlayService : Service(), PropHost {
 
         idleUntil = SystemClock.uptimeMillis() + 2500L
         registerScreenReceiver()
-        addImeProbe()
+        ImeWatch.onChange = { ime -> handler.post { onImeChanged(ime) } }
         handler.post(tick)
-    }
-
-    /**
-     * A one-pixel window with no layout flags, kept purely to read the IME inset: our own
-     * windows set FLAG_LAYOUT_NO_LIMITS, so the system never applies insets to them. The
-     * keyboard that insets this window is the same one whichever app is being typed in,
-     * which is what lets him step out of the way of someone else's typing.
-     */
-    private fun addImeProbe() {
-        if (imeProbe != null) return
-        val view = View(this)
-        val params = WindowManager.LayoutParams(
-            4,
-            4,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 0
-            y = 0
-        }
-        if (runCatching { windowManager.addView(view, params) }.isSuccess) imeProbe = view
     }
 
     /**
      * Height of the keyboard, whether it is ours or another app's. Zero when none is up.
      *
-     * This is the only place the keyboard is measured, but the system will not tell a
-     * floating overlay directly, so it asks the two things that can answer: the insets sent
-     * to the probe window, and the display frame of his own chat bar, which the IME pans.
-     * The tallest plausible answer wins; anything the size of the nav strip is not a
-     * keyboard.
+     * The accessibility service is the one trusted source. A floating overlay is only ever
+     * sent an IME inset for a keyboard it raised itself, so nothing inside this service can
+     * see another app's typing, and a probe window that pretends otherwise is just a guess.
+     * His own box does not need this: it steps clear as soon as it opens, using the height
+     * remembered from the last time it was measured.
      */
-    private fun imeHeight(): Int {
-        var ime = 0
+    private fun imeHeight(): Int = ImeWatch.heightPx
 
-        imeProbe?.let { view ->
-            val insets = runCatching { view.rootWindowInsets }.getOrNull()
-            if (insets != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                ime = insets.getInsets(WindowInsets.Type.ime()).bottom
-            }
-            if (ime == 0) {
-                // Older releases, and the ones that hide the inset: read the window's frame
-                // instead, which is inset too when the keyboard is up.
-                val frame = Rect()
-                view.getWindowVisibleDisplayFrame(frame)
-                ime = screenH - frame.bottom
-            }
+    /** Called when the accessibility service sees a keyboard appear, move or go. */
+    private fun onImeChanged(ime: Int) {
+        keyboardUp = ime > 0
+        if (ime == 0) return
+        if (abs(ime - keyboardHeightPx) > dpInt(2f)) {
+            keyboardHeightPx = ime
+            Keyboard.remember(this, ime)
         }
-
-        inputBar?.let { bar ->
-            val frame = Rect()
-            bar.getWindowVisibleDisplayFrame(frame)
-            ime = maxOf(ime, screenH - frame.bottom)
-        }
-
-        val plausible = ime > bottomInset + dpInt(80f) && ime < screenH * 0.72f
-        return if (plausible) ime else 0
+        walkClearOfKeyboard()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -393,8 +350,7 @@ class OverlayService : Service(), PropHost {
         postOwner = null
         post = null
         postArrival = null
-        imeProbe?.let { view -> runCatching { windowManager.removeView(view) } }
-        imeProbe = null
+        ImeWatch.onChange = null
         keyboardUp = false
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
         pet = null
@@ -1087,18 +1043,12 @@ class OverlayService : Service(), PropHost {
     // ------------------------------------------------------------ keyboard size
 
     /**
-     * Watches the keyboard from the probe window, so one opened in another app counts too,
-     * and steps him clear of it whether or not he is the one being typed at.
+     * A safety net under the accessibility service: that pushes each change as it happens,
+     * but this re-reads the height while the overlay runs, so a service that has been killed
+     * cannot leave him avoiding a keyboard that went away long ago.
      */
     private fun watchKeyboard() {
-        val ime = imeHeight()
-        keyboardUp = ime > 0
-        if (ime == 0) return
-        if (abs(ime - keyboardHeightPx) > dpInt(2f)) {
-            keyboardHeightPx = ime
-            Keyboard.remember(this, ime)
-        }
-        walkClearOfKeyboard()
+        onImeChanged(imeHeight())
     }
 
     /**
