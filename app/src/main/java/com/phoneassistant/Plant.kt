@@ -74,11 +74,10 @@ class Plant(host: PropHost) : Prop(host) {
      * standing somewhere on the same screen.
      */
     private fun leanTowardsPip() {
-        val pip = host.petCentre()
-        val target = if (pip == null) {
+        val target = if (!host.petOnScreen()) {
             0f
         } else {
-            ((pip.first - centreX) / dp(240f)).coerceIn(-1f, 1f) * 8f
+            ((host.petCentreX() - centreX) / dp(240f)).coerceIn(-1f, 1f) * 8f
         }
         val next = lean + (target - lean) * 0.08f
         if (abs(next - lean) < 0.02f) return

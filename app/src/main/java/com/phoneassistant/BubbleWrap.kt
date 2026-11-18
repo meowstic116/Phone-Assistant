@@ -7,7 +7,6 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.os.SystemClock
-import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
@@ -49,15 +48,7 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     private val domeGloss = fill(0xE6FFFFFF.toInt())
 
     /** A band of light that crosses the plastic now and then: the sheet's only idle motion. */
-    private val sheenBand = dp(86f)
-    private val sheen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        shader = LinearGradient(
-            0f, 0f, sheenBand, 0f,
-            intArrayOf(0x00FFFFFF, 0x14FFFFFF, 0x00FFFFFF),
-            floatArrayOf(0f, 0.5f, 1f),
-            Shader.TileMode.CLAMP
-        )
-    }
+    private val sheen = Sheen(dp(86f), 0x14FFFFFF.toInt(), SHEEN_PERIOD_MS)
     private val sheetClip = Path()
     private val sheetRect = RectF()
 
@@ -110,34 +101,23 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         drawSheen(canvas, now)
     }
 
-    /** How far through the light's slow cycle the sheet is, 0 to 1. */
-    private fun sheenPhase(now: Long): Float =
-        ((now - bornAt) % SHEEN_PERIOD_MS).toFloat() / SHEEN_PERIOD_MS
-
     /**
      * Plastic catches the light as it settles. Slow, faint, and clipped to the sheet, so an
      * untouched sheet is not a still image — without redrawing it the rest of the time.
      */
     private fun drawSheen(canvas: Canvas, now: Long) {
-        val phase = sheenPhase(now)
-        if (phase > SHEEN_SWEEP) return
+        if (!sheen.visible(now, bornAt)) return
 
-        val through = phase / SHEEN_SWEEP
         val left = dp(1f)
         val top = dp(1f)
         val right = width - dp(1f)
         val bottom = height - dp(1f)
-        val x = left - sheenBand + through * (right - left + sheenBand * 2f)
-
-        sheen.alpha = (sin(through * PI) * 255.0).toInt().coerceIn(0, 255)
         sheetRect.set(left, top, right, bottom)
         sheetClip.reset()
         sheetClip.addRoundRect(sheetRect, dp(16f), dp(16f), Path.Direction.CW)
         canvas.save()
         canvas.clipPath(sheetClip)
-        canvas.rotate(-14f, (left + right) / 2f, (top + bottom) / 2f)
-        canvas.translate(x, top)
-        canvas.drawRect(0f, -dp(40f), sheenBand, bottom - top + dp(80f), sheen)
+        sheen.draw(canvas, left, top, right, bottom, now, bornAt)
         canvas.restore()
     }
 
@@ -247,7 +227,7 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         // untouched sheet changes, so the rest of the cycle costs nothing.
         if (burstAt.any { it > 0L && now - it in 0..BURST_MS }) {
             invalidate()
-        } else if (sheenPhase(now) <= SHEEN_SWEEP) {
+        } else if (sheen.visible(now, bornAt)) {
             invalidate()
         }
     }
@@ -283,8 +263,5 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         private const val DEGREES = Math.PI.toFloat() / 180f
 
         private const val SHEEN_PERIOD_MS = 5_600L
-
-        /** The light is on screen for this fraction of each cycle. */
-        private const val SHEEN_SWEEP = 0.42f
     }
 }

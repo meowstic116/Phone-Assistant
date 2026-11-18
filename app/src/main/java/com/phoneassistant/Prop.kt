@@ -51,10 +51,13 @@ interface PropHost {
     fun petIsNear(x: Float, y: Float, within: Float): Boolean
 
     /**
-     * Pip's middle in screen pixels, or null when he is not on screen. Props that want to
-     * face him read this rather than assuming where he is.
+     * Whether Pip is on screen at all. Props that want to face him ask this first, because
+     * [petCentreX] only means anything while he is there.
      */
-    fun petCentre(): Pair<Float, Float>?
+    fun petOnScreen(): Boolean
+
+    /** Pip's middle, in screen pixels. Read every frame, so it returns a plain float. */
+    fun petCentreX(): Float
 
     /** Pip walks until his centre sits on (x, y), then runs [done]. */
     fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?)

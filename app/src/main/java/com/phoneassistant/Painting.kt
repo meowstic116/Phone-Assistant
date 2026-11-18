@@ -1,16 +1,11 @@
 package com.phoneassistant
 
 import android.graphics.Canvas
-import android.graphics.LinearGradient
-import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
-import android.graphics.Shader
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import kotlin.math.PI
-import kotlin.math.sin
 import kotlin.random.Random
 
 /**
@@ -59,17 +54,7 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
     private val scratch = RectF()
     private val path = Path()
 
-    /** Width of the highlight, in its own coordinates so the canvas can carry it around. */
-    private val sheenBand = dp(52f)
-
-    private val sheen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        shader = LinearGradient(
-            0f, 0f, sheenBand, 0f,
-            intArrayOf(0x00FFFFFF, 0x22FFFFFF, 0x00FFFFFF),
-            floatArrayOf(0f, 0.45f, 1f),
-            Shader.TileMode.CLAMP
-        )
-    }
+    private val sheen = Sheen(dp(52f), 0x22FFFFFF.toInt(), SHEEN_PERIOD_MS)
 
     override fun onFrame() {
         if (brush < 1f) {
@@ -81,12 +66,8 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
         // Finished, so the sheen is the only thing still moving. Redraw while it is on
         // screen and leave the rest of its cycle as a still frame: a canvas this detailed
         // is the most expensive thing on the screen to repaint for no reason.
-        if (sheenPhase() <= SHEEN_SWEEP) invalidate()
+        if (sheen.visible(SystemClock.uptimeMillis(), bornAt)) invalidate()
     }
-
-    /** How far through the light's slow cycle the canvas is, 0 to 1. */
-    private fun sheenPhase(): Float =
-        ((SystemClock.uptimeMillis() - bornAt) % SHEEN_PERIOD_MS).toFloat() / SHEEN_PERIOD_MS
 
     override fun onTap(x: Float, y: Float) {
         val wasFinished = finished
@@ -131,18 +112,16 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
      * has actually been painted. Paint takes a while to dry, so it keeps going afterwards.
      */
     private fun drawSheen(canvas: Canvas) {
-        val phase = sheenPhase()
-        if (phase > SHEEN_SWEEP) return
-        val through = phase / SHEEN_SWEEP
+        val now = SystemClock.uptimeMillis()
+        if (!sheen.visible(now, bornAt)) return
         val paintedRight = artArea.left + artArea.width() * brush
-        val x = artArea.left - sheenBand + through * (artArea.width() + sheenBand * 2f)
-
-        sheen.alpha = (sin(through * PI) * 255.0).toInt().coerceIn(0, 255)
         canvas.save()
         canvas.clipRect(artArea.left, artArea.top, paintedRight, artArea.bottom)
-        canvas.rotate(-16f, artArea.centerX(), artArea.centerY())
-        canvas.translate(x, artArea.top)
-        canvas.drawRect(0f, -dp(30f), sheenBand, artArea.height() + dp(60f), sheen)
+        sheen.draw(
+            canvas,
+            artArea.left, artArea.top, artArea.right, artArea.bottom,
+            now, bornAt
+        )
         canvas.restore()
     }
 
@@ -476,9 +455,6 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
 
     companion object {
         private const val SHEEN_PERIOD_MS = 7_200L
-
-        /** The sheen is only on screen for this fraction of each cycle. */
-        private const val SHEEN_SWEEP = 0.42f
 
         val WET_LINES = listOf(
             "give it a minute. still wet.",
