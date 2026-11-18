@@ -174,7 +174,6 @@ class OverlayService : Service(), PropHost {
     /** True while a keyboard is showing, in this app or any other. */
     private var keyboardUp = false
     private var keyboardWatch = 0L
-    private var probeSamples = 0
 
     private val handler = Handler(Looper.getMainLooper())
     private val rnd = Random(System.currentTimeMillis())
@@ -389,6 +388,16 @@ class OverlayService : Service(), PropHost {
     override fun stageHeight(): Int = screenH
     override fun stageTop(): Int = topInset
     override fun stageBottom(): Int = bottomInset
+
+    override fun toysFloor(): Float {
+        // Measured here rather than from the last tick: a toy placed a moment after the
+        // keyboard appeared would otherwise land under it.
+        val ime = imeHeight()
+        val bottom =
+            if (ime > bottomInset + dpInt(80f)) (screenH - ime).toFloat()
+            else (screenH - bottomInset).toFloat()
+        return bottom - dp(8f)
+    }
     override fun px(value: Float): Float = dp(value)
     override fun petWidth(): Int = petW
     override fun petHeight(): Int = petH
@@ -1047,35 +1056,11 @@ class OverlayService : Service(), PropHost {
 
         field.requestFocus()
         showKeyboard()
+        // Steps clear by the remembered height straight away; the watcher refines it.
         walkClearOfKeyboard()
-        startKeyboardProbe()
-        // The keyboard animates in after this, and showing it can interrupt the walk,
-        // so check again once it has settled.
-        handler.postDelayed({
-            if (inputBar != null && !walking) walkClearOfKeyboard()
-        }, 500L)
     }
 
     // ------------------------------------------------------------ keyboard size
-
-    /**
-     * Watches the display frame while the keyboard rises. With the bar panned by the
-     * IME, the frame bottom reports where the keyboard starts, which gives its real
-     * height on this device rather than a percentage guess.
-     */
-    private fun startKeyboardProbe() {
-        probeSamples = 0
-        handler.removeCallbacks(keyboardProbe)
-        handler.postDelayed(keyboardProbe, 120L)
-    }
-
-    private val keyboardProbe = object : Runnable {
-        override fun run() {
-            if (inputBar == null) return
-            measureKeyboard()
-            if (probeSamples++ < 12) handler.postDelayed(this, 120L)
-        }
-    }
 
     /**
      * Watches the keyboard from the probe window, so one opened in another app counts too,
@@ -1089,23 +1074,6 @@ class OverlayService : Service(), PropHost {
         if (abs(ime - keyboardHeightPx) > dpInt(2f)) {
             keyboardHeightPx = ime
             Keyboard.remember(this, ime)
-        }
-        walkClearOfKeyboard()
-    }
-
-    private fun measureKeyboard() {
-        val bar = inputBar ?: return
-        val frame = Rect()
-        bar.getWindowVisibleDisplayFrame(frame)
-        val covered = screenH - frame.bottom
-
-        // Anything the size of the navigation strip is not a keyboard.
-        val plausible = covered > bottomInset + dpInt(80f) && covered < screenH * 0.72f
-        if (!plausible) return
-
-        if (abs(covered - keyboardHeightPx) > dpInt(2f)) {
-            keyboardHeightPx = covered
-            Keyboard.remember(this, covered)
         }
         walkClearOfKeyboard()
     }
@@ -1206,7 +1174,6 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun removeInputBar() {
-        handler.removeCallbacks(keyboardProbe)
         handler.removeCallbacks(showKeyboardNudge)
         inputBar?.let { bar -> runCatching { windowManager.removeView(bar) } }
         inputBar = null

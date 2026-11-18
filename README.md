@@ -13,7 +13,9 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   him near the top of the screen. The box leaves as soon as you send, or when you press
   back. He steps straight up clear of the keyboard using its measured height, not a guess —
   and he keeps clear of a keyboard you open in any other app too, because a one-pixel probe
-  window reads the IME inset that his own overlay windows are built to ignore.
+  window reads the IME inset that his own overlay windows are built to ignore. That one
+  reading is the only place the keyboard is measured, and any toy he puts out while you are
+  typing is placed above it rather than in the middle of your words.
   Replies come from any OpenAI-compatible API.
 - A **Chat history** screen shows the whole conversation and lets you keep talking from
   there; replies still appear in his overlay bubble, which floats above the chat.
@@ -118,7 +120,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.44-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.45-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

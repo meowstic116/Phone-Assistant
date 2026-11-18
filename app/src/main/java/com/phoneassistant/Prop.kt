@@ -22,6 +22,12 @@ interface PropHost {
     fun stageTop(): Int
     fun stageBottom(): Int
 
+    /**
+     * The lowest y a toy's top edge may sit: above the keyboard if one is up, whoever is
+     * typing in it, or above the navigation strip if not.
+     */
+    fun toysFloor(): Float
+
     /** dp to pixels, for props doing their own arithmetic. */
     fun px(value: Float): Float
 

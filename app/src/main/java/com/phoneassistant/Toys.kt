@@ -337,17 +337,23 @@ object Toys {
                     "the bubble wrap is already out and mostly unpopped. tease them about " +
                         "all the bubbles they have left."
                 )
-                BubbleWrap(host).bring(host.stageWidth() * 0.52f, host.stageHeight() * 0.22f) ->
-                    Outcome(
-                        true,
-                        "you put a sheet of bubble wrap on their screen and are pressing a " +
-                            "few of the bubbles yourself. they can pop the rest by tapping."
-                    )
-                else -> Outcome(
-                    false,
-                    "you dropped the bubble wrap and it bounced off the screen. one dry line " +
-                        "about being rejected by a phone."
-                )
+                else -> {
+                    val wrap = BubbleWrap(host)
+                    val y = topAboveKeyboard(host, host.stageHeight() * 0.22f, wrap.windowH)
+                    if (wrap.bring(host.stageWidth() * 0.52f, y)) {
+                        Outcome(
+                            true,
+                            "you put a sheet of bubble wrap on their screen and are pressing " +
+                                "a few of the bubbles yourself. they can pop the rest by tapping."
+                        )
+                    } else {
+                        Outcome(
+                            false,
+                            "you dropped the bubble wrap and it bounced off the screen. one " +
+                                "dry line about being rejected by a phone."
+                        )
+                    }
+                }
             }
 
             Toy.PLANT -> when {
@@ -355,17 +361,23 @@ object Toys {
                     false,
                     "the plant is already out. point out that it would love some water."
                 )
-                Plant(host).bring(host.stageWidth() * 0.18f, host.stageHeight() * 0.34f) ->
-                    Outcome(
-                        true,
-                        "you put a pot plant on their screen. it needs three waterings per " +
-                            "stage to grow, and you are already invested in it."
-                    )
-                else -> Outcome(
-                    false,
-                    "you tried to put the plant down and there was no room. one dry line " +
-                        "about the screen being too small for a garden."
-                )
+                else -> {
+                    val plant = Plant(host)
+                    val y = topAboveKeyboard(host, host.stageHeight() * 0.34f, plant.windowH)
+                    if (plant.bring(host.stageWidth() * 0.18f, y)) {
+                        Outcome(
+                            true,
+                            "you put a pot plant on their screen. it needs three waterings " +
+                                "per stage to grow, and you are already invested in it."
+                        )
+                    } else {
+                        Outcome(
+                            false,
+                            "you tried to put the plant down and there was no room. one dry " +
+                                "line about the screen being too small for a garden."
+                        )
+                    }
+                }
             }
         }
     }
@@ -524,10 +536,15 @@ object Toys {
 
     private fun openStand(host: OverlayService): LemonadeStand? {
         val stand = LemonadeStand(host)
-        return if (stand.bring(host.stageWidth() * 0.1f, host.stageHeight() * 0.55f)) {
-            stand
-        } else {
-            null
-        }
+        val y = topAboveKeyboard(host, host.stageHeight() * 0.55f, stand.windowH)
+        return if (stand.bring(host.stageWidth() * 0.1f, y)) stand else null
     }
+
+    /**
+     * Where a toy's top edge goes: the spot it wanted, unless that would put it under a
+     * keyboard someone is typing on. He can put a toy out while they are in another app, and
+     * it should not land in the middle of their typing.
+     */
+    private fun topAboveKeyboard(host: OverlayService, wanted: Float, windowH: Int): Float =
+        wanted.coerceAtMost(host.toysFloor() - windowH)
 }
