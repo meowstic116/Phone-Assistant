@@ -82,13 +82,13 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         when {
             count == 1 -> {
                 host.feel(PetView.Mood.HAPPY, 1200L)
-                host.say("oh. oh we're doing this. okay.")
+                host.say("right. we're doing this.")
             }
-            count == 10 -> host.say("ten already. your thumbs have no chill.")
-            count == total / 2 -> host.say("halfway. I'm not saying I'm impressed. I'm saying nothing.")
+            count == 10 -> host.say("ten. you're taking this seriously.")
+            count == total / 2 -> host.say("halfway. no comment.")
             count == total -> {
                 host.feel(PetView.Mood.HAPPY, 3500L)
-                host.say("ALL of them. every single bubble. you're a menace and I respect it.")
+                host.say("every single one. that was thorough.")
                 removeAt = SystemClock.uptimeMillis() + 4200L
             }
         }

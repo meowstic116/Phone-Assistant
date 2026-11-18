@@ -117,7 +117,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     fun serve(announce: Boolean = true): Boolean {
         if (!hasRoom()) {
             if (announce) {
-                host.say("that is a two-glass stand. I have one jug and a lot of pride.")
+                host.say("two glasses. I'm not made of lemons.")
             }
             return false
         }
@@ -243,17 +243,17 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         private const val POUR_GAP_MS = 800L
 
         val POST_LINES = listOf(
-            "*dusts the counter* right. my spot. where were we.",
-            "back behind the counter. the queue starts here, and it is you.",
+            "*dusts the counter* right. back to it.",
+            "back behind the counter. the queue is just you, as ever.",
             "*straightens the sign* still fifty cents. still mostly lemon."
         )
 
         val SERVE_LINES = listOf(
-            "one lemonade. fifty cents. I will also accept a compliment.",
-            "*pours carefully* this is the good jug. don't tell the other jug.",
-            "here. it's mostly lemon. the rest is attitude.",
-            "fresh squeezed. well. squeezed. mostly.",
-            "*slides you a glass* I have a whole business now. try not to be impressed."
+            "one lemonade. fifty cents, or a compliment.",
+            "*pours* the good jug. don't tell the other jug.",
+            "mostly lemon. the rest is technique.",
+            "freshly squeezed. give or take.",
+            "*slides it over* one business, fully operational."
         )
     }
 }
@@ -351,15 +351,15 @@ class LemonadeGlass(host: PropHost) : Prop(host) {
 
     companion object {
         val SIP_LINES = listOf(
-            "*watches you drink* ... well?",
-            "that's the good jug. I knew it.",
-            "*nods professionally* hydration. my gift to you.",
-            "sip responsibly. there is no more."
+            "*watches* well?",
+            "the good jug. I knew it.",
+            "*nods* hydration. you're welcome.",
+            "sip carefully. there isn't more."
         )
         val CLEAR_LINES = listOf(
-            "*takes the glass back* I'll wash that. eventually.",
-            "glass back. I'm not your busboy. I'm your bartender.",
-            "thank you for your business. tip jar is my ego."
+            "*takes the glass* this gets washed. eventually.",
+            "glass back. bartender, not busboy.",
+            "thank you for your business. the tip jar is my ego."
         )
     }
 }

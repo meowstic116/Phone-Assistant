@@ -46,11 +46,11 @@ object Toys {
 
     /** Said out loud, with no API call, the moment a toy break runs out. */
     val BREAK_OVER_LINES = listOf(
-        "*stretches* break's over. I sat here being patient and it was awful.",
-        "time's up. I'm allowed toys again. I want it noted that I waited the whole time, quietly, like a professional.",
-        "break finished. *cracks tiny knuckles* so. what are we making.",
-        "I'm back. technically I never left. emotionally I was in a small waiting room.",
-        "my break just ended and I have never been more ready to do something small and stupid."
+        "*stretches* break's over. it was fine.",
+        "time's up. toys allowed again. I waited quietly, like a professional.",
+        "break finished. *cracks tiny knuckles* so. what now.",
+        "I'm back. technically I never left.",
+        "break's over. I have one small idea."
     )
 
     private val requestVerbs = listOf(
@@ -233,8 +233,7 @@ object Toys {
                         Outcome(
                             false,
                             "they asked for another lemonade and there are no glasses left. " +
-                                "make a warm joke about the glassware crisis at your little " +
-                                "business."
+                                "say one dry line about the glassware situation."
                         )
                     }
                     else -> {
@@ -299,8 +298,8 @@ object Toys {
                 BubbleWrap(host).bring(host.stageWidth() * 0.52f, host.stageHeight() * 0.22f) ->
                     Outcome(
                         true,
-                        "you dumped a sheet of bubble wrap on their screen. it is extremely " +
-                            "poppable and you are keeping count."
+                        "you put a sheet of bubble wrap on their screen. it is very poppable " +
+                            "and you are keeping count."
                     )
                 else -> Outcome(
                     false,
@@ -318,7 +317,7 @@ object Toys {
                     Outcome(
                         true,
                         "you put a pot plant on their screen. it needs three waterings per " +
-                            "stage to grow, and you are already emotionally attached."
+                            "stage to grow, and you are already invested in it."
                     )
                 else -> Outcome(
                     false,
@@ -396,10 +395,10 @@ object Toys {
             host.feel(PetView.Mood.ANNOYED, 2500L)
             notes += if (named == null) {
                 "they told you to tidy everything away, so you packed every toy and painting " +
-                    "back into your pocket, with a theatrical sigh and a joke about it."
+                    "back into your pocket, with one dry remark about it."
             } else {
-                "they asked you to put ${named.label.lowercase()} away, so you did, and you " +
-                    "are pretending to be very dignified about it."
+                "they asked you to put ${named.label.lowercase()} away, so you did, without " +
+                    "any fuss about it."
             }
             return notes.joinToString(" ")
         }
@@ -407,8 +406,8 @@ object Toys {
         if (dislikesIt(text)) {
             if (host.propsOnScreen().isEmpty()) return notesText(notes)
             host.feel(PetView.Mood.ANNOYED, 6000L)
-            notes += "they just poked fun at something you made or gave them. take a mock " +
-                "gasp, defend it with a joke, and do not grovel."
+            notes += "they just poked fun at something you made or gave them. take it in " +
+                "good humour, defend it briefly with one dry line, and do not grovel."
             return notes.joinToString(" ")
         }
 
@@ -468,17 +467,15 @@ object Toys {
         host.say(
             when (toy) {
                 Toy.LEMONADE ->
-                    "opening a lemonade stand. this is my whole personality now. " +
-                        "*slides you a glass*"
+                    "opening the stand. fifty cents, or a compliment."
                 Toy.PAINTING ->
-                    "I'm painting something. watch, or don't. it'll be a limited edition either way."
+                    "painting something. it'll be a limited edition either way."
                 Toy.SOCCER ->
-                    "I'm bored. first to three. you're going down, and the goals stay where I put them."
+                    "first to three. the goals stay where I put them."
                 Toy.BUBBLES ->
-                    "found bubble wrap. I'm not going to pop it. that's your job. " +
-                        "*pops one immediately*"
+                    "found bubble wrap. it's your job, not mine. *pops one*"
                 Toy.PLANT ->
-                    "I got us a plant. tap it to water it. we're plant people now."
+                    "we have a plant now. tap it to water it."
             }
         )
     }

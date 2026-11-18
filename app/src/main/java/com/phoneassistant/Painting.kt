@@ -65,7 +65,7 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
         host.feel(PetView.Mood.HAPPY, 2200L)
         host.say(
             if (!wasFinished) {
-                "not yet! it's still wet. *hunches over it*"
+                "give it a minute. still wet."
             } else {
                 TAP_LINES.random()
             }
@@ -426,11 +426,11 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
 
     companion object {
         val TAP_LINES = listOf(
-            "careful. that's a limited edition. one of one. literally.",
-            "the dog in that one owes me twenty bucks. it's a whole situation.",
-            "no flash photography. I'm shy about my brushwork.",
-            "*holds it up* this is my best work. I've made one (1) painting.",
-            "you can look all you like. I am not explaining the middle bit."
+            "careful. one of one, literally.",
+            "the dog in that one owes me twenty.",
+            "no flash photography. it's shy.",
+            "*holds it up* best work. also my only work.",
+            "look all you like. I'm not explaining the middle."
         )
     }
 }
@@ -451,7 +451,7 @@ class PaintingScene(private val host: PropHost, private val style: Painting.Styl
 
         host.petWalkTo(spotX, spotY) {
             host.petSit(true)
-            host.say("*sits down with a tiny easel* hold on. inspiration is happening.")
+            host.say("*sets up the easel* give me a minute. inspiration is scheduled.")
             val art = Painting(host, style)
             val gap = host.px(6f)
             val halfPet = host.petWidth() / 2f
@@ -475,8 +475,8 @@ class PaintingScene(private val host: PropHost, private val style: Painting.Styl
         host.petSit(false)
         host.feel(PetView.Mood.HAPPY, 3200L)
         host.say(
-            "done. it's \"${art.style.title}\". *holds it out* it's still a bit wet, " +
-                "and I'm a bit proud."
+            "done. it's \"${art.style.title}\". *holds it out* still wet, and I'm " +
+                "quietly pleased."
         )
         val w = host.stageWidth().toFloat()
         val h = host.stageHeight().toFloat()

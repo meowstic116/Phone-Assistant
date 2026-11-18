@@ -103,9 +103,7 @@ class OverlayService : Service(), PropHost {
             // when the reason is the break.
             val outcome = Toys.summon(service, toy)
             if (!outcome.ok && Quiet.active(service)) {
-                service.sayAloud(
-                    "I'm on a break. you asked, so I'm honouring it. *sits on own hands*"
-                )
+                service.sayAloud("I'm on a break. you asked.")
             }
             return outcome.ok
         }
@@ -119,10 +117,7 @@ class OverlayService : Service(), PropHost {
             Toys.clearAll(service)
             Quiet.start(service, ms)
             service.feel(PetView.Mood.ANNOYED, 4000L)
-            service.sayAloud(
-                "okay, break time. *puts tiny tools down* I'll be over here not making " +
-                    "anything, being extremely patient about it."
-            )
+            service.sayAloud("break time. *puts the tools down* I'll be here, being patient.")
             return true
         }
 
@@ -130,9 +125,7 @@ class OverlayService : Service(), PropHost {
         fun endBreak(): Boolean {
             val service = instance ?: return false
             Quiet.clear(service)
-            service.sayAloud(
-                "break's over! *stretches* I was just getting comfortable, and now I have ideas."
-            )
+            service.sayAloud("break's over. *stretches* I had ideas, actually.")
             return true
         }
 

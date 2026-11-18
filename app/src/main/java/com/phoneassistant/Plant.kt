@@ -44,7 +44,7 @@ class Plant(host: PropHost) : Prop(host) {
                 warnedFlood = true
                 water = 0
                 host.feel(PetView.Mood.ANNOYED, 2400L)
-                host.say("SLOW DOWN. you're drowning it. and me. mostly it.")
+                host.say("ease off. you're drowning it.")
             }
             invalidate()
             return
@@ -52,7 +52,7 @@ class Plant(host: PropHost) : Prop(host) {
 
         if (stage >= maxStage) {
             host.feel(PetView.Mood.SMUG, 2000L)
-            host.say("it's as big as it gets. I'm a plant dad and I'm thriving.")
+            host.say("that's full size. I'm a plant dad now.")
             return
         }
 
@@ -79,7 +79,7 @@ class Plant(host: PropHost) : Prop(host) {
             invalidate()
             if (stage >= maxStage) {
                 host.feel(PetView.Mood.SMUG, 4000L)
-                host.say("*pats the pot* look at it. we grew that. well. I grew that. you watered.")
+                host.say("*pats the pot* we grew that. well. I grew that. you watered.")
             } else {
                 host.say(GROW_LINES[(stage - 1).coerceIn(0, GROW_LINES.size - 1)])
             }
@@ -156,10 +156,10 @@ class Plant(host: PropHost) : Prop(host) {
 
     companion object {
         val GROW_LINES = listOf(
-            "*peers at the pot* it's doing something. I can tell.",
-            "a new leaf. I'm emotional.",
-            "look at it go. plants are just slow applause.",
-            "nearly there. *hovers over it*"
+            "*peers at the pot* something's happening. slowly.",
+            "a new leaf. noted.",
+            "it's growing. plants are just slow applause.",
+            "*hovers* nearly there."
         )
     }
 }

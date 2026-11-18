@@ -22,25 +22,25 @@ class SoccerGame(private val host: PropHost) {
         private const val TIME_LIMIT_MS = 90_000L
 
         val CHEAT_LINES = listOf(
-            "did you just *move* my goal? put that back. I saw that.",
-            "you moved it again. I have eyes, they're enormous, they see everything.",
-            "one more goalpost shuffle and this pitch gets a strongly worded review."
+            "you moved my goal. I saw that.",
+            "moved it again. I have eyes. they're enormous.",
+            "one more shuffle and I'm writing a review."
         )
         val PIP_GOAL_LINES = listOf(
-            "GOAL. *tiny victory dance* that's how it's done.",
-            "in! the net! I'm basically a professional and I have the legs for it.",
-            "hah! did you even see it go past you? because I did. smugly."
+            "goal. *small, restrained celebration*",
+            "in. mostly legs, some talent.",
+            "did you see it go past? I did. smugly."
         )
         val YOUR_GOAL_LINES = listOf(
-            "lucky bounce. *checks tiny notes* yep. definitely lucky. good goal though.",
-            "*stares at the ball* ... that happened. I'm fine. this is me being fine.",
-            "ooh, one for you. *slow, tiny clap* look at me being gracious. I'm great at this."
+            "lucky bounce. good goal, though.",
+            "*stares at the ball* that happened. I'm fine.",
+            "one for you. *slow clap* I'm being gracious."
         )
         val PIP_KICK_LINES = listOf(
             "my turn. *scuffs it*",
-            "*boots it* this one's for all the phones shaped like me.",
+            "*boots it* for the phones shaped like me.",
             "watch the technique. there isn't any.",
-            "here comes the Pip express."
+            "all legs, no plan."
         )
     }
 
@@ -81,10 +81,7 @@ class SoccerGame(private val host: PropHost) {
 
         layOut()
 
-        host.say(
-            "first to three. tap the ball to boot it at my goal, down there. " +
-                "I'll be defending. badly, probably."
-        )
+        host.say("first to three. tap the ball at my goal. I'll defend, badly.")
         host.feel(PetView.Mood.SMUG, 2600L)
     }
 
@@ -134,10 +131,7 @@ class SoccerGame(private val host: PropHost) {
         if (cheats >= 3) {
             over = true
             paused = true
-            host.say(
-                "that's three goalpost moves, which is the legal limit. I'm calling it. " +
-                    "*flops* rematch later, once I've emotionally recovered."
-            )
+            host.say("three goal moves. that's the limit. *flops* rematch later.")
             ui.postDelayed({ clear() }, 3400L)
         } else {
             host.say(CHEAT_LINES[(cheats - 1).coerceAtMost(CHEAT_LINES.size - 1)])
@@ -181,9 +175,9 @@ class SoccerGame(private val host: PropHost) {
         over = true
         paused = true
         val line = when {
-            youScore > pipScore -> "time's up and you're ahead. I demand a recount, and a rematch, and a snack."
-            pipScore > youScore -> "time's up. I win. *flops over dramatically* being this good is exhausting."
-            else -> "time's up and we're level. we're both bad at this. especially you."
+            youScore > pipScore -> "time. you're ahead. I want a recount."
+            pipScore > youScore -> "time. I win. being this good is tiring."
+            else -> "time. level. we're both bad at this."
         }
         host.feel(if (youScore > pipScore) PetView.Mood.ANNOYED else PetView.Mood.SMUG, 5000L)
         host.say(line)
@@ -198,11 +192,9 @@ class SoccerGame(private val host: PropHost) {
         host.feel(if (youWon) PetView.Mood.ANNOYED else PetView.Mood.SMUG, 6000L)
         host.say(
             if (youWon) {
-                "you won. *sits down heavily* I'd like it noted that this pitch is " +
-                    "obviously cursed and that I let you, for morale reasons."
+                "you won. *sits down* that pitch is cursed. noted."
             } else {
-                "$pipScore to $youScore. I win. I'd like a trophy, or at least a snack. " +
-                    "you can be the snack. I mean you can get the snack."
+                "$pipScore to $youScore. I'll take a trophy, or a snack."
             }
         )
         ui.postDelayed({ clear() }, 4500L)
@@ -250,8 +242,8 @@ class Goal(host: PropHost, private val game: SoccerGame, val pipDefends: Boolean
 
     override fun onTap(x: Float, y: Float) {
         host.say(
-            if (pipDefends) "that's my goal. it stays where I put it. that's the rule I just invented."
-            else "your goal. moving it is against the rules, and I wrote the rules, so."
+            if (pipDefends) "that's my goal. it stays. I wrote that rule."
+            else "your goal. moving it is against the rules I wrote."
         )
     }
 
@@ -441,7 +433,7 @@ class ScoreBoard(host: PropHost, private val game: SoccerGame) : Prop(host) {
     override fun onTap(x: Float, y: Float) {
         host.say(
             "PIP ${game.pipScore} — ${game.youScore} YOU. first to three. " +
-                "and moving goals is cheating, which I know because I made the rules."
+                "moving goals is cheating. I wrote that too."
         )
     }
 
