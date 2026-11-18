@@ -211,7 +211,7 @@ object Toys {
                 false,
                 "you are on a break from toys for ${describeDuration(Quiet.remaining(ctx))} " +
                     "because they asked you to be, so you can't get " +
-                    "${toy.label.lowercase()} out right now. be mock-indignant about it."
+                    "${toy.label.lowercase()} out right now. make a joke about it."
             )
         }
 
@@ -225,7 +225,7 @@ object Toys {
                     stand == null -> Outcome(
                         false,
                         "you tried to set up your lemonade stand and the screen refused. " +
-                            "complain about how hard it is to run a business here."
+                            "make a joke about how hard it is to run a business here."
                     )
                     stand.serve() -> Outcome(
                         true,
@@ -236,8 +236,8 @@ object Toys {
                     )
                     else -> Outcome(
                         false,
-                        "they asked for another lemonade and you are out of glasses. refuse, " +
-                            "dramatically."
+                        "they asked for another lemonade and there are no glasses left. make " +
+                            "a warm joke about the glassware crisis at your little business."
                     )
                 }
             }
@@ -261,8 +261,8 @@ object Toys {
             Toy.SOCCER -> if (out.isNotEmpty()) {
                 Outcome(
                     false,
-                    "there is already a game of soccer going. tell them to stop talking and " +
-                        "score something."
+                    "there is already a game of soccer going. cheer them on and tell them " +
+                        "to score something."
                 )
             } else {
                 SoccerGame(host).start()
@@ -276,7 +276,8 @@ object Toys {
             Toy.BUBBLES -> when {
                 out.isNotEmpty() -> Outcome(
                     false,
-                    "the bubble wrap is already out and mostly unpopped. that is on them."
+                    "the bubble wrap is already out and mostly unpopped. tease them about " +
+                        "all the bubbles they have left."
                 )
                 BubbleWrap(host).bring(host.stageWidth() * 0.52f, host.stageHeight() * 0.22f) ->
                     Outcome(
@@ -286,14 +287,15 @@ object Toys {
                     )
                 else -> Outcome(
                     false,
-                    "you dropped the bubble wrap and it bounced off the screen. rude."
+                    "you dropped the bubble wrap and it bounced off the screen. make a joke " +
+                        "about being rejected by a phone."
                 )
             }
 
             Toy.PLANT -> when {
                 out.isNotEmpty() -> Outcome(
                     false,
-                    "the plant is already out. they should be watering it, not talking to you."
+                    "the plant is already out. point out that it would love some water."
                 )
                 Plant(host).bring(host.stageWidth() * 0.18f, host.stageHeight() * 0.34f) ->
                     Outcome(
@@ -303,7 +305,8 @@ object Toys {
                     )
                 else -> Outcome(
                     false,
-                    "you tried to put the plant down and there was no room. complain."
+                    "you tried to put the plant down and there was no room. make a joke about " +
+                        "the screen being too small for a garden."
                 )
             }
         }

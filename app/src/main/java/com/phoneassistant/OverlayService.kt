@@ -111,7 +111,8 @@ class OverlayService : Service(), PropHost {
             Quiet.start(service, ms)
             service.feel(PetView.Mood.ANNOYED, 4000L)
             service.sayAloud(
-                "fine. break time. I'll be here, not making anything, being extremely patient."
+                "okay, break time. *puts tiny tools down* I'll be over here not making " +
+                    "anything, being extremely patient about it."
             )
             return true
         }
@@ -121,7 +122,7 @@ class OverlayService : Service(), PropHost {
             val service = instance ?: return false
             Quiet.clear(service)
             service.sayAloud(
-                "break's over, apparently. *stretches* I was just getting comfortable."
+                "break's over! *stretches* I was just getting comfortable, and now I have ideas."
             )
             return true
         }

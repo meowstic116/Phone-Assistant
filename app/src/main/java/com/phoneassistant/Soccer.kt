@@ -24,7 +24,7 @@ class SoccerGame(private val host: PropHost) {
         val CHEAT_LINES = listOf(
             "did you just *move* my goal? put that back. I saw that.",
             "you moved it again. I have eyes, they're enormous, they see everything.",
-            "one more goalpost shuffle and I'm taking my ball home."
+            "one more goalpost shuffle and this pitch gets a strongly worded review."
         )
         val PIP_GOAL_LINES = listOf(
             "GOAL. *tiny victory dance* that's how it's done.",
@@ -32,8 +32,8 @@ class SoccerGame(private val host: PropHost) {
             "hah! did you even see it go past you? because I did. smugly."
         )
         val YOUR_GOAL_LINES = listOf(
-            "fine. FINE. that one was lucky and we both know it.",
-            "*stares at the ball* ... okay. okay. that happened.",
+            "lucky bounce. *checks tiny notes* yep. definitely lucky. good goal though.",
+            "*stares at the ball* ... that happened. I'm fine. this is me being fine.",
             "ooh, one for you. *slow, tiny clap* look at me being gracious. I'm great at this."
         )
         val PIP_KICK_LINES = listOf(
@@ -251,7 +251,7 @@ class Goal(host: PropHost, private val game: SoccerGame, val pipDefends: Boolean
     override fun onTap(x: Float, y: Float) {
         host.say(
             if (pipDefends) "that's my goal. it stays where I put it. that's the rule I just invented."
-            else "your goal. it's not supposed to move. that's not me being a sore loser, that's the law."
+            else "your goal. moving it is against the rules, and I wrote the rules, so."
         )
     }
 

@@ -21,14 +21,6 @@
             android:textSize="24sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/resetButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:padding="8dp"
-            android:text="reset"
-            android:textColor="@color/accent"
-            android:textSize="13sp" />
     </LinearLayout>
 
     <TextView

@@ -41,7 +41,6 @@ class PersonaActivity : Activity() {
             Toast.makeText(this, saved, Toast.LENGTH_SHORT).show()
         }
 
-        findViewById<TextView>(R.id.resetButton).setOnClickListener { adoptDefault() }
         useDefaultButton.setOnClickListener { askToAdoptDefault() }
 
         restoreButton.setOnClickListener {

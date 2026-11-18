@@ -64,7 +64,7 @@ from work" leaves the lemonade stand alone.
   pill. Tap the ball to boot it at Pip's goal (tap left or right of the middle to angle it);
   he walks over and kicks it back at yours. First to three or ninety seconds, and he
   announces the result either way. The goals are draggable, which he notices: he calls it
-  cheating, and three goalpost moves and he takes his ball home.
+  cheating (cheerfully), and three goalpost moves and he calls the game off.
 - **Bubble wrap** — a sheet of 35 bubbles. Pop them; he counts and gets competitive. Pop
   all of them and he clears it away, impressed against his will.
 - **Plant** — tap to water it, three waterings per stage and it grows through four stages
@@ -95,7 +95,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.22-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.23-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
@@ -150,9 +150,9 @@ delete a bad capture. The conversation itself is still capped at the last 24 mes
 ## Changing the character
 
 - **Personality**: the **Personality** button in the app opens the prompt in an editor and
-  saves it on the device. The built-in version lives in `Persona.kt`; **reset** and **use
-  new built-in** both go back to it, and both stash your text in `custom_backup` first so
-  **bring my text back** can restore it. The note about which app you are in, the list of
+  saves it on the device. The built-in version lives in `Persona.kt`; **use new built-in**
+  goes back to it, stashing your text in `custom_backup` first so **bring my text back**
+  can restore it. The note about which app you are in, the list of
   toys on screen, and the remembered facts are all appended automatically and are not part
   of the editable text.
 - Look and animation: `app/src/main/java/com/phoneassistant/PetView.kt`
