@@ -27,6 +27,9 @@ class LemonadeStand(host: PropHost) : Prop(host) {
 
     private var lineIndex = 0
 
+    /** Glasses promised and not yet poured, capped at what the stand can hold. */
+    private var owed = 0
+
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
@@ -93,8 +96,11 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      */
     fun behindCounterY(): Float = posY + windowH - dp(81f)
 
+    /** How many glasses are on the screen right now. */
+    private fun glassesOut(): Int = host.propsOnScreen().count { it is LemonadeGlass }
+
     /** One jug, two glasses: whether there is space for another pour. */
-    fun hasRoom(): Boolean = host.propsOnScreen().count { it is LemonadeGlass } < 2
+    fun hasRoom(): Boolean = glassesOut() < 2
 
     /** Pours a glass, beside the stand. Returns false when there is no room for another. */
     fun serve(): Boolean {
@@ -152,22 +158,42 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      * appears with him behind the stand rather than the instant he answers. No timer: a long
      * walk across the screen must not pour early, and the only things that cancel this walk
      * are deliberate — a chat or a tap on him.
+     *
+     * Each accepted request adds one glass to the debt, capped by the space the stand has
+     * left, and the debt is decremented before the glass is poured. That is what makes a
+     * pour exactly once no matter how many times the post's arrival is reached — a resumed
+     * walk and the already-here check both end up in [pourPending], and the second one finds
+     * nothing owed.
      */
     fun pourOnArrival() {
-        takePost(say = false) { serve() }
+        val room = (2 - glassesOut()).coerceAtLeast(0)
+        owed = (owed + 1).coerceAtMost(room)
+        if (owed <= 0) return
+        takePost(say = false) { pourPending() }
     }
 
-    /** Off the screen: let him wander again. */
+    private fun pourPending() {
+        if (owed <= 0) return
+        owed--
+        // serve() keeps its own room check, so a debt that was capped cannot overfill the
+        // stand if a glass appeared in the meantime.
+        if (!serve()) {
+            owed = 0
+            return
+        }
+        if (owed > 0 && hasRoom()) pourPending()
+    }
+
+    /** Off the screen: let him wander again, and forget anything still owed. */
     override fun onDetachedFromWindow() {
+        owed = 0
         host.petRelease()
         super.onDetachedFromWindow()
     }
 
-    override fun describe(): String {
-        val glasses = host.propsOnScreen().count { it is LemonadeGlass }
-        return "your lemonade stand, with you standing behind the counter " +
-            "(glasses out right now: $glasses)"
-    }
+    override fun describe(): String =
+        "your lemonade stand, with you standing behind the counter " +
+            "(glasses out right now: ${glassesOut()})"
 
     private fun next(lines: List<String>): String {
         lineIndex = (lineIndex + Random.nextInt(1, lines.size)) % lines.size

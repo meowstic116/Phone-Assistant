@@ -336,7 +336,11 @@ class OverlayService : Service(), PropHost {
         petWalkTo(x, y) { firePostArrival() }
     }
 
-    /** Does the work waiting at his post, once, on arrival. */
+    /**
+     * Does the work waiting at his post, once, on arrival. The work is taken before it runs:
+     * the resumed walk and the already-here branch in [step] can both reach this for the same
+     * obligation, and a pour must never happen twice.
+     */
     private fun firePostArrival() {
         val work = postArrival ?: return
         postArrival = null
@@ -753,6 +757,8 @@ class OverlayService : Service(), PropHost {
         walking = false
         toyWalk = false
         relocating = false
+        // Dropped like every other interruption, so a stale callback cannot fire later.
+        arrive = null
         pet?.walking = false
         if (moveUp) {
             val comfortable = topInset + screenH * 0.12f
