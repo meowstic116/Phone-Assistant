@@ -1,5 +1,6 @@
 package com.phoneassistant
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -358,6 +359,9 @@ class OverlayService : Service(), PropHost {
     /** A break ended while the screen was off, so the line waits for them to look. */
     private var breakOverPending = false
 
+    /** A break was running when the timer was last armed, and nothing has been said yet. */
+    private var breakArmed = false
+
     /**
      * Schedules a single wake-up for the exact end of the break, rather than polling for it
      * thirty times a second. Called on start, on every change, and when he is created.
@@ -365,8 +369,26 @@ class OverlayService : Service(), PropHost {
     private fun armBreakTimer() {
         handler.removeCallbacks(breakAlarm)
         val left = Quiet.remaining(this)
-        if (left <= 0L) return
+        breakArmed = left > 0L
+        if (!breakArmed) return
         handler.postDelayed(breakAlarm, left + 500L)
+    }
+
+    /**
+     * Handler delays count awake time, so a phone that sleeps through the deadline wakes
+     * with the timer still pending and the line arrives late. Check the wall clock the
+     * moment the screen is back, and re-arm for whatever is genuinely left.
+     */
+    private fun onScreenAwake() {
+        handler.removeCallbacks(breakAlarm)
+        val left = Quiet.remaining(this)
+        if (left > 0L) {
+            breakArmed = true
+            handler.postDelayed(breakAlarm, left + 500L)
+            return
+        }
+        if (!breakArmed && !breakOverPending) return
+        announceBreakOver()
     }
 
     private fun breakEnded() {
@@ -385,6 +407,7 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun announceBreakOver() {
+        breakArmed = false
         breakOverPending = false
         sayAloud(Toys.BREAK_OVER_LINES.random())
         feel(PetView.Mood.HAPPY, 3000L)
@@ -999,8 +1022,20 @@ class OverlayService : Service(), PropHost {
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            paused = intent?.action == Intent.ACTION_SCREEN_OFF
-            if (paused) pet?.walking = false
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    paused = true
+                    pet?.walking = false
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    paused = false
+                    // On a locked phone the bubble would sit behind the keyguard, so wait
+                    // for the unlock instead of talking to the room.
+                    val keyguard = getSystemService(KeyguardManager::class.java)
+                    if (keyguard?.isKeyguardLocked != true) onScreenAwake()
+                }
+                Intent.ACTION_USER_PRESENT -> onScreenAwake()
+            }
         }
     }
 
@@ -1008,6 +1043,7 @@ class OverlayService : Service(), PropHost {
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
         }
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
