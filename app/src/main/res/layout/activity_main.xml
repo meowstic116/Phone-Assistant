@@ -218,7 +218,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="28dp"
             android:layout_marginBottom="16dp"
-            android:text="Pip knows which app is open, never what is on the screen. No Accessibility access is used, so it cannot read your messages or tap anything for you."
+            android:text="Pip knows which app is open. When you give him a job he reads the visible labels of the app in front to work out what to press, one step at a time, and he never types into a password field. Nothing he reads is stored, and the only thing that leaves the phone is that list of labels, sent to the AI model you chose."
             android:textColor="@color/textDim"
             android:textSize="12sp" />
     </LinearLayout>

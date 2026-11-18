@@ -65,7 +65,15 @@ object AssistantBrain {
             Facts.rememberFromMessage(appContext, it.content)
         }
 
-        val systemPrompt = Persona.systemPrompt(appContext, appLabel, stage, event)
+        // Whether he can actually work other apps right now decides what the prompt says
+        // about his hands: promising them while the switch is off would be a lie.
+        val systemPrompt = Persona.systemPrompt(
+            appContext,
+            appLabel,
+            stage,
+            event,
+            canAct = Screen.available()
+        )
 
         executor.execute {
             val result = try {
@@ -101,13 +109,43 @@ object AssistantBrain {
             messages.put(JSONObject().put("role", message.role).put("content", message.content))
         }
 
+        // Kept tight on purpose: short replies are the character, and a cap makes that
+        // stick even when the model feels chatty.
+        return send(config, messages, temperature = 0.8, maxTokens = 150)
+    }
+
+    /**
+     * One completion for the agent loop, blocking on the caller's own thread so the loop can
+     * stay a loop. Low temperature, because this is choosing a button, not being funny.
+     */
+    fun complete(
+        ctx: Context,
+        system: String,
+        user: String,
+        maxTokens: Int = 220
+    ): Pair<Boolean, String> {
+        val config = config(ctx.applicationContext)
+        if (config.apiKey.isBlank()) {
+            Diag.apiFailed("no API key", "add one on the setup screen")
+            return false to "I need an API key before I can work your phone."
+        }
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", system))
+            .put(JSONObject().put("role", "user").put("content", user))
+        return send(config, messages, temperature = 0.2, maxTokens = maxTokens)
+    }
+
+    private fun send(
+        config: Config,
+        messages: JSONArray,
+        temperature: Double,
+        maxTokens: Int
+    ): Pair<Boolean, String> {
         val body = JSONObject()
             .put("model", config.model)
             .put("messages", messages)
-            .put("temperature", 0.8)
-            // Kept tight on purpose: short replies are the character, and a cap makes that
-            // stick even when the model feels chatty.
-            .put("max_tokens", 150)
+            .put("temperature", temperature)
+            .put("max_tokens", maxTokens)
 
         val connection = (URL(endpointFor(config.baseUrl)).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"

@@ -39,6 +39,15 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   and closable with its ×, that stays over other apps so the keyboard height and where he is
   against it can be watched live while you type somewhere else. (The panel is one of his own
   windows, so it needs him running.)
+- **Phone jobs.** Ask him to do something in another app and he gets on with it: "open
+  Messages and tell Mum I'm late", "search for the parcel number", "scroll down and tap the
+  third one", "turn do not disturb on". He reads the app in front as a short numbered list of
+  the things that can be pressed, typed into or scrolled, picks one step, does it, and looks
+  again — at most eight steps, so a job cannot run away with your API quota, and the work is
+  visible as it happens because the app in front is changing. He says what he is starting,
+  then reports in his bubble. His hands go through the accessibility service: he refuses
+  password fields, payments, purchases and deletions he was not asked for, whatever the model
+  suggests, because those refusals are in the code and not only in the instructions.
 - Drag it anywhere. It lives in a foreground service with a persistent notification.
 
 ## Toys
@@ -138,7 +147,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.58-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.59-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
@@ -147,12 +156,15 @@ Tagged builds are also published as GitHub Releases by
 
 1. Build and install: `./gradlew installDebug` (or open in Android Studio and Run).
 2. On the setup screen, grant **Display over other apps**, **Usage access**, and
-   **Notifications**. **Keyboard awareness** (an accessibility service) is optional but
-   recommended: it is the only way Pip can see a keyboard opened in another app, since a
-   floating overlay is never told about a keyboard it did not raise itself. It reads window
-   type and bounds only — never what is typed or shown — and is used for nothing else.
-   **Diagnostics** on the main screen shows whether it is reporting a height at all, which is
-   the quickest way to tell a working service from a switched-off one.
+   **Notifications**. **Pip can work other apps** (an accessibility service) is needed for
+   phone jobs, and is the only way he can see a keyboard opened in another app — a floating
+   overlay is never told about a keyboard it did not raise itself. He reads the labels of the
+   app in front only while a job is running, never a password field, and that list of labels
+   is the only thing that leaves the phone. Nothing is stored. If the switch was already on
+   from an older build, turn it off and on once so Android picks up the new capabilities:
+   before 0.59 it could only see window bounds. **Diagnostics** on the main screen shows
+   whether it is reporting at all, which is the quickest way to tell a working service from a
+   switched-off one.
 3. Paste an API key. The defaults point at Gemini's free tier
    (`https://generativelanguage.googleapis.com/v1beta/openai` with
    `gemini-3.5-flash-lite`), and a key from https://aistudio.google.com/apikey costs

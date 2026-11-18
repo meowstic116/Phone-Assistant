@@ -1,0 +1,323 @@
+package com.phoneassistant
+
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Path
+import android.graphics.Rect
+import android.os.Bundle
+import android.view.accessibility.AccessibilityNodeInfo
+import java.util.ArrayDeque
+
+/**
+ * The phone under Pip's hands: reading the app in front as a short list of usable elements,
+ * and acting on them.
+ *
+ * All of this goes through the accessibility service, which is the only API that can see
+ * another app's screen and press its buttons. Reading is limited to the window in front, and
+ * happens only while a job is running — nothing is kept afterwards, and the only thing that
+ * leaves the phone is the list of visible labels sent to the model that was asked to choose
+ * a step.
+ *
+ * Password fields are listed so the model can see they exist, and refused if it tries to
+ * type into one. That refusal is here, at the point of typing, rather than only in the
+ * instructions: a suggestion is not a guarantee.
+ */
+object Screen {
+
+    /** One usable thing on the screen, numbered the way the model is shown it. */
+    class Item(
+        val index: Int,
+        val role: String,
+        val label: String,
+        val hint: String,
+        val editable: Boolean,
+        val password: Boolean,
+        val scrollable: Boolean,
+        val id: String?,
+        val bounds: Rect,
+        val node: AccessibilityNodeInfo
+    )
+
+    /** The screen, read once: what it is, what is on it, and the listing for the model. */
+    class Snapshot(val app: String, val items: List<Item>, val listing: String)
+
+    @Volatile
+    private var service: AccessibilityService? = null
+
+    fun connect(service: AccessibilityService) {
+        this.service = service
+    }
+
+    fun disconnect(service: AccessibilityService) {
+        if (this.service === service) this.service = null
+    }
+
+    /** Whether the accessibility service is actually bound, not just switched on. */
+    fun available(): Boolean = service != null
+
+    // -------------------------------------------------------------------- reading
+
+    fun snapshot(): Snapshot? {
+        val svc = service ?: return null
+        val root = runCatching { svc.rootInActiveWindow }.getOrNull() ?: return null
+        val items = ArrayList<Item>()
+        collect(svc.packageName?.toString(), root, items)
+        return Snapshot(root.packageName?.toString().orEmpty(), items, listing(items))
+    }
+
+    /**
+     * Walks the tree in reading order. Our own overlay windows are skipped: Pip's bubble and
+     * his panel are not things he should be pressing.
+     */
+    private fun collect(ownPackage: String?, root: AccessibilityNodeInfo, out: MutableList<Item>) {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var seen = 0
+        while (queue.isNotEmpty() && out.size < MAX_ITEMS && seen < MAX_NODES) {
+            val node = queue.removeFirst()
+            seen++
+            if (ownPackage != null && node.packageName?.toString() == ownPackage) continue
+            if (node.isVisibleToUser) consider(node, out)
+            for (child in 0 until node.childCount) {
+                node.getChild(child)?.let { queue.add(it) }
+            }
+        }
+    }
+
+    private fun consider(node: AccessibilityNodeInfo, out: MutableList<Item>) {
+        val label = (node.text ?: node.contentDescription)?.toString()
+            ?.replace(WHITESPACE, " ")?.trim()?.take(LABEL_MAX).orEmpty()
+        val editable = node.isEditable
+        val scrollable = node.isScrollable
+        // Everything that can be pressed, typed into or scrolled, plus plain text: the text
+        // is how the model knows it is looking at the right conversation or message.
+        if (!editable && !node.isClickable && !node.isCheckable && !scrollable && label.isEmpty()) {
+            return
+        }
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        if (bounds.width() <= 0 || bounds.height() <= 0) return
+        val role = node.className?.toString()?.substringAfterLast('.')?.take(24) ?: "View"
+        out += Item(
+            index = out.size + 1,
+            role = role,
+            label = label,
+            hint = node.hintText?.toString()?.replace(WHITESPACE, " ")?.trim()
+                ?.take(HINT_MAX).orEmpty(),
+            editable = editable,
+            password = node.isPassword,
+            scrollable = scrollable,
+            id = node.viewIdResourceName?.substringAfterLast('/'),
+            bounds = bounds,
+            node = node
+        )
+    }
+
+    private fun listing(items: List<Item>): String {
+        if (items.isEmpty()) return "(nothing usable — a picture, a game, or still loading)"
+        return buildString {
+            items.forEach { item ->
+                append(item.index).append(". [").append(item.role).append("] ")
+                when {
+                    item.label.isNotEmpty() -> append('"').append(item.label).append('"')
+                    item.id != null -> append("id/").append(item.id)
+                    else -> append("(no label)")
+                }
+                if (item.editable) append(" · text field")
+                if (item.password) append(" · password, never touch")
+                else if (item.scrollable) append(" · scrollable")
+                append('\n')
+            }
+        }.trimEnd()
+    }
+
+    /** The app's name, for the model to recognise; the package is the fallback. */
+    fun appLabel(ctx: Context, packageName: String): String? {
+        if (packageName.isBlank()) return null
+        return runCatching {
+            val pm = ctx.packageManager
+            pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
+        }.getOrNull()
+    }
+
+    // -------------------------------------------------------------------- acting
+
+    /**
+     * Presses the element. The label is usually a child of the row that takes the press, so
+     * a clickable ancestor is tried before falling back to a real tap on the element's
+     * middle — which is also what gets through for windows that report nothing clickable.
+     */
+    fun tap(item: Item): Boolean {
+        var node: AccessibilityNodeInfo? = item.node
+        repeat(TAP_ANCESTORS) {
+            val current = node ?: return@repeat
+            if (current.isClickable) {
+                val clicked = runCatching {
+                    current.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                }.getOrDefault(false)
+                if (clicked) return true
+            }
+            node = runCatching { current.parent }.getOrNull()
+        }
+        return gestureTap(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
+    }
+
+    fun longPress(item: Item): Boolean {
+        var node: AccessibilityNodeInfo? = item.node
+        repeat(TAP_ANCESTORS) {
+            val current = node ?: return@repeat
+            if (current.isLongClickable) {
+                val held = runCatching {
+                    current.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
+                }.getOrDefault(false)
+                if (held) return true
+            }
+            node = runCatching { current.parent }.getOrNull()
+        }
+        return gestureLongPress(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
+    }
+
+    /**
+     * Puts [text] into a field, replacing what is there. Refuses password fields outright.
+     *
+     * ACTION_SET_TEXT needs no keyboard, which is why it is used instead of typing key by
+     * key — and why a job can fill a field in an app that is not even in front yet.
+     */
+    fun type(item: Item, text: String): Boolean {
+        if (item.password) return false
+        val args = Bundle().apply {
+            putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                text
+            )
+        }
+        val node = item.node
+        if (runCatching {
+                node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            }.getOrDefault(false)
+        ) {
+            return true
+        }
+        // Some fields only take text once they hold focus; asking directly is the reliable
+        // second attempt and still needs no keyboard.
+        runCatching { node.performAction(AccessibilityNodeInfo.ACTION_FOCUS) }
+        runCatching { node.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+        return runCatching {
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        }.getOrDefault(false)
+    }
+
+    /** Scrolls the given element, its nearest scrollable parent, or the screen itself. */
+    fun scroll(forward: Boolean, item: Item?): Boolean {
+        val action = if (forward) {
+            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+        } else {
+            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+        }
+        var node: AccessibilityNodeInfo? = item?.node
+            ?: runCatching { service?.rootInActiveWindow }.getOrNull()
+        repeat(SCROLL_ANCESTORS) {
+            val current = node ?: return@repeat
+            if (current.isScrollable &&
+                runCatching { current.performAction(action) }.getOrDefault(false)
+            ) {
+                return true
+            }
+            node = runCatching { current.parent }.getOrNull()
+        }
+        return gestureScroll(forward)
+    }
+
+    fun back(): Boolean = global(AccessibilityService.GLOBAL_ACTION_BACK)
+
+    fun home(): Boolean = global(AccessibilityService.GLOBAL_ACTION_HOME)
+
+    fun recents(): Boolean = global(AccessibilityService.GLOBAL_ACTION_RECENTS)
+
+    fun notifications(): Boolean = global(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)
+
+    private fun global(action: Int): Boolean =
+        runCatching { service?.performGlobalAction(action) == true }.getOrDefault(false)
+
+    /**
+     * Opens an app by the name the model used. Exact label first, then a prefix, then
+     * anything containing it, then the package name — "messages" should reach Messages and
+     * not something with the word buried in a longer title.
+     */
+    fun openApp(ctx: Context, query: String): String? {
+        val wanted = query.trim().lowercase()
+        if (wanted.isEmpty()) return null
+        val pm = ctx.packageManager
+        val start = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        @Suppress("DEPRECATION") // The flags overload is the one that works from API 26.
+        val apps = runCatching { pm.queryIntentActivities(start, 0) }.getOrDefault(emptyList())
+        val named = apps.mapNotNull { info ->
+            runCatching { info to info.loadLabel(pm).toString() }.getOrNull()
+        }
+        val match = named.firstOrNull { (_, label) -> label.lowercase() == wanted }
+            ?: named.firstOrNull { (_, label) -> label.lowercase().startsWith(wanted) }
+            ?: named.firstOrNull { (_, label) -> label.lowercase().contains(wanted) }
+            ?: named.firstOrNull { (info, _) ->
+                info.activityInfo.packageName.lowercase().contains(wanted)
+            }
+            ?: return null
+
+        val info = match.first.activityInfo
+        val launch = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .setComponent(ComponentName(info.packageName, info.name))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        return runCatching {
+            ctx.startActivity(launch)
+            match.second
+        }.getOrNull()
+    }
+
+    // ------------------------------------------------------------------ gestures
+
+    private fun gestureTap(x: Float, y: Float): Boolean {
+        val path = Path().apply { moveTo(x, y) }
+        return dispatch(path, 60L)
+    }
+
+    private fun gestureLongPress(x: Float, y: Float): Boolean {
+        val path = Path().apply { moveTo(x, y) }
+        return dispatch(path, 550L)
+    }
+
+    private fun gestureScroll(forward: Boolean): Boolean {
+        val metrics = service?.resources?.displayMetrics ?: return false
+        val x = metrics.widthPixels * 0.5f
+        val middle = metrics.heightPixels * 0.5f
+        val travel = metrics.heightPixels * 0.26f
+        // A finger moving up pushes the content up, which is scrolling down.
+        val from = if (forward) middle + travel else middle - travel
+        val to = if (forward) middle - travel else middle + travel
+        val path = Path().apply {
+            moveTo(x, from)
+            lineTo(x, to)
+        }
+        return dispatch(path, 300L)
+    }
+
+    private fun dispatch(path: Path, durationMs: Long): Boolean {
+        val svc = service ?: return false
+        val stroke = GestureDescription.StrokeDescription(path, 0L, durationMs)
+        return runCatching {
+            svc.dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+        }.getOrDefault(false)
+    }
+
+    private val WHITESPACE = Regex("\\s+")
+
+    private const val MAX_ITEMS = 48
+    private const val MAX_NODES = 1500
+    private const val LABEL_MAX = 70
+    private const val HINT_MAX = 40
+    private const val TAP_ANCESTORS = 4
+    private const val SCROLL_ANCESTORS = 6
+}

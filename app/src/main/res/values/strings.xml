@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Phone Assistant</string>
-    <string name="ime_watcher_description">Lets Pip see when a keyboard is on screen, so he can
-        keep out of its way. It reads only where windows are and what kind they are — never
-        what is typed or shown.</string>
+    <string name="ime_watcher_description">Lets Pip work other apps when you ask him to —
+        open one, tap, type, scroll, go back — and see when a keyboard is on screen so he can
+        keep out of its way. He reads the labels of the screen in front only while doing a job
+        you asked for, never a password field, and nothing he reads is kept or sent anywhere
+        except as a list of labels to the AI model you chose.</string>
 </resources>

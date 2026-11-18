@@ -1,12 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Watches for the keyboard's window appearing or disappearing and reports its height.
-    Content retrieval is off on purpose: window bounds are enough, and no screen text is read.
+    The keyboard's window, and the screen Pip works on when asked.
+
+    Window content is readable because a phone job — "open Messages and tell Mum I'm late" —
+    needs the labels of the app in front to know what to press. It is read only while a job
+    is running, and password fields are never typed into. Nothing is stored, and nothing
+    leaves the phone except the list of visible labels sent to the model in use.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagRetrieveInteractiveWindows"
-    android:canRetrieveWindowContent="false"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
     android:description="@string/ime_watcher_description"
     android:notificationTimeout="100" />

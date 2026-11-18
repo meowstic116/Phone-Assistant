@@ -1,0 +1,365 @@
+package com.phoneassistant
+
+import android.content.Context
+import android.os.SystemClock
+import org.json.JSONObject
+import java.util.concurrent.Executors
+
+/**
+ * Pip's hands, working: a short loop that reads the screen, asks the brain for one action,
+ * does it, and looks again.
+ *
+ * It is deliberately small. Each step is one request, so a job cannot quietly spend an
+ * afternoon of the user's API quota, and every step is shown on the screen as it happens —
+ * the app in front changes, which is the only progress report that means anything. Any
+ * failure and any refusal ends the job with a line instead of retrying forever.
+ *
+ * The model is never given the whole screen, only a numbered list of the things that can be
+ * pressed, typed into or scrolled, plus their labels. It answers with the number of the
+ * element it wants, so no coordinates are guessed and no element is invented.
+ */
+object Agent {
+
+    /** One step is one API call: enough to open an app, find a chat, type and send. */
+    private const val MAX_STEPS = 8
+
+    /** Time for the screen to settle after an action before it is read again. */
+    private const val SETTLE_MS = 650L
+
+    private val worker = Executors.newSingleThreadExecutor()
+
+    /** The job being worked, or null when there is none. */
+    @Volatile
+    private var job: String? = null
+
+    /**
+     * Bumped by every start and every cancel. A loop only speaks and only clears [job]
+     * while its own number is still the current one, so a job the user has moved on from
+     * cannot talk over the one that replaced it — a shared flag would be cleared by the
+     * new job and let the old one finish loudly.
+     */
+    @Volatile
+    private var ticket = 0
+
+    fun running(): Boolean = job != null
+
+    /** Stops the job at the next step. A cancelled job says nothing at the end. */
+    fun cancel() {
+        if (job == null) return
+        ticket++
+        job = null
+    }
+
+    /**
+     * Reads a "delegate" reply — the model handing a phone job to its own hands — or null
+     * when it was just talking, which is most of the time.
+     */
+    fun delegated(reply: String): String? {
+        val json = jsonIn(reply) ?: return null
+        if (!json.optString("action").equals("delegate", ignoreCase = true)) return null
+        return json.optString("task").trim().take(300).takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Starts a job on its own thread. [onSay] and [onDone] fire on that thread, so a caller
+     * with views to touch must hop to the main looper. Returns false when he has no hands or
+     * is already busy.
+     */
+    fun start(
+        ctx: Context,
+        request: String,
+        onSay: (String) -> Unit,
+        onDone: (String) -> Unit
+    ): Boolean {
+        if (job != null) return false
+        if (!Screen.available()) return false
+        val mine = ++ticket
+        job = request
+        val appContext = ctx.applicationContext
+        worker.execute { loop(appContext, request, mine, onSay, onDone) }
+        return true
+    }
+
+    // ------------------------------------------------------------------- the loop
+
+    private fun loop(
+        ctx: Context,
+        request: String,
+        mine: Int,
+        onSay: (String) -> Unit,
+        onDone: (String) -> Unit
+    ) {
+        // Still the job the user is waiting on? A cancelled or replaced job is silent.
+        fun alive(): Boolean = ticket == mine
+
+        val finish: (String) -> Unit = { line -> if (alive()) onDone(line) }
+        val history = StringBuilder()
+        var steps = 0
+        try {
+            while (steps < MAX_STEPS && alive()) {
+                val screen = Screen.snapshot()
+                if (screen == null) {
+                    finish(
+                        if (Screen.available()) {
+                            "I can't see the screen, so I've stopped."
+                        } else {
+                            NO_HANDS
+                        }
+                    )
+                    return
+                }
+                val decision = decide(ctx, request, history.toString(), screen, steps)
+                    ?: run {
+                        finish("My brain stopped answering halfway through.")
+                        return
+                    }
+
+                if (decision.say.isNotBlank() && alive()) onSay(decision.say)
+                if (decision.action == DONE) {
+                    finish(decision.say.ifBlank { "Done." })
+                    return
+                }
+
+                val outcome = perform(ctx, decision, screen)
+                history.append(steps + 1).append(". ").append(decision.summary(screen))
+                    .append(" → ").append(outcome).append('\n')
+                steps++
+                if (!outcome.startsWith(FAILED)) SystemClock.sleep(SETTLE_MS)
+            }
+            finish("That's as far as I got — I stop after $MAX_STEPS steps.")
+        } catch (t: Throwable) {
+            // A job that throws must not leave the overlay convinced it is still working.
+            Diag.caught("agent", t)
+            finish("Something went wrong while I was working. *dusts itself off*")
+        } finally {
+            // Only the current job may clear the mark: a replaced one must not stand in the
+            // way of the job that took its place.
+            if (alive()) job = null
+        }
+    }
+
+    /** Asks for the next step, with what has happened so far and the screen as it is now. */
+    private fun decide(
+        ctx: Context,
+        request: String,
+        history: String,
+        screen: Screen.Snapshot,
+        step: Int
+    ): Decision? {
+        val app = Screen.appLabel(ctx, screen.app) ?: screen.app
+        val user = buildString {
+            append("TASK: ").append(request).append('\n')
+            append("APP: ").append(app.ifBlank { "unknown" }).append('\n')
+            if (history.isBlank()) {
+                append("WHAT HAS HAPPENED SO FAR: nothing yet\n")
+            } else {
+                append("WHAT HAS HAPPENED SO FAR:\n").append(history)
+            }
+            append("SCREEN NOW:\n").append(screen.listing).append('\n')
+            if (step == 0) {
+                append("\nThis is the first step: say what you are doing in one short line, ")
+                append("then act.\n")
+            }
+            if (step == MAX_STEPS - 1) {
+                append("\nNo steps left after this one: get as close as you can, then finish.\n")
+            }
+        }
+        val (ok, raw) = AssistantBrain.complete(ctx, SYSTEM, user)
+        if (!ok) return null
+        return Decision.parse(raw)
+    }
+
+    // ---------------------------------------------------------------- the actions
+
+    private fun perform(ctx: Context, decision: Decision, screen: Screen.Snapshot): String {
+        val item = screen.items.firstOrNull { it.index == decision.target }
+
+        fun missing(): String = "$FAILED there is no element ${decision.target}"
+
+        return when (decision.action) {
+            "tap" -> when {
+                item == null -> missing()
+                Screen.tap(item) -> "tapped it"
+                else -> "$FAILED the tap did not land"
+            }
+
+            "long_press" -> when {
+                item == null -> missing()
+                Screen.longPress(item) -> "held it down"
+                else -> "$FAILED the long press did not land"
+            }
+
+            "type" -> when {
+                item == null -> missing()
+                !item.editable -> "$FAILED that is not a text field"
+                decision.text.isBlank() -> "$FAILED there was nothing to type"
+                Screen.type(item, decision.text) -> "typed it"
+                else -> "$FAILED the field would not take text"
+            }
+
+            "scroll_down" ->
+                if (Screen.scroll(true, item)) "scrolled down"
+                else "$FAILED nothing would scroll"
+
+            "scroll_up" ->
+                if (Screen.scroll(false, item)) "scrolled up"
+                else "$FAILED nothing would scroll"
+
+            "back" -> if (Screen.back()) "went back" else "$FAILED back was refused"
+
+            "home" -> if (Screen.home()) "went home" else "$FAILED home was refused"
+
+            "recents" -> if (Screen.recents()) "opened recents" else "$FAILED recents was refused"
+
+            "notifications" ->
+                if (Screen.notifications()) "opened the shade"
+                else "$FAILED the shade would not open"
+
+            "open_app" -> {
+                val name = decision.app.ifBlank { decision.text }
+                when {
+                    name.isBlank() -> "$FAILED no app was named"
+                    else -> {
+                        val opened = Screen.openApp(ctx, name)
+                        if (opened == null) "$FAILED no app called $name" else "opened $opened"
+                    }
+                }
+            }
+
+            "wait" -> "waited"
+
+            else -> "$FAILED I don't know how to ${decision.action}"
+        }
+    }
+
+    // --------------------------------------------------------------- the decision
+
+    /** One JSON answer from the model, in the shape the protocol asks for. */
+    private class Decision(
+        val say: String,
+        val action: String,
+        val target: Int,
+        val text: String,
+        val app: String
+    ) {
+
+        /** What the model tried, in the words the next step will be given it. */
+        fun summary(screen: Screen.Snapshot): String {
+            val what = screen.items.firstOrNull { it.index == target }?.label
+            return buildString {
+                append(action.replace('_', ' '))
+                if (target > 0) append(" #").append(target)
+                if (what != null && what.isNotEmpty()) append(" \"").append(what).append('"')
+                if (text.isNotBlank()) append(" \"").append(text.take(60)).append('"')
+                if (app.isNotBlank()) append(" ").append(app)
+            }
+        }
+
+        companion object {
+
+            /**
+             * Reads an answer. Anything that is not JSON is taken as Pip simply talking —
+             * which is what happens when the model ignores the protocol — so a stray
+             * sentence still reaches the user instead of becoming an error.
+             */
+            fun parse(raw: String): Decision {
+                val json = jsonIn(raw)
+                    ?: return Decision(
+                        say = raw.trim().take(200),
+                        action = DONE,
+                        target = 0,
+                        text = "",
+                        app = ""
+                    )
+                val action = normalise(
+                    json.optString("action").ifBlank { json.optString("do") }
+                )
+                return Decision(
+                    say = json.optString("say").trim().take(200),
+                    action = action,
+                    target = json.optInt("target", json.optInt("index", 0)),
+                    text = textOf(json),
+                    app = json.optString("app").trim().take(60)
+                )
+            }
+
+            private fun textOf(json: JSONObject): String {
+                val direct = json.optString("text")
+                if (direct.isNotEmpty()) return direct.take(1000)
+                return json.optString("value").take(1000)
+            }
+
+            /** The names a model reaches for, mapped onto the ones that are implemented. */
+            private fun normalise(action: String): String = when (val clean = action.trim().lowercase()) {
+                "click", "press", "select" -> "tap"
+                "set_text", "enter_text", "write", "input", "fill" -> "type"
+                "scroll", "swipe_up", "page_down" -> "scroll_down"
+                "swipe_down", "page_up" -> "scroll_up"
+                "home_screen", "go_home" -> "home"
+                "shade", "pull_down", "notification_shade" -> "notifications"
+                "launch", "open", "start_app" -> "open_app"
+                "finish", "stop", "complete" -> DONE
+                else -> if (clean.isEmpty()) DONE else clean
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- the protocol
+
+    private const val FAILED = "failed:"
+    private const val DONE = "done"
+
+    const val NO_HANDS =
+        "Switch me on in accessibility first — Settings › Accessibility › Pip — and then " +
+            "I can work your phone."
+
+    /**
+     * The whole instruction set. It is separate from Pip's personality on purpose: the
+     * persona is the user's to rewrite, and a rewritten prompt must not be able to break the
+     * machine half of the job.
+     */
+    private val SYSTEM = """
+        You are Pip's hands on an Android phone. Each turn you are given a task and the
+        phone's current screen as a numbered list of its usable elements. Choose exactly one
+        next action, or say the job is done.
+
+        Reply with a single JSON object and nothing else. No markdown, no explanation.
+        {"say":"", "action":"tap", "target":0, "text":"", "app":""}
+
+        ACTIONS
+        - tap / long_press: target is the number of the element to press.
+        - type: target is the number of a text field, text is what to put in it. It replaces
+          the whole field.
+        - scroll_down / scroll_up: scrolls the screen, or the element in target.
+        - back / home / recents / notifications: no target.
+        - open_app: app is the name of the app, e.g. "Messages". The app is opened first and
+          read on the next turn.
+        - wait: when a screen is still loading.
+        - done: the job is finished, or cannot be done at all.
+
+        RULES
+        - One action per reply. The screen is read again after every action, so never plan
+          two steps in one answer.
+        - "say" is what Pip says in a bubble: one short, dry sentence, under fifteen words.
+          Use it on the first turn to say what you are starting, and on done to report.
+        - The labels in the list are the only truth about the screen. Use them exactly as
+          written; do not invent a button that is not listed.
+        - If an action failed according to WHAT HAS HAPPENED SO FAR, do something different.
+          Never repeat a failing action.
+        - Never touch an element marked password, and never pay, buy, confirm a purchase or
+          delete something the user did not name. If the task needs that, stop with done and
+          say why, briefly.
+        - If the request is not a phone job at all, answer it in "say" with done.
+    """.trimIndent()
+
+    /**
+     * The JSON in a model's answer, wherever it put it. Models wrap it in prose or fences
+     * often enough that finding the outermost braces is worth more than being strict.
+     */
+    private fun jsonIn(text: String): JSONObject? {
+        val start = text.indexOf('{')
+        val end = text.lastIndexOf('}')
+        if (start < 0 || end <= start) return null
+        return runCatching { JSONObject(text.substring(start, end + 1)) }.getOrNull()
+    }
+}

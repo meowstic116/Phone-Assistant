@@ -153,7 +153,13 @@ class DiagnosticsActivity : Activity() {
         val watching = ImeWatch.enabled(this)
         line(
             "accessibility",
-            if (watching) "on" else "off — another app's keyboard is invisible to him"
+            if (watching) "on" else "off — no other app's keyboard, and no hands"
+        )
+        // Bound is a different fact from switched on: a service that has been killed reads
+        // as off here even though Settings says otherwise, and that is worth seeing.
+        line(
+            "phone hands",
+            if (Screen.available()) "connected" else "not connected — toggle it in Settings"
         )
         val ime = ImeWatch.heightPx
         line("IME reported", "${ime}px · ${asDp(ime, density)}dp")

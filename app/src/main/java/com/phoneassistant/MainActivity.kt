@@ -263,9 +263,9 @@ class MainActivity : Activity() {
             startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
         }
         addPermissionRow("Notifications", notificationsGranted()) { askForNotifications() }
-        // Optional: without it he still keeps clear of his own keyboard, but not of one
-        // opened in another app, which is the only way to see that keyboard at all.
-        addPermissionRow("Keyboard awareness (accessibility)", ImeWatch.enabled(this)) {
+        // Optional: without it he still keeps clear of his own keyboard, but he can neither
+        // see a keyboard opened in another app nor work another app for the user.
+        addPermissionRow("Pip can work other apps (accessibility)", ImeWatch.enabled(this)) {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
     }

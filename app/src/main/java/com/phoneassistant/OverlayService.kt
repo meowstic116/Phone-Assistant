@@ -512,6 +512,9 @@ class OverlayService : Service(), PropHost {
         post = null
         postArrival = null
         postReturn = false
+        // A job outlives no service: its next step would be acting on a screen nothing is
+        // watching any more.
+        Agent.cancel()
         ImeWatch.onChange = null
         keyboardUp = false
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
@@ -1186,6 +1189,9 @@ class OverlayService : Service(), PropHost {
         if (inputBar != null) {
             closeChat()
         } else {
+            // Opening the chat is an interruption: whatever he was doing with his hands
+            // stops, rather than carrying on in an app behind the box he just gave you.
+            Agent.cancel()
             attentive = true
             walking = false
             toyWalk = false
@@ -1426,6 +1432,9 @@ class OverlayService : Service(), PropHost {
         relocating = false
 
         Memory.append(this, "user", text)
+        // A new message outranks whatever he was doing with his hands: half-finished work in
+        // another app would be acting on an instruction the user has already replaced.
+        Agent.cancel()
         // His answer takes priority from this moment on, so the toys' own lines stay quiet.
         beginReply()
         // Thinking comes before the toys act. The other way round, thinking cancelled the
@@ -1438,6 +1447,12 @@ class OverlayService : Service(), PropHost {
 
         AssistantBrain.reply(this, currentAppLabel, Toys.summary(this), event) { ok, reply ->
             handler.post {
+                // Sometimes the answer is not a line but a job for his hands to do.
+                val job = if (ok) Agent.delegated(reply) else null
+                if (job != null) {
+                    startJob(job)
+                    return@post
+                }
                 if (ok) Memory.append(this, "assistant", reply)
                 modelSays(reply)
                 handler.postDelayed({
@@ -1451,6 +1466,44 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun typing(): Boolean = inputField?.text?.isNotEmpty() == true
+
+    // ------------------------------------------------------------------ phone jobs
+
+    /**
+     * Runs a job the model handed over: one action at a time, reading the screen between
+     * them, through the accessibility service. The thinking dots stay up until his first
+     * line replaces them, so there is never a stretch where nothing says he is working.
+     *
+     * The job speaks and finishes on its own thread, so both callbacks come back to the main
+     * looper before they touch a window.
+     */
+    private fun startJob(job: String) {
+        // The chat model has answered, so nothing is waiting on it any more: the toys may
+        // talk again while the job runs.
+        awaitingReply = false
+        val started = Agent.start(
+            this,
+            job,
+            onSay = { line -> handler.post { if (running) sayAloud(line) } },
+            onDone = { line ->
+                handler.post {
+                    if (!running) return@post
+                    Memory.append(this, "assistant", line)
+                    sayAloud(line)
+                    feel(PetView.Mood.HAPPY, 2500L)
+                }
+            }
+        )
+        if (!started) {
+            sayAloud(
+                if (Screen.available()) {
+                    "I'm already in the middle of something."
+                } else {
+                    Agent.NO_HANDS
+                }
+            )
+        }
+    }
 
     /**
      * The window already declares SOFT_INPUT_STATE_ALWAYS_VISIBLE, so the keyboard comes

@@ -9,8 +9,9 @@ import android.os.Process
 
 /**
  * Answers "which app is the user in right now" using Usage Access.
- * This reads app identities only — never screen contents — so no Accessibility
- * Service is involved.
+ * This reads app identities only — never screen contents — which is why it needs no
+ * accessibility service: [Screen] is the only thing that reads a screen, and only when the
+ * user has given Pip a job.
  */
 object AppWatcher {
 

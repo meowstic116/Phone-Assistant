@@ -11,17 +11,23 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 
 /**
- * Reports how tall the keyboard is, including a keyboard opened in another app.
+ * Pip's way into other apps: how tall the keyboard is, and the screen he works on.
  *
  * A floating overlay window is never sent the IME inset unless the keyboard was raised for it,
  * which is why a probe window cannot see someone else's typing. This asks the accessibility
- * framework instead, which knows about every window on the display. It reads window type and
- * bounds only — never any window's contents, and it never acts on any event.
+ * framework instead, which knows about every window on the display. The keyboard part reads
+ * window type and bounds only.
+ *
+ * The rest is what [Screen] needs to do a job the user asked for: the element list of the
+ * window in front, and the ability to press, type, scroll, and go back. None of that happens
+ * while it is idle — see [Screen], which only reads when a job is running, and nothing is
+ * kept or sent anywhere except to the model choosing the next step.
  */
 class ImeWatcher : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        Screen.connect(this)
         refresh()
     }
 
@@ -33,11 +39,17 @@ class ImeWatcher : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         ImeWatch.publish(0)
+        // Hands off at once: a job in flight must stop rather than act on a service that is
+        // on its way out.
+        Screen.disconnect(this)
+        Agent.cancel()
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
         ImeWatch.publish(0)
+        Screen.disconnect(this)
+        Agent.cancel()
         super.onDestroy()
     }
 
