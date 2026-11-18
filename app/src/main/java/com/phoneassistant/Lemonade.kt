@@ -35,7 +35,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     private val ui = Handler(Looper.getMainLooper())
 
     /** Runs the next owed pour, a beat after the last one. */
-    private val pourNext = Runnable { pourPending() }
+    private val pourNext = Runnable { pourPending(announce = false) }
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
@@ -109,10 +109,16 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     /** One jug, two glasses: whether there is space for another pour. */
     fun hasRoom(): Boolean = glassesOut() < 2
 
-    /** Pours a glass, beside the stand. Returns false when there is no room for another. */
-    fun serve(): Boolean {
+    /**
+     * Pours a glass, beside the stand. Returns false when there is no room for another.
+     * [announce] is false for the second glass of a pair, so he does not say the same serve
+     * line twice in a row.
+     */
+    fun serve(announce: Boolean = true): Boolean {
         if (!hasRoom()) {
-            host.say("that is a two-glass stand. I have one jug and a lot of pride.")
+            if (announce) {
+                host.say("that is a two-glass stand. I have one jug and a lot of pride.")
+            }
             return false
         }
 
@@ -129,7 +135,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         if (!glass.bring(x, y)) return false
 
         host.feel(PetView.Mood.HAPPY, 2200L)
-        host.say(next(SERVE_LINES))
+        if (announce) host.say(next(SERVE_LINES))
         return true
     }
 
@@ -176,15 +182,20 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         val room = (2 - glassesOut()).coerceAtLeast(0)
         owed = (owed + 1).coerceAtMost(room)
         if (owed <= 0) return
-        takePost(onArrive = ::pourPending)
+        takePost(onArrive = { pourPending() })
     }
 
-    private fun pourPending() {
+    /**
+     * Pours one owed glass. The first of a batch speaks (it is the line that answers the
+     * request); the follow-ups scheduled [POUR_GAP_MS] later stay quiet, so a pair of glasses
+     * is one thing said rather than the same line twice.
+     */
+    private fun pourPending(announce: Boolean = true) {
         if (owed <= 0) return
         owed--
         // serve() keeps its own room check, so a debt that was capped cannot overfill the
         // stand if a glass appeared in the meantime.
-        if (!serve()) {
+        if (!serve(announce)) {
             owed = 0
             return
         }

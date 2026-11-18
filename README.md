@@ -56,7 +56,8 @@ from work" leaves the lemonade stand alone.
   open a chat — and the pour waits: he goes back and pours as soon as he is free. One
   request makes exactly one glass: the debt is cleared before each pour and capped at the
   stand's two glasses, so an interrupted-then-resumed walk never doubles it. Ask twice
-  quickly and the second glass arrives about a second after the first, not on top of it. When he opens
+  quickly and the second glass arrives about a second after the first, silently — one serve
+  line per pair, not the same line twice. When he opens
   the stand he walks round behind the counter and serves from there. The counter is drawn
   over his hips and feet — it starts 6dp below his chin — with the sign and the awning
   clear of him, so he stands behind the stand rather than in front of it. Tapping him
@@ -106,7 +107,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.32-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.33-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
