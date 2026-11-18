@@ -35,13 +35,53 @@ that reason.
 
 ## Signing
 
-`signing/phone-assistant.jks` is committed and used for both debug and release builds, so
-every build shares one signature and updates install straight over the top. Password
-`android`, alias `androiddebugkey`.
+**Debug builds** use `signing/phone-assistant.jks`, which is committed and public. That is
+what lets local builds install over the top without uninstalling. It is a sideloading
+convenience, never a distribution key.
 
-That key is public and self-signed — completely fine for sideloading on your own phone,
-but never acceptable for Play Store distribution or for anything you actually want to
-protect from impersonation.
+**Release builds** use your own private keystore. It is not in this repo, so cloning the
+project never exposes it. Create it once, on your own machine:
+
+```bash
+keytool -genkeypair -v -keystore phone-assistant-release.jks \
+  -alias phoneassistant -keyalg RSA -keysize 4096 -validity 10000
+
+# base64 it for the GitHub secret (works on macOS and Linux)
+base64 phone-assistant-release.jks | tr -d '\n' > release-base64.txt
+```
+
+Then add four secrets under **Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `RELEASE_KEYSTORE_BASE64` | contents of `release-base64.txt` |
+| `RELEASE_KEYSTORE_PASSWORD` | the store password you typed |
+| `RELEASE_KEY_ALIAS` | `phoneassistant` |
+| `RELEASE_KEY_PASSWORD` | the key password (same as the store password if you just pressed enter) |
+
+Back up the `.jks` file somewhere safe. If you lose it you can never update an installed
+release again — only ship a new package name.
+
+### Publishing a release
+
+Bump `versionCode` and `versionName` in `app/build.gradle.kts`, then tag:
+
+```bash
+git tag v0.3
+git push origin v0.3
+```
+
+`.github/workflows/release.yml` builds, signs and publishes a GitHub Release with the APK
+attached.
+
+### One catch
+
+Debug and release builds have different signatures, so Android treats them as different
+apps. Installing the first release build over an installed debug build needs a single
+uninstall; after that, releases update seamlessly over each other.
+
+Running `assembleRelease` without the env vars still works, but falls back to the public
+debug key and prints a warning — useful for testing, useless for distribution.
 
 ## Changing the character
 
