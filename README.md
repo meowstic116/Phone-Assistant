@@ -52,7 +52,8 @@ from work" leaves the lemonade stand alone.
   he has one jug. The glass is its own prop: tap it once to drink, tap the empty glass
   again to hand it back. Ask him for "a lemonade" in chat and he pours one — walking round
   behind the counter first and only pouring once he is there, so the glass never appears
-  while he is still on the other side of the screen. When he opens
+  while he is still on the other side of the screen. Interrupt him on the way — tap him,
+  open a chat — and the pour waits: he goes back and pours as soon as he is free. When he opens
   the stand he walks round behind the counter and serves from there. The counter is drawn
   over his hips and feet — it starts 6dp below his chin — with the sign and the awning
   clear of him, so he stands behind the stand rather than in front of it. Tapping him
@@ -102,7 +103,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.28-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.29-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

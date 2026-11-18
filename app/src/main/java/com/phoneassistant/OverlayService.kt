@@ -166,6 +166,12 @@ class OverlayService : Service(), PropHost {
     /** A spot a toy wants him to stay at, or null when he is free to wander. */
     private var post: Pair<Float, Float>? = null
 
+    /**
+     * One-shot work waiting at that post — a lemonade to pour. Kept here rather than on the
+     * walk, because a walk can be interrupted (a tap, a chat) and the promise survives it.
+     */
+    private var postArrival: (() -> Unit)? = null
+
     /** How long until he gets bored and starts something by himself. */
     private var initiativeIn = 200_000L
 
@@ -326,13 +332,26 @@ class OverlayService : Service(), PropHost {
 
     override fun petHoldAt(x: Float, y: Float, done: (() -> Unit)?) {
         post = x to y
-        petWalkTo(x, y, done)
+        postArrival = done
+        petWalkTo(x, y) { firePostArrival() }
+    }
+
+    /** Does the work waiting at his post, once, on arrival. */
+    private fun firePostArrival() {
+        val work = postArrival ?: return
+        postArrival = null
+        work()
     }
 
     override fun petRelease() {
         post = null
+        postArrival = null
         idleUntil = SystemClock.uptimeMillis() + 1500L
     }
+
+    /** Whether his middle is more than a nudge away from (x, y). */
+    private fun awayFrom(x: Float, y: Float): Boolean =
+        hypot(posX + petW / 2f - x, posY + petH / 2f - y) > dp(6f)
 
     /** Called by toys only, so every walk from here is one he has been sent on. */
     override fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?) {
@@ -469,6 +488,18 @@ class OverlayService : Service(), PropHost {
             if (initiativeIn <= 0L) {
                 initiativeIn = 180_000L + rnd.nextLong(140_000L)
                 Toys.spontaneous(this)
+            }
+        }
+
+        // Work left at his post outlives an interrupted walk. If a chat or a tap stopped
+        // him halfway there, he heads back once he is free and does it on arrival — never
+        // before, so a long crossing never pours the glass early.
+        val station = post
+        if (station != null && postArrival != null && !attentive && !walking && !relocating) {
+            if (awayFrom(station.first, station.second)) {
+                petWalkTo(station.first, station.second) { firePostArrival() }
+            } else {
+                firePostArrival()
             }
         }
 
