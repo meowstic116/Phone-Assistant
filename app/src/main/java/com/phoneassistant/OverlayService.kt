@@ -114,6 +114,12 @@ class OverlayService : Service(), PropHost {
         /** What is out on the screen right now, for the prompt. Empty when nothing is. */
         fun toysOnStage(): String = instance?.let { Toys.summary(it) } ?: ""
 
+        /**
+         * Toy business for a message sent from the history screen, so asking him there does
+         * exactly what asking him in the bubble does. Returns the note for his prompt.
+         */
+        fun reactTo(text: String): String? = instance?.let { Toys.reactTo(it, text) }
+
         /** Main-screen button: send Pip on a break of the given length. */
         fun startBreak(ms: Long): Boolean {
             val service = instance ?: return false
@@ -588,8 +594,13 @@ class OverlayService : Service(), PropHost {
             val dx = targetX - posX
             val dy = targetY - posY
             val distance = hypot(dx, dy)
-            // Getting clear of the keyboard is urgent, so he hurries for that walk.
-            val rate = if (relocating) speed * 4f else speed
+            // Errands and getting clear of the keyboard are urgent, so he hurries: a toy he
+            // was asked for should be done with, not a slow stroll away.
+            val rate = when {
+                relocating -> speed * 4f
+                toyWalk -> speed * 2.5f
+                else -> speed
+            }
             val perFrame = rate * frameMs / 1000f
 
             if (distance <= perFrame || distance < 0.5f) {

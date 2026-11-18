@@ -170,21 +170,15 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     }
 
     /**
-     * Walks him round behind the counter and pours when he actually gets there, so the glass
-     * appears with him behind the stand rather than the instant he answers. No timer: a long
-     * walk across the screen must not pour early, and the only things that cancel this walk
-     * are deliberate — a chat or a tap on him.
-     *
-     * Each accepted request adds one glass to the debt, capped by the space the stand has
-     * left, and the debt is decremented before the glass is poured. That is what makes a
-     * pour exactly once no matter how many times the post's arrival is reached — a resumed
-     * walk and the already-here check both end up in [pourPending], and the second one finds
-     * nothing owed.
+     * Answers a request at once: the glass is poured now and he hurries round behind the
+     * counter with it. Waiting for the crossing made a request feel ignored, and the pour
+     * still cannot happen twice — each request adds one glass to the debt, capped by the
+     * space the stand has left, and [pourPending] takes it before pouring.
      */
-    fun pourOnArrival() {
+    fun pourNow() {
         val room = (2 - glassesOut()).coerceAtLeast(0)
         owed = (owed + 1).coerceAtMost(room)
-        if (owed <= 0) return
+        if (owed > 0) pourPending()
         takePost()
     }
 

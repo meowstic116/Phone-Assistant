@@ -76,12 +76,15 @@ class ChatHistoryActivity : Activity() {
 
         sendButton.isEnabled = false
         OverlayService.beginThinking()
+        // Same order as the overlay: the toys act on the message, then he thinks about it.
+        val event = OverlayService.reactTo(text)
         val placeholder = addBubble("…", false)
 
         AssistantBrain.reply(
             this,
             OverlayService.currentAppLabel,
-            OverlayService.toysOnStage()
+            OverlayService.toysOnStage(),
+            event
         ) { ok, reply ->
             runOnUiThread {
                 messageList.removeView(placeholder)

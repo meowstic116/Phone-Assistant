@@ -52,15 +52,12 @@ from work" leaves the lemonade stand alone.
 
 - **Lemonade stand** — tap the stand and he pours you a glass, to a maximum of two because
   he has one jug. The glass is its own prop: tap it once to drink, tap the empty glass
-  again to hand it back. Ask him for "a lemonade" in chat and he pours one — walking round
-  behind the counter first and only pouring once he is there, so the glass never appears
-  while he is still on the other side of the screen. Interrupt him on the way — tap him,
-  open a chat — and the pour waits: he goes back and pours as soon as he is free. One
-  request makes exactly one glass: the debt is cleared before each pour and capped at the
-  stand's two glasses, so an interrupted-then-resumed walk never doubles it. Ask twice
-  quickly and the second glass arrives about a second after the first, silently — one serve
-  line per pair, not the same line twice. When he opens
-  the stand he walks round behind the counter and serves from there. The counter is drawn
+  again to hand it back. Ask him for "a lemonade" in chat and the glass is on the screen
+  at once: he pours first and hurries round behind the counter with it, rather than making
+  you wait out the crossing. One request makes exactly one glass: the debt is cleared
+  before each pour and capped at the stand's two glasses, so a second pour can never double
+  it. Ask twice quickly and the second glass arrives about a second after the first,
+  silently — one serve line per pair, not the same line twice. The counter is drawn
   over his hips and feet — it starts 6dp below his chin — with the sign and the awning
   clear of him, so he stands behind the stand rather than in front of it. Tapping him
   while he is back there still talks to him; tapping the counter pours a glass. Drag the
@@ -116,7 +113,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.39-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.40-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

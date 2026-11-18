@@ -4,7 +4,10 @@ package com.phoneassistant
 enum class Toy(val label: String, private val words: List<String>) {
     LEMONADE(
         "Lemonade stand",
-        listOf("lemonade", "lemonade stand", "lemon drink", "a drink", "fifty cents")
+        listOf(
+            "lemonade", "lemonade stand", "lemon drink", "a drink", "fifty cents",
+            "lemon", "a glass", "glass of", "thirsty", "refill", "the stand", "your stand"
+        )
     ),
     PAINTING(
         "Canvas",
@@ -12,7 +15,10 @@ enum class Toy(val label: String, private val words: List<String>) {
     ),
     SOCCER(
         "Soccer",
-        listOf("soccer", "football", "kickabout", "kick a ball", "ball", "goal", "penalty")
+        listOf(
+            "soccer", "football", "kickabout", "kick a ball", "ball", "goal", "penalty",
+            "a game"
+        )
     ),
     BUBBLES(
         "Bubble wrap",
@@ -61,8 +67,11 @@ object Toys {
 
     private val awayPhrases = listOf(
         "put it away", "put that away", "put everything away", "clean that up",
-        "clean this up", "clear it", "get rid of it", "pack it up", "take it away",
-        "stop playing", "tidy up", "put it all away", "away please"
+        "clean this up", "clean it up", "clean up", "clear it", "clear the stand",
+        "clear your stand", "get rid of it", "get rid of the", "pack it up", "pack away",
+        "take it away", "take it down", "take the stand down", "stop playing", "tidy up",
+        "put it all away", "away please", "bin it", "chuck it", "close the stand",
+        "shut the stand", "no more stand", "off the screen"
     )
 
     /** Unambiguously about his toys, so they count however the sentence is phrased. */
@@ -211,7 +220,7 @@ object Toys {
                 false,
                 "you are on a break from toys for ${describeDuration(Quiet.remaining(ctx))} " +
                     "because they asked you to be, so you can't get " +
-                    "${toy.label.lowercase()} out right now. make a joke about it."
+                    "${toy.label.lowercase()} out right now. say so dryly."
             )
         }
 
@@ -225,7 +234,7 @@ object Toys {
                     stand == null -> Outcome(
                         false,
                         "you tried to set up your lemonade stand and the screen refused. " +
-                            "make a joke about how hard it is to run a business here."
+                            "one dry line about running a business on a phone."
                     )
                     !stand.hasRoom() -> {
                         // He still heads back behind his counter, but there is nothing to pour.
@@ -240,18 +249,18 @@ object Toys {
                         // He walks round behind the counter first, and the glass appears when
                         // he actually gets there — a stand he was nowhere near, or one that
                         // has been dragged, still ends with him serving from behind it.
-                        stand.pourOnArrival()
+                        stand.pourNow()
                         Outcome(
                             true,
                             if (existing == null) {
-                                "you set up your stand, walked round behind the counter and " +
-                                    "poured them a lemonade. the glass is sitting on their " +
-                                    "screen now — they can drag it and tap it to drink it. you " +
-                                    "are standing behind the stand, ready for business."
+                                "you set up your stand and poured them a lemonade straight " +
+                                    "away. the glass is on their screen now — they can drag " +
+                                    "it and tap it to drink it — and you are walking behind " +
+                                    "the counter."
                             } else {
-                                "you walked back behind the counter of your stand and poured " +
-                                    "them a lemonade. the glass is sitting on their screen " +
-                                    "now — they can drag it and tap it to drink it."
+                                "you poured them another lemonade straight away. the glass is " +
+                                    "on their screen now — they can drag it and tap it to " +
+                                    "drink it — and you are walking back behind the counter."
                             }
                         )
                     }
@@ -262,7 +271,7 @@ object Toys {
                 Outcome(
                     false,
                     "they asked you to paint again and there is already a painting out. point " +
-                        "at it and take all the credit instead of making another."
+                        "at the one you already made."
                 )
             } else {
                 val style = Painting.Style.values().random()
@@ -303,7 +312,7 @@ object Toys {
                     )
                 else -> Outcome(
                     false,
-                    "you dropped the bubble wrap and it bounced off the screen. make a joke " +
+                    "you dropped the bubble wrap and it bounced off the screen. one dry line " +
                         "about being rejected by a phone."
                 )
             }
@@ -321,8 +330,8 @@ object Toys {
                     )
                 else -> Outcome(
                     false,
-                    "you tried to put the plant down and there was no room. make a joke about " +
-                        "the screen being too small for a garden."
+                    "you tried to put the plant down and there was no room. one dry line " +
+                        "about the screen being too small for a garden."
                 )
             }
         }
@@ -376,7 +385,7 @@ object Toys {
             host.feel(PetView.Mood.ANNOYED, 4000L)
             notes += "they asked you to put your toys away and not get any out for " +
                 "${describeDuration(length)}. you packed everything up and you'll honour " +
-                "it, with one small joke about it."
+                "it, with one dry line about it."
             return notes.joinToString(" ")
         }
 
@@ -428,8 +437,8 @@ object Toys {
             blocks += "YOU ARE ON A TOY BREAK\n" +
                 "- They asked you to lay off the toys, and there is about " +
                 describeDuration(left) + " of that break left before you may get one out " +
-                "again. If they ask about it, tell them how long is left and make a joke " +
-                "about waiting. Don't offer to start a game, pour a lemonade or paint " +
+                "again. If they ask about it, tell them how long is left, dryly. Don't " +
+                "offer to start a game, pour a lemonade or paint " +
                 "anything until it's over."
         }
 
@@ -451,8 +460,8 @@ object Toys {
             append("happening, do not ask them to tap something that isn't there. A toy that ")
             append("came up earlier in the conversation is gone unless it is listed again. ")
             append("They can drag anything on the list anywhere and tap it to use it, and they ")
-            append("can ask you to put one away. React to what is really there — brag, explain ")
-            append("the daft rules, react to the score, or ask how it's going.")
+            append("can ask you to put one away. Say something short and dry about what is ")
+            append("really there: a rule, the score, how it's going.")
         }
 
         return blocks.joinToString("\n\n")
