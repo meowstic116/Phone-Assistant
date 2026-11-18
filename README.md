@@ -33,8 +33,10 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
 - A **Diagnostics** screen shows, live, exactly what Android tells the app rather than what
   it should: the keyboard height the accessibility service reports, whether that service is
   switched on, whether a keyboard is up, where he is sitting against it, what is on the
-  stage, and the last two failures — the most recent refused request and the most recent
-  exception that was swallowed to keep the overlay alive. Nothing is written to disk or sent
+  stage, the last phone job step by step — what was asked for, every action it tried,
+  whether Android took that action, and why the job stopped — and the last two failures: the
+  most recent refused request and the most recent exception that was swallowed to keep the
+  overlay alive. Nothing is written to disk or sent
   anywhere. A **floating readout** can be turned on from that screen: a small panel, draggable
   and closable with its ×, that stays over other apps so the keyboard height and where he is
   against it can be watched live while you type somewhere else. (The panel is one of his own
@@ -147,7 +149,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.59-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.60-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
@@ -164,7 +166,8 @@ Tagged builds are also published as GitHub Releases by
    from an older build, turn it off and on once so Android picks up the new capabilities:
    before 0.59 it could only see window bounds. **Diagnostics** on the main screen shows
    whether it is reporting at all, which is the quickest way to tell a working service from a
-   switched-off one.
+   switched-off one. It also keeps the last phone job's steps, so a job that stopped early
+   says why there rather than leaving you to guess at a bubble that has already gone.
 3. Paste an API key. The defaults point at Gemini's free tier
    (`https://generativelanguage.googleapis.com/v1beta/openai` with
    `gemini-3.5-flash-lite`), and a key from https://aistudio.google.com/apikey costs

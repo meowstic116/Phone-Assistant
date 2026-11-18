@@ -43,11 +43,17 @@ object Agent {
 
     fun running(): Boolean = job != null
 
-    /** Stops the job at the next step. A cancelled job says nothing at the end. */
+    /**
+     * Stops the job at the next step. A cancelled job says nothing at the end, but the
+     * diagnostics record still has to say why it went quiet — otherwise a job that was
+     * talked over reads as one that simply gave up after two steps.
+     */
     fun cancel() {
         if (job == null) return
+        val mine = ticket
         ticket++
         job = null
+        Diag.jobEnded(mine, STOP_CANCELLED)
     }
 
     /**
@@ -75,6 +81,7 @@ object Agent {
         if (!Screen.available()) return false
         val mine = ++ticket
         job = request
+        Diag.jobStarted(mine, request)
         val appContext = ctx.applicationContext
         worker.execute { loop(appContext, request, mine, onSay, onDone) }
         return true
@@ -92,45 +99,59 @@ object Agent {
         // Still the job the user is waiting on? A cancelled or replaced job is silent.
         fun alive(): Boolean = ticket == mine
 
-        val finish: (String) -> Unit = { line -> if (alive()) onDone(line) }
+        // The bubble gets one sentence; the record keeps the reason, which is a different
+        // thing — "I can't see the screen" does not tell the user what to switch on, and
+        // "the accessibility service is not connected" does.
+        val finish: (String, String) -> Unit = { line, why ->
+            if (alive()) {
+                Diag.jobEnded(mine, why)
+                onDone(line)
+            }
+        }
         val history = StringBuilder()
         var steps = 0
         try {
             while (steps < MAX_STEPS && alive()) {
                 val screen = Screen.snapshot()
                 if (screen == null) {
+                    val hands = Screen.available()
                     finish(
-                        if (Screen.available()) {
-                            "I can't see the screen, so I've stopped."
-                        } else {
-                            NO_HANDS
-                        }
+                        if (hands) "I can't see the screen, so I've stopped." else NO_HANDS,
+                        if (hands) STOP_NO_SCREEN else STOP_NO_HANDS
                     )
                     return
                 }
                 val decision = decide(ctx, request, history.toString(), screen, steps)
                     ?: run {
-                        finish("My brain stopped answering halfway through.")
+                        finish("My brain stopped answering halfway through.", STOP_BRAIN)
                         return
                     }
 
                 if (decision.say.isNotBlank() && alive()) onSay(decision.say)
                 if (decision.action == DONE) {
-                    finish(decision.say.ifBlank { "Done." })
+                    finish(
+                        decision.say.ifBlank { "Done." },
+                        if (decision.say.isBlank()) STOP_DONE else "finished — ${decision.say}"
+                    )
                     return
                 }
 
                 val outcome = perform(ctx, decision, screen)
+                val landed = !outcome.startsWith(FAILED)
                 history.append(steps + 1).append(". ").append(decision.summary(screen))
                     .append(" → ").append(outcome).append('\n')
+                Diag.jobStep(mine, decision.summary(screen), outcome, landed)
                 steps++
-                if (!outcome.startsWith(FAILED)) SystemClock.sleep(SETTLE_MS)
+                if (landed) SystemClock.sleep(SETTLE_MS)
             }
-            finish("That's as far as I got — I stop after $MAX_STEPS steps.")
+            finish("That's as far as I got — I stop after $MAX_STEPS steps.", STOP_STEPS)
         } catch (t: Throwable) {
             // A job that throws must not leave the overlay convinced it is still working.
             Diag.caught("agent", t)
-            finish("Something went wrong while I was working. *dusts itself off*")
+            finish(
+                "Something went wrong while I was working. *dusts itself off*",
+                "threw ${t.javaClass.simpleName}" + (t.message?.let { ": $it" } ?: "")
+            )
         } finally {
             // Only the current job may clear the mark: a replaced one must not stand in the
             // way of the job that took its place.
@@ -308,6 +329,16 @@ object Agent {
 
     private const val FAILED = "failed:"
     private const val DONE = "done"
+
+    // Why a job stopped, in the words the diagnostics record uses. Separate from what he
+    // says, because the two answer different questions: the bubble is for the user, the
+    // reason is for working out what to change.
+    private const val STOP_CANCELLED = "cancelled — a new message, the chat, or the service"
+    private const val STOP_NO_SCREEN = "could not read the screen in front"
+    private const val STOP_NO_HANDS = "the accessibility service is not connected"
+    private const val STOP_BRAIN = "the brain stopped answering"
+    private const val STOP_DONE = "the job said it was finished"
+    private const val STOP_STEPS = "stopped at the $MAX_STEPS step limit"
 
     const val NO_HANDS =
         "Switch me on in accessibility first — Settings › Accessibility › Pip — and then " +

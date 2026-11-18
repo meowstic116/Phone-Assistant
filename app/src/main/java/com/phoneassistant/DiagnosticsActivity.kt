@@ -20,6 +20,10 @@ import android.widget.Toast
  * exists for the same reason: a swallowed exception that keeps the overlay alive is invisible
  * everywhere else.
  *
+ * The last phone job is here for the same reason, step by step. A job that fails halfway says
+ * one dry sentence in a bubble and stops, and from outside that is indistinguishable from a
+ * job that did nothing at all; the record is where "the tap did not land" can be read.
+ *
  * Nothing here is remembered between runs, and nothing is sent anywhere.
  */
 class DiagnosticsActivity : Activity() {
@@ -206,6 +210,39 @@ class DiagnosticsActivity : Activity() {
             line("props", "nothing")
         } else {
             status.props.distinct().forEach { name -> line("prop", name) }
+        }
+
+        section("LAST PHONE JOB")
+        val job = Diag.lastJob
+        if (job == null) {
+            line("job", "none yet — ask Pip to do something")
+        } else {
+            line(if (job.running) "running" else "asked", "\"${job.request}\"")
+            val took = if (job.endedAt > 0L) (job.endedAt - job.startedAt) / 1000 else 0
+            line(
+                "state",
+                if (job.running) {
+                    "started ${Diag.ago(job.startedAt)} · ${job.steps.size} steps so far"
+                } else {
+                    "${Diag.ago(job.startedAt)} · ${job.steps.size} steps · ${took}s"
+                }
+            )
+            line("why it stopped", job.reason ?: "still working — no ending yet")
+            if (job.steps.isEmpty()) {
+                detail("no step was taken")
+            } else {
+                job.steps.forEachIndexed { index, step ->
+                    out.append("  ").append(index + 1).append(". ")
+                        .append(if (step.ok) "ok" else "NO").append("  ")
+                        .append(step.text)
+                    if (step.outcome.isNotBlank()) out.append(" → ").append(step.outcome)
+                    out.append('\n')
+                }
+                // Honest about what ok means: the framework accepting an action is not the
+                // same as the screen having changed, and a job can look healthy here and
+                // still have gone nowhere.
+                detail("ok = Android accepted it; the screen was read again after every step")
+            }
         }
 
         section("BRAIN")

@@ -10,6 +10,10 @@ import android.os.SystemClock
  * alive, which nobody saw. Recording the second kind is the point — a frame that throws every
  * 33 ms used to be invisible from the inside and from the outside.
  *
+ * It also keeps the last phone job, step by step. That is not a failure in itself, but it is
+ * what makes one readable: a job that goes wrong says one sentence in a bubble and stops, and
+ * from the outside that is indistinguishable from a job that did nothing at all.
+ *
  * Everything is in memory only. This is a readout, not a log the app depends on.
  */
 object Diag {
@@ -31,6 +35,53 @@ object Diag {
     @Volatile
     var lastCaught: Event? = null
         private set
+
+    /** One thing a job tried: what it did, how that went, and whether Android took it. */
+    data class Step(val text: String, val outcome: String, val ok: Boolean)
+
+    /**
+     * The last phone job from the words that asked for it to the line that ended it.
+     *
+     * [id] is the job's ticket. A job that has been replaced must not write into the record
+     * of the one that replaced it, so every write names its own — a cancelled job can still
+     * be finishing its last API call while the next one is already working.
+     */
+    data class Job(
+        val id: Int,
+        val request: String,
+        val startedAt: Long,
+        val steps: List<Step> = emptyList(),
+        val reason: String? = null,
+        val endedAt: Long = 0L
+    ) {
+        val running: Boolean get() = reason == null
+    }
+
+    /** The last job, live while it runs and left in place afterwards. Null until one starts. */
+    @Volatile
+    var lastJob: Job? = null
+        private set
+
+    /** A job is beginning; the previous record is replaced rather than added to. */
+    fun jobStarted(id: Int, request: String) {
+        lastJob = Job(id, oneLine(request, 200), now())
+    }
+
+    /** One step, as it happened, with what it was aimed at and what came back. */
+    fun jobStep(id: Int, text: String, outcome: String, ok: Boolean) {
+        val current = lastJob ?: return
+        if (current.id != id) return
+        lastJob = current.copy(
+            steps = current.steps + Step(oneLine(text, 120), oneLine(outcome, 120), ok)
+        )
+    }
+
+    /** Why the job stopped. The first reason wins: only one thing ends a job. */
+    fun jobEnded(id: Int, reason: String) {
+        val current = lastJob ?: return
+        if (current.id != id || !current.running) return
+        lastJob = current.copy(reason = oneLine(reason, 200), endedAt = now())
+    }
 
     /** The brain refused, or could not be reached at all. [detail] is cut to fit one screen. */
     fun apiFailed(what: String, detail: String) {
@@ -77,6 +128,9 @@ object Diag {
         val message = t.message?.replace("\n", " ")?.trim()?.take(140).orEmpty()
         return if (message.isEmpty()) "$what · $name" else "$what · $name: $message"
     }
+
+    private fun oneLine(text: String, max: Int): String =
+        text.replace("\n", " ").trim().take(max)
 
     private fun now() = SystemClock.elapsedRealtime()
 }
