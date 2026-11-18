@@ -93,9 +93,12 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      */
     fun behindCounterY(): Float = posY + windowH - dp(81f)
 
+    /** One jug, two glasses: whether there is space for another pour. */
+    fun hasRoom(): Boolean = host.propsOnScreen().count { it is LemonadeGlass } < 2
+
     /** Pours a glass, beside the stand. Returns false when there is no room for another. */
     fun serve(): Boolean {
-        if (host.propsOnScreen().count { it is LemonadeGlass } >= 2) {
+        if (!hasRoom()) {
             host.say("that is a two-glass stand. I have one jug and a lot of pride.")
             return false
         }
@@ -132,15 +135,26 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      * arrived his idle timer would pick a new spot within seconds and leave the counter
      * empty, so the stand takes a post he holds until it is taken off the screen.
      */
-    fun takePost(say: Boolean) {
+    fun takePost(say: Boolean, onArrive: (() -> Unit)? = null) {
         host.petHoldAt(centreX, behindCounterY()) {
             if (say) host.say(POST_LINES.random())
+            onArrive?.invoke()
         }
     }
 
     /** Dragged somewhere else: he walks back round behind it instead of being left behind. */
     override fun onDragFinished() {
         takePost(say = true)
+    }
+
+    /**
+     * Walks him round behind the counter and pours when he actually gets there, so the glass
+     * appears with him behind the stand rather than the instant he answers. No timer: a long
+     * walk across the screen must not pour early, and the only things that cancel this walk
+     * are deliberate — a chat or a tap on him.
+     */
+    fun pourOnArrival() {
+        takePost(say = false) { serve() }
     }
 
     /** Off the screen: let him wander again. */

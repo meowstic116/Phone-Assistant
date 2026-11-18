@@ -221,28 +221,41 @@ object Toys {
             Toy.LEMONADE -> {
                 val existing = out.filterIsInstance<LemonadeStand>().firstOrNull()
                 val stand = existing ?: openStand(host)
-                // A stand that is already out may have been dragged, or he may have wandered
-                // off since it opened: take the counter post again so he is always behind it
-                // when he pours, not serving from whatever spot he happened to be in.
-                if (existing != null) existing.takePost(say = false)
                 when {
                     stand == null -> Outcome(
                         false,
                         "you tried to set up your lemonade stand and the screen refused. " +
                             "make a joke about how hard it is to run a business here."
                     )
-                    stand.serve() -> Outcome(
-                        true,
-                        "you set up your stand, walked around behind the counter and poured " +
-                            "them a lemonade. the glass is sitting on their screen now — they " +
-                            "can drag it and tap it to drink it. you are standing behind the " +
-                            "stand, ready for business."
-                    )
-                    else -> Outcome(
-                        false,
-                        "they asked for another lemonade and there are no glasses left. make " +
-                            "a warm joke about the glassware crisis at your little business."
-                    )
+                    !stand.hasRoom() -> {
+                        // He still heads back behind his counter, but there is nothing to pour.
+                        stand.takePost(say = false)
+                        Outcome(
+                            false,
+                            "they asked for another lemonade and there are no glasses left. " +
+                                "make a warm joke about the glassware crisis at your little " +
+                                "business."
+                        )
+                    }
+                    else -> {
+                        // He walks round behind the counter first, and the glass appears when
+                        // he actually gets there — a stand he was nowhere near, or one that
+                        // has been dragged, still ends with him serving from behind it.
+                        stand.pourOnArrival()
+                        Outcome(
+                            true,
+                            if (existing == null) {
+                                "you set up your stand, walked round behind the counter and " +
+                                    "poured them a lemonade. the glass is sitting on their " +
+                                    "screen now — they can drag it and tap it to drink it. you " +
+                                    "are standing behind the stand, ready for business."
+                            } else {
+                                "you walked back behind the counter of your stand and poured " +
+                                    "them a lemonade. the glass is sitting on their screen " +
+                                    "now — they can drag it and tap it to drink it."
+                            }
+                        )
+                    }
                 }
             }
 
@@ -451,11 +464,10 @@ object Toys {
 
     private fun openStand(host: OverlayService): LemonadeStand? {
         val stand = LemonadeStand(host)
-        if (!stand.bring(host.stageWidth() * 0.1f, host.stageHeight() * 0.55f)) return null
-        // Opening the stand is a two-step trick: put it down, then take his place behind
-        // the counter so he is actually serving rather than standing next to it — and
-        // stay there, rather than wandering off once his idle timer runs out.
-        stand.takePost(say = false)
-        return stand
+        return if (stand.bring(host.stageWidth() * 0.1f, host.stageHeight() * 0.55f)) {
+            stand
+        } else {
+            null
+        }
     }
 }
