@@ -334,6 +334,27 @@ object Toys {
         host.propsOnScreen().forEach { host.dropProp(it) }
     }
 
+    /** Short, understated lines for tidying a toy away because he is done with it. */
+    private fun tiredOf(toy: Toy): String = when (toy) {
+        Toy.LEMONADE -> "closing the stand. the rush is over."
+        Toy.PAINTING -> "that's enough painting for one day."
+        Toy.SOCCER -> "done running about. folding the pitch up."
+        Toy.BUBBLES -> "bubble wrap's finished. into the bin."
+        Toy.PLANT -> "giving the plant its space back."
+    }
+
+    /**
+     * Packs one toy away on his own initiative, once he has had enough of it. Every prop of
+     * that toy goes, so a stand leaves with its glasses, and the post is released with it.
+     */
+    fun retire(host: OverlayService, toy: Toy) {
+        val mine = host.propsOnScreen().filter { toy.owns(it) }
+        if (mine.isEmpty()) return
+        mine.forEach { host.dropProp(it) }
+        host.feel(PetView.Mood.SLEEPY, 2_500L)
+        host.say(tiredOf(toy))
+    }
+
     /**
      * Turns a message into screen business — a break, a stand, a glass, a canvas, a game —
      * and returns a note for Pip's own prompt so his reply matches what just happened.

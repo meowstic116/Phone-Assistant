@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -91,6 +92,9 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
         private set
 
     lateinit var params: WindowManager.LayoutParams
+
+    /** When this prop appeared, so a toy can outstay its welcome and be packed away. */
+    val bornAt: Long = SystemClock.uptimeMillis()
 
     private val density = resources.displayMetrics.density
     protected fun dp(v: Float) = v * density

@@ -99,8 +99,10 @@ object AssistantBrain {
         val body = JSONObject()
             .put("model", config.model)
             .put("messages", messages)
-            .put("temperature", 0.9)
-            .put("max_tokens", 300)
+            .put("temperature", 0.8)
+            // Kept tight on purpose: short replies are the character, and a cap makes that
+            // stick even when the model feels chatty.
+            .put("max_tokens", 150)
 
         val connection = (URL(endpointFor(config.baseUrl)).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"

@@ -31,8 +31,10 @@ out from the **Toys** buttons in the app, ask him for one in chat ("open your le
 stand", "paint something", "let's play soccer"), or just leave the screen alone — he gets
 bored every few minutes and starts something himself.
 
-He is the only one who puts things away, and only when asked: "put the plant away", "pack
-the lemonade away", "tidy up".
+He puts things away when you ask ("put the plant away", "pack the lemonade away", "tidy
+up"), and also on his own: once a toy has been out for about four minutes he has had
+enough of it, says so briefly and tidies that one away. The oldest toy goes first, and a
+lemonade stand leaves with its glasses and his place behind the counter.
 
 He can be sent on a break too: "no toys for half an hour", "take a break for 20 minutes",
 "not now" (which means 15 minutes), or "leave me alone for the evening" (8 hours). He puts
@@ -84,12 +86,15 @@ from work" leaves the lemonade stand alone.
 
 ## Personality
 
-He is a jokester: daft, playful, cheerful, always up for a bit — cheeky rather than
-rebellious, and never genuinely grumpy. He teases because he is fond of you, gloats in a
-silly way when he wins, laughs off losing, and takes criticism of his painting as an excuse
-for an even better joke. He still helps when you actually need something — usually with a
-joke first, then properly. The default prompt is long on purpose and is fully rewritable
-from the **Personality** screen.
+He is a jokester, but an understated one: dry, specific, quietly pleased with himself — a
+small joke rather than a big one, and never loud. Cheeky rather than rebellious, never
+genuinely grumpy. He teases because he is fond of you, says something wry when he wins,
+takes losing fine, and takes criticism of his painting in good humour. He still helps when
+you actually need something, plainly and properly.
+
+Replies are short by design: a sentence most of the time, two at the very most, with the
+request capped at 150 tokens so a chatty model cannot sprawl. The default prompt is long on
+purpose and is fully rewritable from the **Personality** screen.
 
 A prompt you write yourself replaces the built-in one outright rather than adding to it, so
 personality changes shipped in a new version do not reach it. The **Personality** screen
@@ -98,7 +103,10 @@ keeping your text — **bring my text back** puts your own wording straight back
 built-in text unchanged counts as choosing the built-in prompt, so nobody gets stuck on an
 old copy of the default by accident.
 
-Reactions to what you do with his toys are local canned lines, so they cost no API calls.
+Reactions to what you do with his toys are local canned lines, so they cost no API calls,
+and they are the fallback: while your message is being answered — and for a few seconds
+after the reply lands — those lines stay quiet, so his own answer always has the last word
+instead of the two talking over each other.
 Criticism and requests in chat go through the model with a note about what just happened,
 so his reply matches: tell him the lemonade was bad and he gets mock-indignant about it.
 Every reply also carries an exact list of what is on the screen, and he is told that the
@@ -107,7 +115,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.34-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.35-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

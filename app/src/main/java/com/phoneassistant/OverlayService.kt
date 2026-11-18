@@ -60,6 +60,12 @@ class OverlayService : Service(), PropHost {
         private const val ACTION_STOP = "com.phoneassistant.STOP"
         private const val BUBBLE_LIFETIME_MS = 12_000L
 
+        /** How long a model reply keeps the floor after it lands, over any toy line. */
+        private const val REPLY_HOLD_MS = 4_000L
+
+        /** How long a toy stays out before he has had enough of it. */
+        private const val TOY_LIFE_MS = 4 * 60_000L
+
         fun start(ctx: Context) {
             ctx.startForegroundService(Intent(ctx, OverlayService::class.java))
         }
@@ -70,7 +76,10 @@ class OverlayService : Service(), PropHost {
 
         /** Show the three dots, for messages sent from the history screen. */
         fun beginThinking() {
-            instance?.startThinking()
+            instance?.let { service ->
+                service.beginReply()
+                service.startThinking()
+            }
         }
 
         /** History screen opened: hold still and step up clear of the input row. */
@@ -84,7 +93,7 @@ class OverlayService : Service(), PropHost {
 
         /** Say something in the overlay bubble, for replies sent from the history screen. */
         fun speak(text: String) {
-            instance?.sayAloud(text)
+            instance?.modelSays(text)
         }
 
         /** Main-screen buttons: put one of Pip's toys on the screen. */
@@ -168,6 +177,11 @@ class OverlayService : Service(), PropHost {
 
     /** The prop he is serving: it keeps its place even when the chat box is in the way. */
     private var postOwner: Prop? = null
+
+    /** A model reply is expected, or has just landed. Its words outrank a toy's. */
+    private var awaitingReply = false
+    private var replyAskedAt = 0L
+    private var replyUntil = 0L
 
     /**
      * One-shot work waiting at that post — a lemonade to pour. Kept here rather than on the
@@ -329,7 +343,33 @@ class OverlayService : Service(), PropHost {
     /** Same thing a tap on him does, for toys whose windows cover him. */
     override fun pokePet() = toggleChat()
 
-    override fun say(line: String) = sayAloud(line)
+    /**
+     * A line from a toy. These are the fallback: while his own answer is on the way, or has
+     * just landed, the toys keep quiet, so the two never talk over each other.
+     */
+    override fun say(line: String) {
+        if (replyHasFloor()) return
+        sayAloud(line)
+    }
+
+    /** True while the model is the one who should be speaking. */
+    private fun replyHasFloor(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        // The wait has a ceiling: a request that never answers must not mute the toys all day.
+        return (awaitingReply && now - replyAskedAt < 15_000L) || now < replyUntil
+    }
+
+    /** From here until the reply lands, only the model speaks. */
+    private fun beginReply() {
+        awaitingReply = true
+        replyAskedAt = SystemClock.uptimeMillis()
+    }
+
+    private fun modelSays(text: String) {
+        awaitingReply = false
+        replyUntil = SystemClock.uptimeMillis() + REPLY_HOLD_MS
+        sayAloud(text)
+    }
 
     override fun feel(mood: PetView.Mood, ms: Long) {
         val view = pet ?: return
@@ -490,6 +530,7 @@ class OverlayService : Service(), PropHost {
         // Toys animate and run their own physics whether or not he is paying attention.
         if (props.isNotEmpty()) {
             props.toList().forEach { prop -> runCatching { prop.onFrame() } }
+            retireIfStale()
         }
 
         watchCountdown += frameMs
@@ -1000,6 +1041,17 @@ class OverlayService : Service(), PropHost {
     }
 
     /**
+     * He gets bored of things he put out himself. The oldest toy on screen, once it has been
+     * there its full welcome, is packed away with a line about it.
+     */
+    private fun retireIfStale() {
+        val oldest = props.minByOrNull { it.bornAt } ?: return
+        if (SystemClock.uptimeMillis() - oldest.bornAt < TOY_LIFE_MS) return
+        val toy = Toy.values().firstOrNull { it.owns(oldest) } ?: return
+        Toys.retire(this, toy)
+    }
+
+    /**
      * Nothing may sit on top of the chat box. Props that end up under it are nudged clear,
      * to whichever side of the box they are already nearest; each nudge resolves the
      * overlap, so this settles instead of shoving things around every frame.
@@ -1052,6 +1104,8 @@ class OverlayService : Service(), PropHost {
         relocating = false
 
         Memory.append(this, "user", text)
+        // His answer takes priority from this moment on, so the toys' own lines stay quiet.
+        beginReply()
         // Some things are done, not said: stands get opened, games get started, and
         // criticism gets taken personally.
         val event = Toys.reactTo(this, text)
@@ -1061,7 +1115,7 @@ class OverlayService : Service(), PropHost {
         AssistantBrain.reply(this, currentAppLabel, Toys.summary(this), event) { ok, reply ->
             handler.post {
                 if (ok) Memory.append(this, "assistant", reply)
-                sayAloud(reply)
+                modelSays(reply)
                 handler.postDelayed({
                     pet?.mood = PetView.Mood.NEUTRAL
                     handler.postDelayed({
