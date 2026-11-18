@@ -51,10 +51,11 @@ object AssistantBrain {
         val appContext = ctx.applicationContext
         val config = config(appContext)
         val history = Memory.history(appContext)
+        val systemPrompt = Persona.systemPrompt(appContext, appLabel)
 
         executor.execute {
             val result = try {
-                request(config, history, appLabel)
+                request(config, systemPrompt, history)
             } catch (t: Throwable) {
                 false to "I can't reach my brain right now. (${t.javaClass.simpleName})"
             }
@@ -68,15 +69,15 @@ object AssistantBrain {
 
     private fun request(
         config: Config,
-        history: List<Memory.Msg>,
-        appLabel: String?
+        systemPrompt: String,
+        history: List<Memory.Msg>
     ): Pair<Boolean, String> {
         if (config.apiKey.isBlank()) {
             return false to "I need an API key before I can think. Add one on the setup screen."
         }
 
         val messages = JSONArray()
-        messages.put(JSONObject().put("role", "system").put("content", Persona.systemPrompt(appLabel)))
+        messages.put(JSONObject().put("role", "system").put("content", systemPrompt))
         history.forEach { message ->
             messages.put(JSONObject().put("role", message.role).put("content", message.content))
         }

@@ -12,13 +12,14 @@ your other apps, and talks back.
   him near the top of the screen. Replies come from any OpenAI-compatible API.
 - A **Chat history** screen shows the whole conversation and lets you keep talking from
   there; replies still appear in his overlay bubble, which floats above the chat.
+- A **Personality** screen shows the full prompt that defines him, and lets you rewrite it.
 - It knows which app you are in (via Usage Access) and can reference it. It never reads
   screen contents.
 - Drag it anywhere. It lives in a foreground service with a persistent notification.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.6-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.7-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
@@ -64,7 +65,10 @@ binaries never enter git history.
 
 ## Changing the character
 
-- Personality, name and rules: `app/src/main/java/com/phoneassistant/Persona.kt`
+- **Personality**: the **Personality** button in the app opens the prompt in an editor and
+  saves it on the device. The built-in version lives in `Persona.kt`, and **reset**
+  restores it. The note about which app you are in is appended automatically and is not
+  part of the editable text.
 - Look and animation: `app/src/main/java/com/phoneassistant/PetView.kt`
 - Walk speed, idle timing, window size: `OverlayService.kt`
 

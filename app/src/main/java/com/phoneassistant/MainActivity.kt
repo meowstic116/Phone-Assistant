@@ -68,6 +68,10 @@ class MainActivity : Activity() {
             startActivity(Intent(this, ChatHistoryActivity::class.java))
         }
 
+        findViewById<Button>(R.id.personaButton).setOnClickListener {
+            startActivity(Intent(this, PersonaActivity::class.java))
+        }
+
         updateStatus = findViewById(R.id.updateStatus)
         updateButton = findViewById(R.id.updateButton)
         updateButton.setOnClickListener {

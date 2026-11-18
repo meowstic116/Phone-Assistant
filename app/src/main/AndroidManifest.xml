@@ -44,6 +44,11 @@
         </activity>
 
         <activity
+            android:name=".PersonaActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".ChatHistoryActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
