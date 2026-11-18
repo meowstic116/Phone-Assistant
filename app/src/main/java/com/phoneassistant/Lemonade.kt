@@ -141,10 +141,10 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      * arrived his idle timer would pick a new spot within seconds and leave the counter
      * empty, so the stand takes a post he holds until it is taken off the screen.
      */
-    fun takePost(say: Boolean, onArrive: (() -> Unit)? = null) {
+    fun takePost(say: Boolean = false, onArrive: () -> Unit = {}) {
         host.petHoldAt(centreX, behindCounterY()) {
             if (say) host.say(POST_LINES.random())
-            onArrive?.invoke()
+            onArrive()
         }
     }
 
@@ -169,7 +169,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         val room = (2 - glassesOut()).coerceAtLeast(0)
         owed = (owed + 1).coerceAtMost(room)
         if (owed <= 0) return
-        takePost(say = false) { pourPending() }
+        takePost(onArrive = ::pourPending)
     }
 
     private fun pourPending() {
@@ -187,7 +187,9 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     /** Off the screen: let him wander again, and forget anything still owed. */
     override fun onDetachedFromWindow() {
         owed = 0
-        host.petRelease()
+        // The service clears posts itself when it stops, and its pet may already be gone by
+        // the time the last window comes off, so only reach back while still attached.
+        if (isAttachedToWindow) host.petRelease()
         super.onDetachedFromWindow()
     }
 

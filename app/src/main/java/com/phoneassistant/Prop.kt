@@ -39,9 +39,10 @@ interface PropHost {
 
     /**
      * Pip takes up a post at (x, y): he walks there and then stays put instead of
-     * wandering off when his idle timer runs out. [petRelease] frees him again.
+     * wandering off when his idle timer runs out. [done] runs once, on arrival, and
+     * [petRelease] frees him again.
      */
-    fun petHoldAt(x: Float, y: Float, done: (() -> Unit)?)
+    fun petHoldAt(x: Float, y: Float, done: () -> Unit)
 
     /** Ends a post taken with [petHoldAt], so he goes back to wandering. */
     fun petRelease()

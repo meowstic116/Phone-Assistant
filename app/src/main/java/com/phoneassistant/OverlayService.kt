@@ -298,6 +298,9 @@ class OverlayService : Service(), PropHost {
         removeInputBar()
         props.toList().forEach { prop -> runCatching { windowManager.removeView(prop) } }
         props.clear()
+        // Nothing survives the service, including work a toy left at his post.
+        post = null
+        postArrival = null
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
         pet = null
         runCatching { unregisterReceiver(screenReceiver) }
@@ -330,16 +333,21 @@ class OverlayService : Service(), PropHost {
         if (ms > 0L) handler.postDelayed({ view.mood = PetView.Mood.NEUTRAL }, ms)
     }
 
-    override fun petHoldAt(x: Float, y: Float, done: (() -> Unit)?) {
+    override fun petHoldAt(x: Float, y: Float, done: () -> Unit) {
         post = x to y
         postArrival = done
+        approachPost(x, y)
+    }
+
+    /** Heads for the post; whatever is waiting there runs on arrival. */
+    private fun approachPost(x: Float, y: Float) {
         petWalkTo(x, y) { firePostArrival() }
     }
 
     /**
-     * Does the work waiting at his post, once, on arrival. The work is taken before it runs:
-     * the resumed walk and the already-here branch in [step] can both reach this for the same
-     * obligation, and a pour must never happen twice.
+     * Does the work waiting at his post, once, on arrival. The work is taken before it runs,
+     * so a second arrival cannot pour the same glass twice — and being at the post already is
+     * not a separate route to the pour, just a walk of one step.
      */
     private fun firePostArrival() {
         val work = postArrival ?: return
@@ -352,10 +360,6 @@ class OverlayService : Service(), PropHost {
         postArrival = null
         idleUntil = SystemClock.uptimeMillis() + 1500L
     }
-
-    /** Whether his middle is more than a nudge away from (x, y). */
-    private fun awayFrom(x: Float, y: Float): Boolean =
-        hypot(posX + petW / 2f - x, posY + petH / 2f - y) > dp(6f)
 
     /** Called by toys only, so every walk from here is one he has been sent on. */
     override fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?) {
@@ -497,14 +501,11 @@ class OverlayService : Service(), PropHost {
 
         // Work left at his post outlives an interrupted walk. If a chat or a tap stopped
         // him halfway there, he heads back once he is free and does it on arrival — never
-        // before, so a long crossing never pours the glass early.
+        // before, so a long crossing never pours the glass early. Being at the post already
+        // is not a second route to it: the walk is simply one step long.
         val station = post
-        if (station != null && postArrival != null && !attentive && !walking && !relocating) {
-            if (awayFrom(station.first, station.second)) {
-                petWalkTo(station.first, station.second) { firePostArrival() }
-            } else {
-                firePostArrival()
-            }
+        if (station != null && postArrival != null && !attentive && !walking) {
+            approachPost(station.first, station.second)
         }
 
         // Standing still and paying attention, unless he is finishing a walk he was
