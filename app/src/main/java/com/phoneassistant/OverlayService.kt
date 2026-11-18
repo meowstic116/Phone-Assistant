@@ -12,6 +12,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.Icon
 import android.os.Build
@@ -100,6 +101,10 @@ class OverlayService : Service() {
     private var inputField: EditText? = null
     private var inputParams: WindowManager.LayoutParams? = null
 
+    /** Measured height of the keyboard in pixels, 0 until it has been seen. */
+    private var keyboardHeightPx = 0
+    private var probeSamples = 0
+
     private val handler = Handler(Looper.getMainLooper())
     private val rnd = Random(System.currentTimeMillis())
 
@@ -164,6 +169,7 @@ class OverlayService : Service() {
         petW = (64 * dp).toInt()
         petH = (86 * dp).toInt()
         speed = 55 * dp
+        keyboardHeightPx = Keyboard.rememberedPx(this)
 
         posX = (screenW - petW) * 0.55f
         posY = (screenH - petH - bottomInset) * 0.62f
@@ -609,6 +615,7 @@ class OverlayService : Service() {
         field.requestFocus()
         handler.postDelayed({ showKeyboard() }, 80L)
         walkClearOfKeyboard()
+        startKeyboardProbe()
         // The keyboard animates in after this, and showing it can interrupt the walk,
         // so check again once it has settled.
         handler.postDelayed({
@@ -616,14 +623,50 @@ class OverlayService : Service() {
         }, 500L)
     }
 
+    // ------------------------------------------------------------ keyboard size
+
+    /**
+     * Watches the display frame while the keyboard rises. With the bar panned by the
+     * IME, the frame bottom reports where the keyboard starts, which gives its real
+     * height on this device rather than a percentage guess.
+     */
+    private fun startKeyboardProbe() {
+        probeSamples = 0
+        handler.removeCallbacks(keyboardProbe)
+        handler.postDelayed(keyboardProbe, 120L)
+    }
+
+    private val keyboardProbe = object : Runnable {
+        override fun run() {
+            if (inputBar == null) return
+            measureKeyboard()
+            if (probeSamples++ < 12) handler.postDelayed(this, 120L)
+        }
+    }
+
+    private fun measureKeyboard() {
+        val bar = inputBar ?: return
+        val frame = Rect()
+        bar.getWindowVisibleDisplayFrame(frame)
+        val covered = screenH - frame.bottom
+
+        // Anything the size of the navigation strip is not a keyboard.
+        val plausible = covered > bottomInset + dpInt(80f) && covered < screenH * 0.72f
+        if (!plausible) return
+
+        if (abs(covered - keyboardHeightPx) > dpInt(2f)) {
+            keyboardHeightPx = covered
+            Keyboard.remember(this, covered)
+        }
+        walkClearOfKeyboard()
+    }
+
     /**
      * If the bar would sit under the keyboard, send him walking up and to one side so
      * the box stays visible — the bar follows him, so it arrives with him.
      */
     private fun walkClearOfKeyboard() {
-        // Keyboards reach a long way up a tall phone, so the bar has to sit in the
-        // top half: anything below ~52% is fair game for a tall keyboard.
-        val ceiling = screenH * 0.52f
+        val ceiling = keyboardCeiling()
         val barBottom = posY + petH + dp(6f) + dp(62f)
         if (barBottom <= ceiling) return
 
@@ -637,6 +680,14 @@ class OverlayService : Service() {
         relocating = true
     }
 
+    /** Top of the keyboard, or a sensible guess before it has ever been measured. */
+    private fun keyboardCeiling(): Float =
+        if (keyboardHeightPx > 0) {
+            (screenH - keyboardHeightPx).toFloat() - dp(10f)
+        } else {
+            screenH * 0.52f
+        }
+
     private fun positionInputBar() {
         val params = inputParams ?: return
         val bar = inputBar ?: return
@@ -649,6 +700,7 @@ class OverlayService : Service() {
     }
 
     private fun removeInputBar() {
+        handler.removeCallbacks(keyboardProbe)
         inputBar?.let { bar -> runCatching { windowManager.removeView(bar) } }
         inputBar = null
         inputField = null
