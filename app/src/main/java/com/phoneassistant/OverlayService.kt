@@ -189,6 +189,12 @@ class OverlayService : Service(), PropHost {
     /** The prop he is serving: it keeps its place even when the chat box is in the way. */
     private var postOwner: Prop? = null
 
+    /**
+     * He was moved off his post by a keyboard and has to go back to it, even when there is
+     * no work left owed there. Separate from [postArrival], which means a pour is waiting.
+     */
+    private var postReturn = false
+
     /** A model reply is expected, or has just landed. Its words outrank a toy's. */
     private var awaitingReply = false
     private var replyAskedAt = 0L
@@ -355,6 +361,7 @@ class OverlayService : Service(), PropHost {
         postOwner = null
         post = null
         postArrival = null
+        postReturn = false
         ImeWatch.onChange = null
         keyboardUp = false
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
@@ -429,6 +436,8 @@ class OverlayService : Service(), PropHost {
         postOwner = owner
         post = x to y
         postArrival = done
+        // A new post is a walk he is starting, not one he owes.
+        postReturn = false
         approachPost(x, y)
     }
 
@@ -450,6 +459,8 @@ class OverlayService : Service(), PropHost {
      * not a separate route to the pour, just a walk of one step.
      */
     private fun firePostArrival() {
+        // He is at the post now, so there is nothing left to walk back for.
+        postReturn = false
         val work = postArrival ?: return
         postArrival = null
         work()
@@ -461,6 +472,7 @@ class OverlayService : Service(), PropHost {
         postOwner = null
         post = null
         postArrival = null
+        postReturn = false
         idleUntil = SystemClock.uptimeMillis() + 1500L
     }
 
@@ -563,7 +575,7 @@ class OverlayService : Service(), PropHost {
         handler.postDelayed({
             fading -= view
             runCatching { windowManager.removeView(view) }
-        }, 170L)
+        }, FADE_MS)
     }
 
     // --------------------------------------------------------------- toy break
@@ -654,9 +666,11 @@ class OverlayService : Service(), PropHost {
         // Work left at his post outlives an interrupted walk. If a chat or a tap stopped
         // him halfway there, he heads back once he is free and does it on arrival — never
         // before, so a long crossing never pours the glass early. Being at the post already
-        // is not a second route to it: the walk is simply one step long.
+        // is not a second route to it: the walk is simply one step long. A post he was
+        // already keeping is walked back to the same way when a keyboard moved him off it,
+        // which is all postReturn means — there may be nothing left to do there.
         val station = post
-        if (station != null && postArrival != null && !attentive && !walking &&
+        if (station != null && (postArrival != null || postReturn) && !attentive && !walking &&
             !inKeyboard(station.second)
         ) {
             approachPost(station.first, station.second)
@@ -1152,10 +1166,10 @@ class OverlayService : Service(), PropHost {
         targetY = neededY.coerceAtLeast(topInset + dp(8f))
         if (abs(targetY - posY) < 1f) return
         // He drops whatever a toy sent him on: the keyboard wins. A post is the exception —
-        // he has to go back behind the counter once the keyboard is gone, so its arrival is
-        // kept owed rather than thrown away with the walk.
+        // he has to go back behind the counter once the keyboard is gone, which is what
+        // postReturn is for.
         arrive = null
-        if (post != null && postArrival == null) postArrival = {}
+        if (post != null) postReturn = true
         walking = true
         toyWalk = false
         relocating = true

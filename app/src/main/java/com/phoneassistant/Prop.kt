@@ -14,6 +14,12 @@ import kotlin.math.abs
 import kotlin.math.hypot
 
 /**
+ * How long a toy takes to fade off the screen, and how long its window is kept before it is
+ * removed. Both the fade and the removal read this, so a removal can never cut a fade short.
+ */
+internal const val FADE_MS = 170L
+
+/**
  * What a prop may ask of the screen it lives on: where the edges are, how to talk, and
  * how to make Pip look smug, annoyed or pleased about something.
  */
@@ -237,7 +243,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
             .alpha(0f)
             .scaleX(0.92f)
             .scaleY(0.92f)
-            .setDuration(150L)
+            .setDuration(FADE_MS)
             .setInterpolator(AccelerateInterpolator())
             .start()
     }
