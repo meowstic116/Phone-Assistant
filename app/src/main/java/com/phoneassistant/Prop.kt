@@ -36,6 +36,15 @@ interface PropHost {
 
     /** Pip walks until his centre sits on (x, y), then runs [done]. */
     fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?)
+
+    /**
+     * Pip takes up a post at (x, y): he walks there and then stays put instead of
+     * wandering off when his idle timer runs out. [petRelease] frees him again.
+     */
+    fun petHoldAt(x: Float, y: Float, done: (() -> Unit)?)
+
+    /** Ends a post taken with [petHoldAt], so he goes back to wandering. */
+    fun petRelease()
     fun petSit(sitting: Boolean)
 
     fun addProp(prop: Prop): Boolean

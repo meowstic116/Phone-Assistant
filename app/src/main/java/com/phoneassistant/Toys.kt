@@ -449,8 +449,9 @@ object Toys {
         val stand = LemonadeStand(host)
         if (!stand.bring(host.stageWidth() * 0.1f, host.stageHeight() * 0.55f)) return null
         // Opening the stand is a two-step trick: put it down, then take his place behind
-        // the counter so he is actually serving rather than standing next to it.
-        host.petWalkTo(stand.centreX, stand.behindCounterY(), null)
+        // the counter so he is actually serving rather than standing next to it — and
+        // stay there, rather than wandering off once his idle timer runs out.
+        stand.takePost(say = false)
         return stand
     }
 }

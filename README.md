@@ -55,7 +55,9 @@ from work" leaves the lemonade stand alone.
   over his hips and feet — it starts 6dp below his chin — with the sign and the awning
   clear of him, so he stands behind the stand rather than in front of it. Tapping him
   while he is back there still talks to him; tapping the counter pours a glass. Drag the
-  stand and he walks back round behind it at the new spot.
+  stand and he walks back round behind it at the new spot, says something about it and
+  keeps station there — the stand holds a post he will not wander away from — until it is
+  taken off the screen.
 - **Canvas** — he walks somewhere, sits down with folded legs, and paints for about seven
   seconds while the picture fills in brush-stroke by brush-stroke. There are five paintings,
   all drawn in code: a dog in a tiny hat who owes him twenty bucks, Pip as a hundred-foot
@@ -98,7 +100,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.25-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.26-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

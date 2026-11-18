@@ -163,6 +163,9 @@ class OverlayService : Service(), PropHost {
     /** Called when he finishes a walk he was sent on by a toy. */
     private var arrive: (() -> Unit)? = null
 
+    /** A spot a toy wants him to stay at, or null when he is free to wander. */
+    private var post: Pair<Float, Float>? = null
+
     /** How long until he gets bored and starts something by himself. */
     private var initiativeIn = 200_000L
 
@@ -319,6 +322,16 @@ class OverlayService : Service(), PropHost {
         val view = pet ?: return
         view.mood = mood
         if (ms > 0L) handler.postDelayed({ view.mood = PetView.Mood.NEUTRAL }, ms)
+    }
+
+    override fun petHoldAt(x: Float, y: Float, done: (() -> Unit)?) {
+        post = x to y
+        petWalkTo(x, y, done)
+    }
+
+    override fun petRelease() {
+        post = null
+        idleUntil = SystemClock.uptimeMillis() + 1500L
     }
 
     /** Called by toys only, so every walk from here is one he has been sent on. */
@@ -494,7 +507,8 @@ class OverlayService : Service(), PropHost {
                 if (abs(dx) > 1f) view.facingRight = dx > 0
                 view.walking = true
             }
-        } else if (!attentive && now > idleUntil) {
+        } else if (!attentive && post == null && now > idleUntil) {
+            // A post outranks being bored: he keeps station until the toy lets him go.
             pickTarget(now)
         }
     }

@@ -127,9 +127,26 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         serve()
     }
 
+    /**
+     * Puts him behind the counter and keeps him there. A plain walk would not do: when he
+     * arrived his idle timer would pick a new spot within seconds and leave the counter
+     * empty, so the stand takes a post he holds until it is taken off the screen.
+     */
+    fun takePost(say: Boolean) {
+        host.petHoldAt(centreX, behindCounterY()) {
+            if (say) host.say(POST_LINES.random())
+        }
+    }
+
     /** Dragged somewhere else: he walks back round behind it instead of being left behind. */
     override fun onDragFinished() {
-        host.petWalkTo(centreX, behindCounterY(), null)
+        takePost(say = true)
+    }
+
+    /** Off the screen: let him wander again. */
+    override fun onDetachedFromWindow() {
+        host.petRelease()
+        super.onDetachedFromWindow()
     }
 
     override fun describe(): String {
@@ -144,6 +161,12 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     }
 
     companion object {
+        val POST_LINES = listOf(
+            "*dusts the counter* right. my spot. where were we.",
+            "back behind the counter. the queue starts here, and it is you.",
+            "*straightens the sign* still fifty cents. still mostly lemon."
+        )
+
         val SERVE_LINES = listOf(
             "one lemonade. fifty cents. I will also accept a compliment.",
             "*pours carefully* this is the good jug. don't tell the other jug.",
