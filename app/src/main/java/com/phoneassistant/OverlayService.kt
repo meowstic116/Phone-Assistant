@@ -167,6 +167,13 @@ class OverlayService : Service(), PropHost {
 
     /** Measured height of the keyboard in pixels, 0 until it has been seen. */
     private var keyboardHeightPx = 0
+
+    /** A window kept only to read the IME inset; our real windows ignore layout insets. */
+    private var imeProbe: View? = null
+
+    /** True while a keyboard is showing, in this app or any other. */
+    private var keyboardUp = false
+    private var keyboardWatch = 0L
     private var probeSamples = 0
 
     private val handler = Handler(Looper.getMainLooper())
@@ -301,7 +308,45 @@ class OverlayService : Service(), PropHost {
 
         idleUntil = SystemClock.uptimeMillis() + 2500L
         registerScreenReceiver()
+        addImeProbe()
         handler.post(tick)
+    }
+
+    /**
+     * A one-pixel window with no layout flags, kept purely to read the IME inset: our own
+     * windows set FLAG_LAYOUT_NO_LIMITS, so the system never applies insets to them. The
+     * keyboard that insets this window is the same one whichever app is being typed in,
+     * which is what lets him step out of the way of someone else's typing.
+     */
+    private fun addImeProbe() {
+        if (imeProbe != null) return
+        val view = View(this)
+        val params = WindowManager.LayoutParams(
+            1,
+            1,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+        }
+        if (runCatching { windowManager.addView(view, params) }.isSuccess) imeProbe = view
+    }
+
+    /** Height of the keyboard, whether it is ours or another app's. Zero when none is up. */
+    private fun imeHeight(): Int {
+        val view = imeProbe ?: return 0
+        val insets = runCatching { view.rootWindowInsets }.getOrNull() ?: return 0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return insets.getInsets(WindowInsets.Type.ime()).bottom
+        }
+        val frame = Rect()
+        view.getWindowVisibleDisplayFrame(frame)
+        return (screenH - frame.bottom).coerceAtLeast(0)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -325,6 +370,9 @@ class OverlayService : Service(), PropHost {
         postOwner = null
         post = null
         postArrival = null
+        imeProbe?.let { view -> runCatching { windowManager.removeView(view) } }
+        imeProbe = null
+        keyboardUp = false
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
         pet = null
         runCatching { unregisterReceiver(screenReceiver) }
@@ -555,6 +603,12 @@ class OverlayService : Service(), PropHost {
 
         if (bubble != null && now >= bubbleHideAt) hideBubble()
 
+        keyboardWatch -= frameMs
+        if (keyboardWatch <= 0L) {
+            keyboardWatch = 400L
+            watchKeyboard()
+        }
+
         // Toys animate and run their own physics whether or not he is paying attention.
         if (props.isNotEmpty()) {
             props.toList().forEach { prop -> runCatching { prop.onFrame() } }
@@ -582,7 +636,9 @@ class OverlayService : Service(), PropHost {
         // before, so a long crossing never pours the glass early. Being at the post already
         // is not a second route to it: the walk is simply one step long.
         val station = post
-        if (station != null && postArrival != null && !attentive && !walking) {
+        if (station != null && postArrival != null && !attentive && !walking &&
+            !inKeyboard(station.second)
+        ) {
             approachPost(station.first, station.second)
         }
 
@@ -612,7 +668,9 @@ class OverlayService : Service(), PropHost {
                 view.walking = false
                 if (relocating) {
                     relocating = false
-                    idleUntil = now + 600_000L
+                    // Waiting by his own chat box is a long stay. Stepping clear of a
+                    // keyboard in another app is not: he goes back to wandering shortly.
+                    idleUntil = now + if (inputBar != null) 600_000L else idleDelay()
                 } else {
                     idleUntil = now + idleDelay()
                     val arrival = arrive
@@ -638,7 +696,9 @@ class OverlayService : Service(), PropHost {
     private fun pickTarget(now: Long) {
         val maxX = (screenW - petW).coerceAtLeast(0).toFloat()
         val minY = topInset + dp(8f)
-        val maxY = (screenH - petH - bottomInset - dp(8f)).coerceAtLeast(minY)
+        // Nowhere in the keyboard, whoever is typing in it.
+        val floor = if (keyboardUp) keyboardCeiling() else (screenH - bottomInset).toFloat()
+        val maxY = (floor - petH - dp(8f)).coerceAtLeast(minY)
         val reach = dp(230f)
 
         val nx = (posX + rnd.nextFloat() * reach * 2 - reach).coerceIn(0f, maxX)
@@ -1017,6 +1077,22 @@ class OverlayService : Service(), PropHost {
         }
     }
 
+    /**
+     * Watches the keyboard from the probe window, so one opened in another app counts too,
+     * and steps him clear of it whether or not he is the one being typed at.
+     */
+    private fun watchKeyboard() {
+        val ime = imeHeight()
+        val plausible = ime > bottomInset + dpInt(80f) && ime < screenH * 0.72f
+        keyboardUp = plausible
+        if (!plausible) return
+        if (abs(ime - keyboardHeightPx) > dpInt(2f)) {
+            keyboardHeightPx = ime
+            Keyboard.remember(this, ime)
+        }
+        walkClearOfKeyboard()
+    }
+
     private fun measureKeyboard() {
         val bar = inputBar ?: return
         val frame = Rect()
@@ -1042,7 +1118,9 @@ class OverlayService : Service(), PropHost {
      */
     private fun walkClearOfKeyboard() {
         val ceiling = keyboardCeiling()
-        val barHeight = inputBar?.height?.toFloat()?.takeIf { it > 0f } ?: dp(62f)
+        // With his own box open the box has to clear the keyboard; on somebody else's
+        // keyboard he only has to keep himself out of it.
+        val barHeight = inputBar?.height?.toFloat()?.takeIf { it > 0f } ?: dp(8f)
         val neededY = ceiling - petH - dp(6f) - barHeight
         if (neededY >= posY) return
 
@@ -1055,6 +1133,14 @@ class OverlayService : Service(), PropHost {
         toyWalk = false
         relocating = true
     }
+
+    /**
+     * Whether standing with his middle at [y] would put him in the keyboard. Without this
+     * the post would walk him back into the keyboard that just moved him off it, and the two
+     * would trade places every frame.
+     */
+    private fun inKeyboard(y: Float): Boolean =
+        keyboardUp && y + petH / 2f > keyboardCeiling()
 
     /** Top of the keyboard, or a sensible guess before it has ever been measured. */
     private fun keyboardCeiling(): Float =
