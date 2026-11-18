@@ -15,39 +15,16 @@ android {
         versionName = "0.2"
     }
 
-    // Debug builds use a committed, public key so local installs update over the top
-    // with no ceremony. It is a sideloading convenience, never a distribution key.
-    //
-    // Release builds use your own private keystore, supplied through environment
-    // variables — locally, or from GitHub Actions secrets. That keystore is not in
-    // this repo, so anyone else cloning it still gets a buildable project.
-    val privateKeystorePath = System.getenv("RELEASE_KEYSTORE_FILE")
-    val hasPrivateKey =
-        !privateKeystorePath.isNullOrBlank() && rootProject.file(privateKeystorePath).exists()
-
-    if (!hasPrivateKey && gradle.startParameter.taskNames.any { it.contains("Release") }) {
-        logger.lifecycle(
-            "Release signing: RELEASE_KEYSTORE_FILE is not set, falling back to the public " +
-                "debug key. This APK is for testing only and cannot update a real release."
-        )
-    }
-
+    // One committed, self-signed key signs every build, debug and release alike, so the
+    // signature never changes and updates install straight over the top. It is public:
+    // ideal for a personal sideloaded app, and never acceptable for Play Store
+    // distribution. See the README if you ever decide to share it.
     signingConfigs {
         create("stable") {
             storeFile = rootProject.file("signing/phone-assistant.jks")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
-        }
-
-        if (hasPrivateKey) {
-            create("privateRelease") {
-                storeFile = rootProject.file(privateKeystorePath!!)
-                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: "phoneassistant"
-                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
-                    ?: System.getenv("RELEASE_KEYSTORE_PASSWORD")
-            }
         }
     }
 
@@ -57,9 +34,7 @@ android {
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName(
-                if (hasPrivateKey) "privateRelease" else "stable"
-            )
+            signingConfig = signingConfigs.getByName("stable")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
