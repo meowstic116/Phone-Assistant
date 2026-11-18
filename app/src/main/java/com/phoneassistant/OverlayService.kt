@@ -64,6 +64,24 @@ class OverlayService : Service() {
         fun stop(ctx: Context) {
             ctx.stopService(Intent(ctx, OverlayService::class.java))
         }
+
+        fun setMood(mood: PetView.Mood) {
+            instance?.pet?.mood = mood
+        }
+
+        /** History screen opened: hold still and step up clear of the input row. */
+        fun beginHistoryAttention() {
+            instance?.enterAttention(moveUp = true)
+        }
+
+        fun endHistoryAttention() {
+            instance?.leaveAttention()
+        }
+
+        /** Say something in the overlay bubble, for replies sent from the history screen. */
+        fun speak(text: String) {
+            instance?.sayAloud(text)
+        }
     }
 
     private lateinit var windowManager: WindowManager
@@ -316,6 +334,37 @@ class OverlayService : Service() {
     }
 
     // --------------------------------------------------------------------- chat
+
+    private fun enterAttention(moveUp: Boolean) {
+        attentive = true
+        walking = false
+        pet?.walking = false
+        if (moveUp) {
+            val comfortable = topInset + screenH * 0.12f
+            if (posY > comfortable) {
+                posY = comfortable
+                applyPetPosition()
+            }
+        }
+    }
+
+    private fun leaveAttention() {
+        hideKeyboard()
+        removeInputBar()
+        hideBubble()
+        attentive = false
+        pet?.mood = PetView.Mood.NEUTRAL
+        idleUntil = SystemClock.uptimeMillis() + 1500L
+    }
+
+    private fun sayAloud(text: String) {
+        attentive = true
+        walking = false
+        pet?.walking = false
+        showBubble(text)
+        pet?.mood = PetView.Mood.TALKING
+        handler.postDelayed({ pet?.mood = PetView.Mood.NEUTRAL }, 1600L)
+    }
 
     private fun toggleChat() {
         if (inputBar != null) {

@@ -9,13 +9,15 @@ your other apps, and talks back.
   screen, blinks, and reacts.
 - Tap it to open a small input box under his feet. He stops to listen, then answers in a
   speech bubble above his head. Replies come from any OpenAI-compatible API.
+- A **Chat history** screen shows the whole conversation and lets you keep talking from
+  there; replies still appear in his overlay bubble, which floats above the chat.
 - It knows which app you are in (via Usage Access) and can reference it. It never reads
   screen contents.
 - Drag it anywhere. It lives in a foreground service with a persistent notification.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.4-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.5-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

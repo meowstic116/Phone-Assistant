@@ -64,6 +64,10 @@ class MainActivity : Activity() {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey")))
         }
 
+        findViewById<Button>(R.id.historyButton).setOnClickListener {
+            startActivity(Intent(this, ChatHistoryActivity::class.java))
+        }
+
         updateStatus = findViewById(R.id.updateStatus)
         updateButton = findViewById(R.id.updateButton)
         updateButton.setOnClickListener {
