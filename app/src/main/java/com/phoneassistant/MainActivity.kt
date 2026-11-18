@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -24,7 +25,16 @@ class MainActivity : Activity() {
     private lateinit var modelField: EditText
     private lateinit var updateStatus: TextView
     private lateinit var updateButton: Button
+    private lateinit var breakStatus: TextView
     private var availableRelease: UpdateChecker.Result? = null
+
+    /** Keeps the break countdown honest while the screen is open. */
+    private val breakTicker = object : Runnable {
+        override fun run() {
+            showBreakStatus()
+            breakStatus.postDelayed(this, 1_000L)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,6 +86,7 @@ class MainActivity : Activity() {
             startActivity(Intent(this, MemoryActivity::class.java))
         }
 
+        breakStatus = findViewById(R.id.breakStatus)
         buildToyButtons()
 
         updateStatus = findViewById(R.id.updateStatus)
@@ -97,6 +108,31 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         refresh()
+        breakStatus.post(breakTicker)
+    }
+
+    override fun onPause() {
+        breakStatus.removeCallbacks(breakTicker)
+        super.onPause()
+    }
+
+    /** Shows exactly how long Pip has left on a toy break, or hides the line when he is free. */
+    private fun showBreakStatus() {
+        val left = Quiet.remaining(this)
+        if (left <= 0L) {
+            breakStatus.visibility = View.GONE
+            return
+        }
+        val total = (left + 999L) / 1000L
+        val hours = total / 3600L
+        val minutes = (total % 3600L) / 60L
+        val seconds = total % 60L
+        breakStatus.text = if (hours > 0L) {
+            "Pip is on a break — %d:%02d:%02d left".format(hours, minutes, seconds)
+        } else {
+            "Pip is on a break — %d:%02d left".format(minutes, seconds)
+        }
+        breakStatus.visibility = View.VISIBLE
     }
 
     override fun onRequestPermissionsResult(

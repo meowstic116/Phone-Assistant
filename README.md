@@ -38,9 +38,11 @@ He can be sent on a break too: "no toys for half an hour", "take a break for 20 
 "not now" (which means 15 minutes), or "leave me alone for the evening" (8 hours). He puts
 everything away, sulks about it, and gets nothing out until the time is up. The break is
 saved on the device, so it survives restarting him, and he knows exactly how much of it is
-left — ask him and he will tell you, with feeling. "You can play again" ends it early.
-Phrases only count when they are aimed at him, so "I need a break from work" leaves the
-lemonade stand alone.
+left — ask him and he will tell you, with feeling. When the time runs out he says so in his
+bubble, from a local list of lines, so it costs no API call and feels like he was actually
+waiting. The app shows a live countdown under the Toys buttons while a break is on. "You
+can play again" ends it early. Phrases only count when they are aimed at him, so "I need a
+break from work" leaves the lemonade stand alone.
 
 - **Lemonade stand** — tap the stand and he pours you a glass, to a maximum of two because
   he has one jug. The glass is its own prop: tap it once to drink, tap the empty glass
@@ -75,7 +77,7 @@ so his reply matches: tell him the lemonade was bad and he will be wounded about
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.15-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.16-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

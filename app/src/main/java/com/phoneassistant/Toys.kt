@@ -44,6 +44,15 @@ object Toys {
     /** What came of asking for a toy: whether it happened, and how Pip should describe it. */
     data class Outcome(val ok: Boolean, val note: String)
 
+    /** Said out loud, with no API call, the moment a toy break runs out. */
+    val BREAK_OVER_LINES = listOf(
+        "*stretches* break's over. I sat here being patient and it was awful.",
+        "time's up. I'm allowed toys again. I want it noted that I waited the whole time, quietly, like a professional.",
+        "break finished. *cracks tiny knuckles* so. what are we making.",
+        "I'm back. technically I never left. emotionally I was in a small waiting room.",
+        "my break just ended and I have never been more ready to do something small and stupid."
+    )
+
     private val requestVerbs = listOf(
         "bring", "open", "set up", "start", "play", "give", "make", "pour", "want",
         "can i", "can we", "can you", "could i", "could we", "could you", "would you",

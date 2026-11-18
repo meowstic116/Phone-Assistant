@@ -137,6 +137,10 @@ class OverlayService : Service(), PropHost {
     /** How long until he gets bored and starts something by himself. */
     private var initiativeIn = 200_000L
 
+    /** Whether a toy break was running last time he checked. */
+    private var onBreak = false
+    private var breakPollIn = 0L
+
     private var screenW = 1
     private var screenH = 1
     private var topInset = 0
@@ -202,6 +206,8 @@ class OverlayService : Service(), PropHost {
 
         posX = (screenW - petW) * 0.55f
         posY = (screenH - petH - bottomInset) * 0.62f
+
+        onBreak = Quiet.active(this)
 
         petParams = WindowManager.LayoutParams(
             petW,
@@ -351,6 +357,23 @@ class OverlayService : Service(), PropHost {
         // Toys animate and run their own physics whether or not he is paying attention.
         if (props.isNotEmpty()) {
             props.toList().forEach { prop -> runCatching { prop.onFrame() } }
+        }
+
+        // Notice the moment a break ends, and say so, so it feels like he was waiting.
+        breakPollIn -= frameMs
+        if (breakPollIn <= 0L) {
+            breakPollIn = 500L
+            if (onBreak) {
+                if (!Quiet.active(this)) {
+                    onBreak = false
+                    sayAloud(Toys.BREAK_OVER_LINES.random())
+                    feel(PetView.Mood.HAPPY, 3000L)
+                    // Give it a moment before he bounces into something on his own.
+                    initiativeIn = 90_000L + rnd.nextLong(90_000L)
+                }
+            } else if (Quiet.active(this)) {
+                onBreak = true
+            }
         }
 
         watchCountdown += frameMs
