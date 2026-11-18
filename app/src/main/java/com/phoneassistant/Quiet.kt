@@ -11,6 +11,12 @@ object Quiet {
     private const val PREFS = "quiet"
     private const val KEY = "until"
 
+    /**
+     * Called after a break starts or is cleared, so the overlay can schedule its wake-up
+     * for the new deadline instead of polling for it.
+     */
+    var onChanged: (() -> Unit)? = null
+
     /** When he may play again. 0 when he is free to play now. */
     private fun until(ctx: Context): Long =
         prefs(ctx).getLong(KEY, 0L)
@@ -22,10 +28,12 @@ object Quiet {
 
     fun start(ctx: Context, ms: Long) {
         prefs(ctx).edit().putLong(KEY, System.currentTimeMillis() + ms).apply()
+        onChanged?.invoke()
     }
 
     fun clear(ctx: Context) {
         prefs(ctx).edit().remove(KEY).apply()
+        onChanged?.invoke()
     }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

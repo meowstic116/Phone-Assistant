@@ -25,6 +25,7 @@ class MainActivity : Activity() {
     private lateinit var modelField: EditText
     private lateinit var updateStatus: TextView
     private lateinit var updateButton: Button
+    private lateinit var breakRow: LinearLayout
     private lateinit var breakStatus: TextView
     private var availableRelease: UpdateChecker.Result? = null
 
@@ -86,7 +87,13 @@ class MainActivity : Activity() {
             startActivity(Intent(this, MemoryActivity::class.java))
         }
 
+        breakRow = findViewById(R.id.breakRow)
         breakStatus = findViewById(R.id.breakStatus)
+        findViewById<Button>(R.id.endBreakButton).setOnClickListener {
+            // He says his own line if he is running; the stored break goes either way.
+            if (!OverlayService.endBreak()) Quiet.clear(this)
+            showBreakStatus()
+        }
         buildToyButtons()
 
         updateStatus = findViewById(R.id.updateStatus)
@@ -120,7 +127,7 @@ class MainActivity : Activity() {
     private fun showBreakStatus() {
         val left = Quiet.remaining(this)
         if (left <= 0L) {
-            breakStatus.visibility = View.GONE
+            breakRow.visibility = View.GONE
             return
         }
         val total = (left + 999L) / 1000L
@@ -132,7 +139,7 @@ class MainActivity : Activity() {
         } else {
             "Pip is on a break — %d:%02d left".format(minutes, seconds)
         }
-        breakStatus.visibility = View.VISIBLE
+        breakRow.visibility = View.VISIBLE
     }
 
     override fun onRequestPermissionsResult(

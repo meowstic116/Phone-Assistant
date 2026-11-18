@@ -98,6 +98,16 @@ class OverlayService : Service(), PropHost {
         /** What is out on the screen right now, for the prompt. Empty when nothing is. */
         fun toysOnStage(): String = instance?.let { Toys.summary(it) } ?: ""
 
+        /** Main-screen button: cut a toy break short. */
+        fun endBreak(): Boolean {
+            val service = instance ?: return false
+            Quiet.clear(service)
+            service.sayAloud(
+                "break's over, apparently. *stretches* I was just getting comfortable."
+            )
+            return true
+        }
+
         /** Put everything away. */
         fun tidyUp(): Boolean {
             val service = instance ?: return false
@@ -137,9 +147,7 @@ class OverlayService : Service(), PropHost {
     /** How long until he gets bored and starts something by himself. */
     private var initiativeIn = 200_000L
 
-    /** Whether a toy break was running last time he checked. */
-    private var onBreak = false
-    private var breakPollIn = 0L
+
 
     private var screenW = 1
     private var screenH = 1
@@ -207,7 +215,9 @@ class OverlayService : Service(), PropHost {
         posX = (screenW - petW) * 0.55f
         posY = (screenH - petH - bottomInset) * 0.62f
 
-        onBreak = Quiet.active(this)
+        // Every start, extension and early end re-arms his wake-up for the new deadline.
+        Quiet.onChanged = { armBreakTimer() }
+        armBreakTimer()
 
         petParams = WindowManager.LayoutParams(
             petW,
@@ -257,6 +267,7 @@ class OverlayService : Service(), PropHost {
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
         pet = null
         runCatching { unregisterReceiver(screenReceiver) }
+        Quiet.onChanged = null
         instance = null
         running = false
         super.onDestroy()
@@ -339,6 +350,48 @@ class OverlayService : Service(), PropHost {
         runCatching { windowManager.removeView(prop) }
     }
 
+    // --------------------------------------------------------------- toy break
+
+    /** Fires once, at the deadline of the break that was running when it was posted. */
+    private val breakAlarm = Runnable { breakEnded() }
+
+    /** A break ended while the screen was off, so the line waits for them to look. */
+    private var breakOverPending = false
+
+    /**
+     * Schedules a single wake-up for the exact end of the break, rather than polling for it
+     * thirty times a second. Called on start, on every change, and when he is created.
+     */
+    private fun armBreakTimer() {
+        handler.removeCallbacks(breakAlarm)
+        val left = Quiet.remaining(this)
+        if (left <= 0L) return
+        handler.postDelayed(breakAlarm, left + 500L)
+    }
+
+    private fun breakEnded() {
+        val left = Quiet.remaining(this)
+        if (left > 0L) {
+            // It was extended while this wake-up was waiting: sit out the rest of it.
+            handler.postDelayed(breakAlarm, left + 500L)
+            return
+        }
+        if (paused) {
+            // Screen is off: a bubble now would expire unseen. Say it when they look.
+            breakOverPending = true
+            return
+        }
+        announceBreakOver()
+    }
+
+    private fun announceBreakOver() {
+        breakOverPending = false
+        sayAloud(Toys.BREAK_OVER_LINES.random())
+        feel(PetView.Mood.HAPPY, 3000L)
+        // Give it a moment before he bounces into something on his own.
+        initiativeIn = 90_000L + rnd.nextLong(90_000L)
+    }
+
     // ---------------------------------------------------------------- wandering
 
     private val tick = object : Runnable {
@@ -359,22 +412,8 @@ class OverlayService : Service(), PropHost {
             props.toList().forEach { prop -> runCatching { prop.onFrame() } }
         }
 
-        // Notice the moment a break ends, and say so, so it feels like he was waiting.
-        breakPollIn -= frameMs
-        if (breakPollIn <= 0L) {
-            breakPollIn = 500L
-            if (onBreak) {
-                if (!Quiet.active(this)) {
-                    onBreak = false
-                    sayAloud(Toys.BREAK_OVER_LINES.random())
-                    feel(PetView.Mood.HAPPY, 3000L)
-                    // Give it a moment before he bounces into something on his own.
-                    initiativeIn = 90_000L + rnd.nextLong(90_000L)
-                }
-            } else if (Quiet.active(this)) {
-                onBreak = true
-            }
-        }
+        // A break that ended while the screen was off gets announced now they are looking.
+        if (breakOverPending) announceBreakOver()
 
         watchCountdown += frameMs
         if (watchCountdown >= 15_000L) {
