@@ -166,6 +166,9 @@ class OverlayService : Service(), PropHost {
     /** A spot a toy wants him to stay at, or null when he is free to wander. */
     private var post: Pair<Float, Float>? = null
 
+    /** The prop he is serving: it keeps its place even when the chat box is in the way. */
+    private var postOwner: Prop? = null
+
     /**
      * One-shot work waiting at that post — a lemonade to pour. Kept here rather than on the
      * walk, because a walk can be interrupted (a tap, a chat) and the promise survives it.
@@ -299,6 +302,7 @@ class OverlayService : Service(), PropHost {
         props.toList().forEach { prop -> runCatching { windowManager.removeView(prop) } }
         props.clear()
         // Nothing survives the service, including work a toy left at his post.
+        postOwner = null
         post = null
         postArrival = null
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
@@ -333,11 +337,15 @@ class OverlayService : Service(), PropHost {
         if (ms > 0L) handler.postDelayed({ view.mood = PetView.Mood.NEUTRAL }, ms)
     }
 
-    override fun petHoldAt(x: Float, y: Float, done: () -> Unit) {
+    override fun petHoldAt(owner: Prop, x: Float, y: Float, done: () -> Unit) {
+        postOwner = owner
         post = x to y
         postArrival = done
         approachPost(x, y)
     }
+
+    override fun petIsNear(x: Float, y: Float, within: Float): Boolean =
+        hypot(posX + petW / 2f - x, posY + petH / 2f - y) <= within
 
     /** Heads for the post; whatever is waiting there runs on arrival. */
     private fun approachPost(x: Float, y: Float) {
@@ -356,6 +364,7 @@ class OverlayService : Service(), PropHost {
     }
 
     override fun petRelease() {
+        postOwner = null
         post = null
         postArrival = null
         idleUntil = SystemClock.uptimeMillis() + 1500L
@@ -1008,6 +1017,9 @@ class OverlayService : Service(), PropHost {
                 prop.posY < bottom && prop.posY + prop.windowH > top
 
         props.toList().forEach { prop ->
+            // The prop he is serving stays put: nudging it away would leave him behind a
+            // counter that is no longer there, and chasing it again would never settle.
+            if (prop === postOwner) return@forEach
             if (!under(prop)) return@forEach
             val above = top - prop.windowH - dp(10f)
             val below = bottom + dp(10f)

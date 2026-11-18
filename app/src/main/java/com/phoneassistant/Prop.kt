@@ -34,15 +34,23 @@ interface PropHost {
     fun petWidth(): Int
     fun petHeight(): Int
 
+    /**
+     * Whether Pip's middle is within [within] pixels of (x, y), in screen pixels. Toy windows
+     * are drawn over his, so a tap may be one meant for him — but only while he is actually
+     * there, not in the space he would occupy if he had not walked off.
+     */
+    fun petIsNear(x: Float, y: Float, within: Float): Boolean
+
     /** Pip walks until his centre sits on (x, y), then runs [done]. */
     fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?)
 
     /**
-     * Pip takes up a post at (x, y): he walks there and then stays put instead of
-     * wandering off when his idle timer runs out. [done] runs once, on arrival, and
-     * [petRelease] frees him again.
+     * Pip takes up a post at (x, y), owned by [owner]: he walks there and then stays put
+     * instead of wandering off when his idle timer runs out. [done] runs once, on arrival,
+     * and [petRelease] frees him again. The owner is the prop he is serving, so it can be
+     * left where it is while he is standing behind it.
      */
-    fun petHoldAt(x: Float, y: Float, done: () -> Unit)
+    fun petHoldAt(owner: Prop, x: Float, y: Float, done: () -> Unit)
 
     /** Ends a post taken with [petHoldAt], so he goes back to wandering. */
     fun petRelease()

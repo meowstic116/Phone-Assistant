@@ -229,7 +229,7 @@ object Toys {
                     )
                     !stand.hasRoom() -> {
                         // He still heads back behind his counter, but there is nothing to pour.
-                        stand.takePost(say = false)
+                        stand.takePost()
                         Outcome(
                             false,
                             "they asked for another lemonade and there are no glasses left. " +

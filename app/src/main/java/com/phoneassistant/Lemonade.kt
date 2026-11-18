@@ -142,7 +142,11 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     override fun onTap(x: Float, y: Float) {
         // This window is drawn over his, so taps aimed at him arrive here. Anything in the
         // box his body occupies above the counter is a poke, not an order.
-        if (y < dp(96f) && x > dp(29f) && x < dp(83f)) {
+        // Only while he is actually standing there: the same box over an empty counter is
+        // not an invisible button.
+        val onHim = y < dp(96f) && x > dp(29f) && x < dp(83f) &&
+            host.petIsNear(posX + x, posY + y, dp(46f))
+        if (onHim) {
             host.pokePet()
             return
         }
@@ -154,10 +158,12 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      * arrived his idle timer would pick a new spot within seconds and leave the counter
      * empty, so the stand takes a post he holds until it is taken off the screen.
      */
-    fun takePost(say: Boolean = false, onArrive: () -> Unit = {}) {
-        host.petHoldAt(centreX, behindCounterY()) {
+    fun takePost(say: Boolean = false) {
+        host.petHoldAt(this, centreX, behindCounterY()) {
             if (say) host.say(POST_LINES.random())
-            onArrive()
+            // Whatever is owed is poured on arrival, so a later takePost — the stand being
+            // dragged while a glass is still promised, say — cannot drop that pour.
+            pourPending()
         }
     }
 
@@ -182,7 +188,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         val room = (2 - glassesOut()).coerceAtLeast(0)
         owed = (owed + 1).coerceAtMost(room)
         if (owed <= 0) return
-        takePost(onArrive = { pourPending() })
+        takePost()
     }
 
     /**
@@ -214,15 +220,18 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     override fun onDetachedFromWindow() {
         owed = 0
         ui.removeCallbacks(pourNext)
-        // The service clears posts itself when it stops, and its pet may already be gone by
-        // the time the last window comes off, so only reach back while still attached.
-        if (isAttachedToWindow) host.petRelease()
+        host.petRelease()
         super.onDetachedFromWindow()
     }
 
-    override fun describe(): String =
-        "your lemonade stand, with you standing behind the counter " +
-            "(glasses out right now: ${glassesOut()})"
+    override fun describe(): String {
+        val base = "your lemonade stand (glasses out right now: ${glassesOut()})"
+        return if (host.petIsNear(centreX, behindCounterY(), dp(24f))) {
+            "$base, and you are standing behind the counter"
+        } else {
+            "$base, and you are not behind it right now"
+        }
+    }
 
     private fun next(lines: List<String>): String {
         lineIndex = (lineIndex + Random.nextInt(1, lines.size)) % lines.size
