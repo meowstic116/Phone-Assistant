@@ -27,6 +27,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -57,7 +58,6 @@ class OverlayService : Service(), PropHost {
         private const val NOTIFICATION_ID = 42
         private const val CHANNEL_ID = "assistant"
         private const val ACTION_STOP = "com.phoneassistant.STOP"
-        private const val BUBBLE_LIFETIME_MS = 12_000L
 
         /** How long a model reply keeps the floor after it lands, over any toy line. */
         private const val REPLY_HOLD_MS = 4_000L
@@ -176,6 +176,9 @@ class OverlayService : Service(), PropHost {
 
     /** Everything Pip has put on the screen: stands, paintings, games, plants. */
     private val props = mutableListOf<Prop>()
+
+    /** Windows that have left the stage and are still fading off the screen. */
+    private val fading = mutableListOf<View>()
 
     /** Called when he finishes a walk he was sent on by a toy. */
     private var arrive: (() -> Unit)? = null
@@ -346,6 +349,8 @@ class OverlayService : Service(), PropHost {
         removeInputBar()
         props.toList().forEach { prop -> runCatching { windowManager.removeView(prop) } }
         props.clear()
+        fading.forEach { view -> runCatching { windowManager.removeView(view) } }
+        fading.clear()
         // Nothing survives the service, including work a toy left at his post.
         postOwner = null
         post = null
@@ -526,13 +531,29 @@ class OverlayService : Service(), PropHost {
         prop.params = params
         if (!runCatching { windowManager.addView(prop, params) }.isSuccess) return false
         props += prop
+        prop.appear()
         keepBarClear()
         return true
     }
 
     override fun dropProp(prop: Prop) {
-        props.remove(prop)
-        runCatching { windowManager.removeView(prop) }
+        if (!props.remove(prop)) return
+        // Gone from the logic at once, so nothing reacts to a toy that has left, but off the
+        // screen gently: it shrinks away instead of blinking out.
+        prop.fadeAway()
+        fadeOut(prop)
+    }
+
+    /**
+     * Removes a window once it has faded. It is tracked until then, so a service that stops
+     * in the middle of a fade cannot leave the window behind.
+     */
+    private fun fadeOut(view: View) {
+        fading += view
+        handler.postDelayed({
+            fading -= view
+            runCatching { windowManager.removeView(view) }
+        }, 170L)
     }
 
     // --------------------------------------------------------------- toy break
@@ -590,7 +611,7 @@ class OverlayService : Service(), PropHost {
         val view = pet ?: return
         val now = SystemClock.uptimeMillis()
 
-        if (bubble != null && now >= bubbleHideAt) hideBubble()
+        if (bubble != null && now >= bubbleHideAt) fadeBubble()
 
         keyboardWatch -= frameMs
         if (keyboardWatch <= 0L) {
@@ -792,6 +813,13 @@ class OverlayService : Service(), PropHost {
 
     // --------------------------------------------------------------- speech bubble
 
+    /**
+     * How long a line stays up, by how much there is to read: a two-word reply should not
+     * sit there for twelve seconds, and a longer one should get longer.
+     */
+    private fun bubbleLifetime(text: String): Long =
+        (2200L + text.length * 55L).coerceIn(3_000L, 14_000L)
+
     private fun showBubble(text: String) {
         hideBubble()
 
@@ -828,8 +856,35 @@ class OverlayService : Service(), PropHost {
         if (runCatching { windowManager.addView(view, params) }.isSuccess) {
             bubble = view
             bubbleParams = params
-            bubbleHideAt = SystemClock.uptimeMillis() + BUBBLE_LIFETIME_MS
+            bubbleHideAt = SystemClock.uptimeMillis() + bubbleLifetime(text)
+            // It grows into place rather than appearing, which is most of what makes a line
+            // feel spoken instead of printed.
+            view.alpha = 0f
+            view.scaleX = 0.9f
+            view.scaleY = 0.9f
+            view.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(150L)
+                .setInterpolator(DecelerateInterpolator(1.8f))
+                .start()
         }
+    }
+
+    /** The bubble has had its time: it leaves the way it arrived, only quicker. */
+    private fun fadeBubble() {
+        val view = bubble ?: return
+        bubble = null
+        bubbleParams = null
+        bubbleHideAt = 0L
+        view.animate()
+            .alpha(0f)
+            .scaleX(0.96f)
+            .scaleY(0.96f)
+            .setDuration(130L)
+            .start()
+        fadeOut(view)
     }
 
     private fun hideBubble() {
@@ -874,6 +929,16 @@ class OverlayService : Service(), PropHost {
         if (runCatching { windowManager.addView(view, params) }.isSuccess) {
             thinking = view
             thinkingParams = params
+            view.alpha = 0f
+            view.scaleX = 0.9f
+            view.scaleY = 0.9f
+            view.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(140L)
+                .setInterpolator(DecelerateInterpolator(1.8f))
+                .start()
         }
     }
 

@@ -8,6 +8,8 @@ import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import kotlin.math.abs
 import kotlin.math.hypot
 
@@ -125,6 +127,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
                 lastRawX = event.rawX
                 lastRawY = event.rawY
                 travelled = false
+                lift(true)
                 true
             }
 
@@ -143,12 +146,14 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
             }
 
             MotionEvent.ACTION_UP -> {
+                lift(false)
                 if (travelled) onDragFinished() else onTap(event.x, event.y)
                 travelled = false
                 true
             }
 
             MotionEvent.ACTION_CANCEL -> {
+                lift(false)
                 travelled = false
                 true
             }
@@ -180,6 +185,48 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     fun bring(x: Float, y: Float): Boolean {
         moveTo(x, y)
         return host.addProp(this)
+    }
+
+    /**
+     * A quick pop as a prop arrives, so it lands on the screen instead of just being there.
+     * The slight undershoot on the way in is what makes it read as placed rather than drawn.
+     */
+    fun appear() {
+        if (!isAttachedToWindow) return
+        alpha = 0f
+        scaleX = 0.84f
+        scaleY = 0.84f
+        animate()
+            .alpha(1f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(200L)
+            .setInterpolator(DecelerateInterpolator(1.8f))
+            .start()
+    }
+
+    /** Shrinks and fades away, for a prop that has already left the stage. */
+    fun fadeAway() {
+        if (!isAttachedToWindow) return
+        animate().cancel()
+        animate()
+            .alpha(0f)
+            .scaleX(0.92f)
+            .scaleY(0.92f)
+            .setDuration(150L)
+            .setInterpolator(AccelerateInterpolator())
+            .start()
+    }
+
+    /** Grows a touch while held, so a prop feels picked up rather than scraped along. */
+    private fun lift(held: Boolean) {
+        animate().cancel()
+        animate()
+            .alpha(1f)
+            .scaleX(if (held) 1.045f else 1f)
+            .scaleY(if (held) 1.045f else 1f)
+            .setDuration(if (held) 90L else 130L)
+            .start()
     }
 
     /** Called for a tap that was not a drag. Coordinates are inside this prop. */

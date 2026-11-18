@@ -8,6 +8,9 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
 
 - A floating character drawn entirely in code (no sprite sheets) that wanders the whole
   screen, blinks, sits down, and reacts.
+- Everything moves rather than appears: a toy he puts down pops into place and shrinks away
+  when it goes, a prop lifts slightly under your finger while you drag it, and the speech
+  bubble eases in, then drifts out. A line stays up for as long as it takes to read.
 - Tap it to open a small input box under his feet. He stops to listen, shows animated
   thinking dots, then answers in a speech bubble that follows him around and flips below
   him near the top of the screen. The box leaves as soon as you send, or when you press
@@ -124,7 +127,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.50-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.51-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
