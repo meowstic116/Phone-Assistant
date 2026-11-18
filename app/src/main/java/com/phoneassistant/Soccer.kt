@@ -36,19 +36,6 @@ class SoccerGame(private val host: PropHost) {
             "*stares at the ball* that happened. I'm fine.",
             "one for you. *slow clap* I'm being gracious."
         )
-        val MY_GOAL_TAP = listOf(
-            "that's my goal. it stays. I wrote that rule.",
-            "my goal. hands off. my rules."
-        )
-        val YOUR_GOAL_TAP = listOf(
-            "your goal. moving it is against the rules I wrote.",
-            "your goal. it stays put. my rules."
-        )
-        val SCORE_TAP = listOf(
-            "first to three. moving goals is cheating. I wrote that too.",
-            "still first to three, and I'm still refereeing."
-        )
-
         val PIP_KICK_LINES = listOf(
             "my turn. *scuffs it*",
             "*boots it* for the phones shaped like me.",
@@ -224,6 +211,20 @@ class SoccerGame(private val host: PropHost) {
 }
 
 /** One of the two goals. Move it and Pip will have opinions. */
+/** What a goal says when tapped, so a second tap is not the same sentence twice. */
+private val MY_GOAL_TAP = listOf(
+    "that's my goal. it stays. I wrote that rule.",
+    "my goal. hands off. my rules."
+)
+private val YOUR_GOAL_TAP = listOf(
+    "your goal. moving it is against the rules I wrote.",
+    "your goal. it stays put. my rules."
+)
+private val SCORE_TAP = listOf(
+    "first to three. moving goals is cheating. I wrote that too.",
+    "still first to three, and I'm still refereeing."
+)
+
 class Goal(host: PropHost, private val game: SoccerGame, val pipDefends: Boolean) : Prop(host) {
 
     override val boxW = 142f
@@ -256,9 +257,7 @@ class Goal(host: PropHost, private val game: SoccerGame, val pipDefends: Boolean
     }
 
     override fun onTap(x: Float, y: Float) {
-        host.say(
-            Lines.pick(if (pipDefends) SoccerGame.MY_GOAL_TAP else SoccerGame.YOUR_GOAL_TAP)
-        )
+        host.say(Lines.pick(if (pipDefends) MY_GOAL_TAP else YOUR_GOAL_TAP))
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -446,7 +445,7 @@ class ScoreBoard(host: PropHost, private val game: SoccerGame) : Prop(host) {
 
     override fun onTap(x: Float, y: Float) {
         host.say(
-            "PIP ${game.pipScore} — ${game.youScore} YOU. " + Lines.pick(SoccerGame.SCORE_TAP)
+            "PIP ${game.pipScore} — ${game.youScore} YOU. " + Lines.pick(SCORE_TAP)
         )
     }
 

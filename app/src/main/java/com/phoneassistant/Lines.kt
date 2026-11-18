@@ -11,7 +11,6 @@ object Lines {
 
     fun pick(lines: List<String>): String {
         // With one option there is nothing to swap it for, so a lone line is said again.
-        val pool = if (lines.size > 1) lines.filter { it != last } else lines
-        return pool.random().also { last = it }
+        return lines.filter { it != last }.ifEmpty { lines }.random().also { last = it }
     }
 }

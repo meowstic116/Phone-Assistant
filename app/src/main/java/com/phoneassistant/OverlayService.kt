@@ -411,13 +411,15 @@ class OverlayService : Service(), PropHost {
     }
 
     /**
-     * Puts him back on his own feet with nothing outstanding: not paying attention, not
-     * walking, no target left over from a walk, no arrival still owed to a toy, not sitting.
-     * Clearing the screen has to do this itself, because a dropped prop takes its window and
-     * its post with it but leaves every one of those fields exactly as it found them.
+     * Puts him back on his own feet with nothing outstanding: no post, no walk, no arrival
+     * still owed to a toy, not sitting, not paying attention. Clearing the screen has to do
+     * this itself, because a dropped prop takes its window with it but leaves every one of
+     * those exactly as it found them.
+     *
+     * [petRelease] sets the idle timer too, so the only target that matters is the next one:
+     * every walk writes its own before anything reads it.
      */
     private fun resetToIdle() {
-        // Nothing owns a post any more either, so that release lives in one place.
         petRelease()
         // A chat bar he opened outranks this: it holds his attention itself, and clears it
         // when it closes.
@@ -426,11 +428,8 @@ class OverlayService : Service(), PropHost {
         toyWalk = false
         relocating = false
         arrive = null
-        targetX = posX
-        targetY = posY
         pet?.walking = false
         pet?.sitting = false
-        idleUntil = SystemClock.uptimeMillis() + 1200L
     }
 
     /** Called by toys only, so every walk from here is one he has been sent on. */
