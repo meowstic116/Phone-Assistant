@@ -20,6 +20,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.text.InputType
 import android.view.Gravity
@@ -216,9 +217,14 @@ class OverlayService : Service(), PropHost {
         posX = (screenW - petW) * 0.55f
         posY = (screenH - petH - bottomInset) * 0.62f
 
+        // A restarted service should know whether anyone is actually looking.
+        paused = getSystemService(PowerManager::class.java)?.isInteractive != true
+
         // Every start, extension and early end re-arms his wake-up for the new deadline.
         Quiet.onChanged = { armBreakTimer() }
         armBreakTimer()
+        // A break may have run out while he was dead: that line is still owed.
+        if (Quiet.owed(this)) breakOverPending = true
 
         petParams = WindowManager.LayoutParams(
             petW,
@@ -387,7 +393,7 @@ class OverlayService : Service(), PropHost {
             handler.postDelayed(breakAlarm, left + 500L)
             return
         }
-        if (!breakArmed && !breakOverPending) return
+        if (!breakArmed && !breakOverPending && !Quiet.owed(this)) return
         announceBreakOver()
     }
 
@@ -409,6 +415,7 @@ class OverlayService : Service(), PropHost {
     private fun announceBreakOver() {
         breakArmed = false
         breakOverPending = false
+        Quiet.markSaid(this)
         sayAloud(Toys.BREAK_OVER_LINES.random())
         feel(PetView.Mood.HAPPY, 3000L)
         // Give it a moment before he bounces into something on his own.
@@ -435,8 +442,12 @@ class OverlayService : Service(), PropHost {
             props.toList().forEach { prop -> runCatching { prop.onFrame() } }
         }
 
-        // A break that ended while the screen was off gets announced now they are looking.
-        if (breakOverPending) announceBreakOver()
+        // A break that ended while the screen was off gets announced now they are looking,
+        // but never behind the lock screen.
+        if (breakOverPending) {
+            val keyguard = getSystemService(KeyguardManager::class.java)
+            if (keyguard?.isKeyguardLocked != true) announceBreakOver()
+        }
 
         watchCountdown += frameMs
         if (watchCountdown >= 15_000L) {
