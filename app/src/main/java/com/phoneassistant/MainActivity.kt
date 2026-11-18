@@ -60,10 +60,6 @@ class MainActivity : Activity() {
             }
         }
 
-        findViewById<Button>(R.id.chatButton).setOnClickListener {
-            startActivity(Intent(this, ChatActivity::class.java))
-        }
-
         findViewById<TextView>(R.id.keyLink).setOnClickListener {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey")))
         }

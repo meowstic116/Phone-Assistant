@@ -10,24 +10,34 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Typeface
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.text.InputType
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.random.Random
 
 /**
- * Keeps the character on screen as an overlay window that is exactly the size of
- * the character, so taps anywhere else still reach the app underneath.
+ * Owns three small overlay windows: the character, a speech bubble above it and an
+ * input bar below it. The character wanders the whole screen, and stops to listen
+ * whenever the input bar is open.
  */
 class OverlayService : Service() {
 
@@ -54,36 +64,44 @@ class OverlayService : Service() {
         fun stop(ctx: Context) {
             ctx.stopService(Intent(ctx, OverlayService::class.java))
         }
-
-        fun setMood(mood: PetView.Mood) {
-            instance?.pet?.mood = mood
-        }
-
-        fun flashMood(mood: PetView.Mood, millis: Long) {
-            val service = instance ?: return
-            service.pet?.mood = mood
-            service.handler.postDelayed({ service.pet?.mood = PetView.Mood.NEUTRAL }, millis)
-        }
     }
 
     private lateinit var windowManager: WindowManager
-    private lateinit var params: WindowManager.LayoutParams
+    private lateinit var petParams: WindowManager.LayoutParams
     private var pet: PetView? = null
+
+    private var bubble: TextView? = null
+    private var inputBar: LinearLayout? = null
+    private var inputField: EditText? = null
+    private var inputParams: WindowManager.LayoutParams? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private val rnd = Random(System.currentTimeMillis())
 
     private var screenW = 1
     private var screenH = 1
-    private var speed = 0f
+    private var topInset = 0
+    private var bottomInset = 0
+    private var petW = 1
+    private var petH = 1
+    private var speed = 55f
+
+    /** Sub-pixel position, so slow diagonal travel still moves. */
+    private var posX = 0f
+    private var posY = 0f
     private var targetX = 0f
+    private var targetY = 0f
+
     private var walking = false
     private var idleUntil = 0L
+    private var attentive = false
     private var paused = false
     private var watchCountdown = 0L
 
     private var downRawX = 0f
+    private var downRawY = 0f
     private var lastRawX = 0f
+    private var lastRawY = 0f
     private var dragged = false
 
     private val frameMs = 33L
@@ -107,47 +125,47 @@ class OverlayService : Service() {
         val dp = resources.displayMetrics.density
         screenW = resources.displayMetrics.widthPixels
         screenH = resources.displayMetrics.heightPixels
-        var navInset = 0
         if (Build.VERSION.SDK_INT >= 30) {
             val metrics = windowManager.currentWindowMetrics
             screenW = metrics.bounds.width()
             screenH = metrics.bounds.height()
-            navInset = metrics.windowInsets
-                .getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars()).bottom
+            val insets = metrics.windowInsets
+            topInset = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
+            bottomInset =
+                insets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars()).bottom
         }
 
-        val petW = (64 * dp).toInt()
-        val petH = (86 * dp).toInt()
-        speed = 62 * dp
-        val restY = screenH - petH - navInset - (4 * dp).toInt()
+        petW = (64 * dp).toInt()
+        petH = (86 * dp).toInt()
+        speed = 55 * dp
 
-        params = WindowManager.LayoutParams(
+        posX = (screenW - petW) * 0.55f
+        posY = (screenH - petH - bottomInset) * 0.62f
+
+        petParams = WindowManager.LayoutParams(
             petW,
             petH,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (screenW * 0.6f).toInt()
-            y = restY
+            x = posX.toInt()
+            y = posY.toInt()
         }
 
         val view = PetView(this)
         view.setOnTouchListener(touchListener)
         pet = view
 
-        val added = runCatching { windowManager.addView(view, params) }.isSuccess
+        val added = runCatching { windowManager.addView(view, petParams) }.isSuccess
         if (!added) {
-            // Permission was revoked between the check and here.
             stopSelf()
             return
         }
 
-        targetX = params.x.toFloat()
-        idleUntil = SystemClock.uptimeMillis() + 1200
+        idleUntil = SystemClock.uptimeMillis() + 2500L
         registerScreenReceiver()
         handler.post(tick)
     }
@@ -164,6 +182,8 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        hideBubble()
+        removeInputBar()
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
         pet = null
         runCatching { unregisterReceiver(screenReceiver) }
@@ -171,6 +191,8 @@ class OverlayService : Service() {
         running = false
         super.onDestroy()
     }
+
+    // ---------------------------------------------------------------- wandering
 
     private val tick = object : Runnable {
         override fun run() {
@@ -183,49 +205,81 @@ class OverlayService : Service() {
         val view = pet ?: return
         val now = SystemClock.uptimeMillis()
 
-        if (walking) {
-            val dx = targetX - params.x
-            val perFrame = speed * frameMs / 1000f
-            if (abs(dx) <= perFrame) {
-                params.x = targetX.toInt()
-                walking = false
-                view.walking = false
-                idleUntil = now + 1500L + rnd.nextLong(4000L)
-                push()
-            } else {
-                params.x = (params.x + if (dx > 0) perFrame else -perFrame).toInt()
-                view.facingRight = dx > 0
-                view.walking = true
-                push()
-            }
-        } else if (now > idleUntil) {
-            val maxX = (screenW - params.width).coerceAtLeast(0)
-            val next = rnd.nextInt(0, maxX + 1).toFloat()
-            if (abs(next - params.x) < params.width * 0.6f) {
-                idleUntil = now + 1000L
-            } else {
-                targetX = next
-                walking = true
-            }
-        }
-
         watchCountdown += frameMs
         if (watchCountdown >= 15_000L) {
             watchCountdown = 0L
-            currentAppLabel = if (AppWatcher.hasPermission(this)) AppWatcher.currentAppLabel(this) else null
+            currentAppLabel =
+                if (AppWatcher.hasPermission(this)) AppWatcher.currentAppLabel(this) else null
+        }
+
+        // Standing still and paying attention while the user types.
+        if (attentive) return
+
+        if (walking) {
+            val dx = targetX - posX
+            val dy = targetY - posY
+            val distance = hypot(dx, dy)
+            val perFrame = speed * frameMs / 1000f
+
+            if (distance <= perFrame || distance < 0.5f) {
+                posX = targetX
+                posY = targetY
+                applyPetPosition()
+                walking = false
+                view.walking = false
+                idleUntil = now + idleDelay()
+            } else {
+                posX += dx / distance * perFrame
+                posY += dy / distance * perFrame
+                applyPetPosition()
+                if (abs(dx) > 1f) view.facingRight = dx > 0
+                view.walking = true
+            }
+        } else if (now > idleUntil) {
+            pickTarget(now)
         }
     }
 
-    private fun push() {
-        val view = pet ?: return
-        runCatching { windowManager.updateViewLayout(view, params) }
+    /** Long pauses between short strolls — he should feel relaxed, not busy. */
+    private fun idleDelay(): Long = 12_000L + rnd.nextLong(16_000L)
+
+    private fun pickTarget(now: Long) {
+        val maxX = (screenW - petW).coerceAtLeast(0).toFloat()
+        val minY = topInset + dp(8f)
+        val maxY = (screenH - petH - bottomInset - dp(8f)).coerceAtLeast(minY)
+        val reach = dp(230f)
+
+        val nx = (posX + rnd.nextFloat() * reach * 2 - reach).coerceIn(0f, maxX)
+        val ny = (posY + rnd.nextFloat() * reach * 2 - reach).coerceIn(minY, maxY)
+
+        if (hypot(nx - posX, ny - posY) < dp(45f)) {
+            idleUntil = now + 3000L
+            return
+        }
+        targetX = nx
+        targetY = ny
+        walking = true
     }
+
+    private fun applyPetPosition() {
+        petParams.x = posX.toInt()
+        petParams.y = posY.toInt()
+        val view = pet ?: return
+        runCatching { windowManager.updateViewLayout(view, petParams) }
+    }
+
+    private fun dp(value: Float) = value * resources.displayMetrics.density
+    private fun dpInt(value: Float) = dp(value).toInt()
+
+    // -------------------------------------------------------------------- touch
 
     private val touchListener = View.OnTouchListener { _, event ->
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downRawX = event.rawX
+                downRawY = event.rawY
                 lastRawX = event.rawX
+                lastRawY = event.rawY
                 dragged = false
                 walking = false
                 pet?.walking = false
@@ -233,22 +287,27 @@ class OverlayService : Service() {
             }
 
             MotionEvent.ACTION_MOVE -> {
-                if (abs(event.rawX - downRawX) > 4 * resources.displayMetrics.density) dragged = true
+                if (abs(event.rawX - downRawX) > 4 * resources.displayMetrics.density ||
+                    abs(event.rawY - downRawY) > 4 * resources.displayMetrics.density
+                ) {
+                    dragged = true
+                }
                 if (dragged) {
-                    params.x = (params.x + (event.rawX - lastRawX)).toInt()
-                    params.y = params.y
+                    posX = (posX + (event.rawX - lastRawX))
+                        .coerceIn(0f, (screenW - petW).toFloat())
+                    posY = (posY + (event.rawY - lastRawY))
+                        .coerceIn(topInset.toFloat(), (screenH - petH - bottomInset).toFloat())
                     lastRawX = event.rawX
-                    push()
+                    lastRawY = event.rawY
+                    applyPetPosition()
                 }
                 true
             }
 
             MotionEvent.ACTION_UP -> {
-                if (dragged) {
-                    targetX = params.x.toFloat()
-                } else {
-                    openChat()
-                }
+                if (!dragged) toggleChat()
+                targetX = posX
+                targetY = posY
                 true
             }
 
@@ -256,9 +315,221 @@ class OverlayService : Service() {
         }
     }
 
-    private fun openChat() {
-        startActivity(Intent(this, ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    // --------------------------------------------------------------------- chat
+
+    private fun toggleChat() {
+        if (inputBar != null) {
+            closeChat()
+        } else {
+            attentive = true
+            walking = false
+            pet?.walking = false
+            showInputBar()
+        }
     }
+
+    private fun closeChat() {
+        hideKeyboard()
+        removeInputBar()
+        hideBubble()
+        attentive = false
+        pet?.mood = PetView.Mood.NEUTRAL
+        idleUntil = SystemClock.uptimeMillis() + 1500L
+    }
+
+    private fun showInputBar() {
+        if (inputBar != null) {
+            inputField?.requestFocus()
+            showKeyboard()
+            return
+        }
+
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpInt(10f), dpInt(4f), dpInt(4f), dpInt(4f))
+            setBackgroundResource(R.drawable.overlay_panel)
+        }
+
+        val field = EditText(this).apply {
+            hint = "Say something…"
+            setSingleLine(false)
+            maxLines = 3
+            textSize = 14f
+            setTextColor(0xFFE8ECF4.toInt())
+            setHintTextColor(0xFF98A2B6.toInt())
+            setBackgroundColor(Color.TRANSPARENT)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_ACTION_SEND
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_SEND) {
+                    sendMessage()
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+
+        val send = TextView(this).apply {
+            text = "Send"
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF7DD3FC.toInt())
+            setPadding(dpInt(12f), dpInt(10f), dpInt(12f), dpInt(10f))
+            setOnClickListener { sendMessage() }
+        }
+
+        bar.addView(field, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        bar.addView(send)
+
+        val params = WindowManager.LayoutParams(
+            dpInt(252f),
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            // Focusable on purpose so it can receive the IME, but not modal, so the
+            // rest of the screen keeps working while it is open.
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN or
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
+        }
+
+        inputParams = params
+        inputBar = bar
+        inputField = field
+        positionInputBar()
+
+        if (!runCatching { windowManager.addView(bar, params) }.isSuccess) {
+            inputBar = null
+            inputField = null
+            inputParams = null
+            attentive = false
+            return
+        }
+
+        field.requestFocus()
+        handler.postDelayed({ showKeyboard() }, 80L)
+    }
+
+    private fun positionInputBar() {
+        val params = inputParams ?: return
+        val bar = inputBar ?: return
+        val width = params.width
+        params.x = (posX + petW / 2f - width / 2f).toInt()
+            .coerceIn(dpInt(6f), (screenW - width - dpInt(6f)).coerceAtLeast(dpInt(6f)))
+        params.y = (posY + petH + dpInt(6f)).toInt()
+            .coerceAtMost(screenH - bottomInset - dpInt(60f))
+        runCatching { windowManager.updateViewLayout(bar, params) }
+    }
+
+    private fun removeInputBar() {
+        inputBar?.let { bar -> runCatching { windowManager.removeView(bar) } }
+        inputBar = null
+        inputField = null
+        inputParams = null
+    }
+
+    private fun sendMessage() {
+        val field = inputField ?: return
+        val text = field.text.toString().trim()
+        if (text.isEmpty()) return
+
+        field.setText("")
+        hideKeyboard()
+        Memory.append(this, "user", text)
+        attentive = true
+        pet?.mood = PetView.Mood.THINKING
+
+        AssistantBrain.reply(this, currentAppLabel) { ok, reply ->
+            handler.post {
+                if (ok) Memory.append(this, "assistant", reply)
+                showBubble(reply)
+                pet?.mood = PetView.Mood.TALKING
+                handler.postDelayed({
+                    pet?.mood = PetView.Mood.NEUTRAL
+                    // Stay put for a moment after speaking, then wander off again
+                    // unless the user is already typing the next message.
+                    handler.postDelayed({
+                        val typing = inputField?.text?.isNotEmpty() == true
+                        if (!typing) closeChat()
+                    }, 2600L)
+                }, 1400L)
+            }
+        }
+    }
+
+    private fun showBubble(text: String) {
+        hideBubble()
+
+        val view = TextView(this).apply {
+            this.text = text
+            textSize = 14f
+            setTextColor(0xFFE8ECF4.toInt())
+            setLineSpacing(dp(2f), 1f)
+            setPadding(dpInt(12f), dpInt(9f), dpInt(12f), dpInt(9f))
+            maxWidth = dpInt(232f)
+            setBackgroundResource(R.drawable.overlay_panel)
+        }
+
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(dpInt(240f), View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val width = view.measuredWidth.coerceAtLeast(dpInt(48f))
+        val height = view.measuredHeight.coerceAtLeast(dpInt(26f))
+
+        var x = (posX + petW / 2f - width / 2f).toInt()
+        x = x.coerceIn(dpInt(6f), (screenW - width - dpInt(6f)).coerceAtLeast(dpInt(6f)))
+
+        val preferred = (posY - height - dpInt(8f)).toInt()
+        // Above him if there is room, otherwise below.
+        val y = if (preferred >= topInset) {
+            preferred
+        } else {
+            (posY + petH + dpInt(8f)).toInt()
+        }
+
+        val params = WindowManager.LayoutParams(
+            width,
+            height,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            this.x = x
+            this.y = y
+        }
+
+        if (runCatching { windowManager.addView(view, params) }.isSuccess) {
+            bubble = view
+        }
+    }
+
+    private fun hideBubble() {
+        bubble?.let { view -> runCatching { windowManager.removeView(view) } }
+        bubble = null
+    }
+
+    private fun showKeyboard() {
+        val field = inputField ?: return
+        field.requestFocus()
+        val imm = getSystemService(InputMethodManager::class.java)
+        imm?.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun hideKeyboard() {
+        val field = inputField ?: return
+        val imm = getSystemService(InputMethodManager::class.java)
+        imm?.hideSoftInputFromWindow(field.windowToken, 0)
+    }
+
+    // ------------------------------------------------------------------- window
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -317,5 +588,4 @@ class OverlayService : Service() {
             )
             .build()
     }
-
 }
