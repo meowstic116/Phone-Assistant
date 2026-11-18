@@ -25,10 +25,17 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
 ## Toys
 
 Everything below is real, movable screen furniture. Drag any of it wherever you want; tap
-it to use it. Each piece is its own small overlay window, so it never blocks the app
-underneath. Bring them out from the **Toys** buttons in the app, ask him for one in chat
-("open your lemonade stand", "paint something", "let's play soccer"), or just leave the
-screen alone — he gets bored every few minutes and starts something himself.
+it to use it; **long-press it to put that one thing away**. Each piece is its own small
+overlay window, so it never blocks the app underneath, and anything that ends up under the
+chat box is nudged clear of it. Bring them out from the **Toys** buttons in the app, ask
+him for one in chat ("open your lemonade stand", "paint something", "let's play soccer"),
+or just leave the screen alone — he gets bored every few minutes and starts something
+himself.
+
+He can be sent on a break too: "no toys for half an hour", "take a break for 20 minutes",
+"not now" (which means 15 minutes), or "leave me alone for the evening" (8 hours). He puts
+everything away, sulks about it, and gets nothing out until the time is up — the break is
+saved on the device, so it survives restarting him. "You can play again" ends it early.
 
 - **Lemonade stand** — tap the stand and he pours you a glass, to a maximum of two because
   he has one jug. The glass is its own prop: tap it once to drink, tap the empty glass
@@ -63,7 +70,7 @@ so his reply matches: tell him the lemonade was bad and he will be wounded about
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.13-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.14-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
@@ -123,9 +130,11 @@ delete a bad capture. The conversation itself is still capped at the last 24 mes
   remembered facts are all appended automatically and are not part of the editable text.
 - Look and animation: `app/src/main/java/com/phoneassistant/PetView.kt`
 - Walk speed, idle timing, window size: `OverlayService.kt`
-- Toys: `Prop.kt` is the base class (one overlay window, drag, tap, `onFrame` for
-  animation and physics). Each toy lives in its own file — `Lemonade.kt`, `Painting.kt`,
-  `Soccer.kt`, `BubbleWrap.kt`, `Plant.kt` — and `Toys.kt` decides which chat messages and
-  buttons summon which one, and what he says about the result.
+- Toys: `Prop.kt` is the base class (one overlay window, drag, tap, long-press to put it
+  away, `onFrame` for animation and physics). Each toy lives in its own file —
+  `Lemonade.kt`, `Painting.kt`, `Soccer.kt`, `BubbleWrap.kt`, `Plant.kt`. `Toys.kt` is the
+  only way a toy arrives: it reads chat messages and buttons, spawns through one `summon`
+  path, and returns a note so Pip's reply matches. `Quiet.kt` remembers how long he has
+  been told to stay out of the toy box.
 
 The API key is stored only in this app's private preferences on the device.

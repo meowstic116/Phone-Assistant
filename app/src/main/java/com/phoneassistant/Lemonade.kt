@@ -73,13 +73,13 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     }
 
     /** Pours a glass, beside the stand. Returns false when there is no room for another. */
-    fun serve(announce: String?): Boolean {
+    fun serve(): Boolean {
         if (host.propsOnScreen().count { it is LemonadeGlass } >= 2) {
             host.say("that is a two-glass stand. I have one jug and a lot of pride.")
             return false
         }
 
-        val glass = LemonadeGlass(host, this)
+        val glass = LemonadeGlass(host)
         val gap = dp(5f)
         val rightRoom = host.stageWidth() - (posX + windowW)
         val x = if (rightRoom > glass.windowW + gap) {
@@ -92,13 +92,16 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         if (!glass.bring(x, y)) return false
 
         host.feel(PetView.Mood.HAPPY, 2200L)
-        host.say(announce ?: next(SERVE_LINES))
+        host.say(next(SERVE_LINES))
         return true
     }
 
     override fun onTap(x: Float, y: Float) {
-        serve(null)
+        serve()
     }
+
+    override fun putAwayLine(): String =
+        "putting the stand away. this business was doomed anyway. no one was paying."
 
     override fun describe(): String {
         val glasses = host.propsOnScreen().count { it is LemonadeGlass }
@@ -125,7 +128,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
  * One glass. First tap drinks it (and Pip takes it personally if you don't finish),
  * second tap clears the empty glass away.
  */
-class LemonadeGlass(host: PropHost, private val stand: LemonadeStand?) : Prop(host) {
+class LemonadeGlass(host: PropHost) : Prop(host) {
 
     override val boxW = 48f
     override val boxH = 68f
@@ -211,6 +214,9 @@ class LemonadeGlass(host: PropHost, private val stand: LemonadeStand?) : Prop(ho
 
     override fun describe(): String =
         if (drunk) "an empty lemonade glass" else "a full glass of Pip's lemonade"
+
+    override fun putAwayLine(): String =
+        if (drunk) "fine, I'll take the glass back." else "you're wasting my lemonade. noted. deeply noted."
 
     companion object {
         val SIP_LINES = listOf(

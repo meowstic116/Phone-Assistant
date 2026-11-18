@@ -86,7 +86,14 @@ class OverlayService : Service(), PropHost {
         }
 
         /** Main-screen buttons: put one of Pip's toys on the screen. */
-        fun bringOut(toy: Toy): Boolean = instance?.let { Toys.summon(it, toy) } ?: false
+        fun bringOut(toy: Toy): Boolean {
+            val service = instance ?: return false
+            if (Quiet.active(service)) {
+                service.sayAloud("I'm on a break. you asked. I'm honouring it. resentfully.")
+                return false
+            }
+            return Toys.summon(service, toy).ok
+        }
 
         /** What is out on the screen right now, for the prompt. Empty when nothing is. */
         fun toysOnStage(): String = instance?.let { Toys.summary(it) } ?: ""
@@ -317,6 +324,7 @@ class OverlayService : Service(), PropHost {
         prop.params = params
         if (!runCatching { windowManager.addView(prop, params) }.isSuccess) return false
         props += prop
+        keepBarClear()
         return true
     }
 
@@ -825,6 +833,36 @@ class OverlayService : Service(), PropHost {
         params.y = (posY + petH + dpInt(6f)).toInt()
             .coerceAtMost(screenH - bottomInset - dpInt(60f))
         runCatching { windowManager.updateViewLayout(bar, params) }
+        keepBarClear()
+    }
+
+    /**
+     * Nothing may sit on top of the chat box. Props that end up under it are nudged clear,
+     * to whichever side of the box they are already nearest; each nudge resolves the
+     * overlap, so this settles instead of shoving things around every frame.
+     */
+    private fun keepBarClear() {
+        val params = inputParams ?: return
+        val barHeight = (inputBar?.height ?: 0).coerceAtLeast(dpInt(48f))
+        val left = params.x.toFloat()
+        val right = left + params.width
+        val top = params.y.toFloat()
+        val bottom = top + barHeight
+
+        fun under(prop: Prop): Boolean =
+            prop.posX < right && prop.posX + prop.windowW > left &&
+                prop.posY < bottom && prop.posY + prop.windowH > top
+
+        props.toList().forEach { prop ->
+            if (!under(prop)) return@forEach
+            val above = top - prop.windowH - dp(10f)
+            val below = bottom + dp(10f)
+            val preferAbove = prop.centreY < top + barHeight / 2f
+            prop.moveTo(prop.posX, if (preferAbove) above else below)
+            if (under(prop)) {
+                prop.moveTo(prop.posX, if (preferAbove) below else above)
+            }
+        }
     }
 
     private fun removeInputBar() {

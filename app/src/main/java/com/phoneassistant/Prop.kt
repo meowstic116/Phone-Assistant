@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -50,7 +51,6 @@ object Ink {
     const val DIM = 0xFF98A2B6.toInt()
     const val LEMON = 0xFFF6C445.toInt()
     const val WOOD = 0xFFB98A5E.toInt()
-    const val GRASS = 0xFF6FBF73.toInt()
     const val ALERT = 0xFFF2796B.toInt()
 }
 
@@ -86,6 +86,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     private var lastRawX = 0f
     private var lastRawY = 0f
     private var travelled = false
+    private var downAt = 0L
 
     private val touch = View.OnTouchListener { _, event ->
         when (event.actionMasked) {
@@ -95,6 +96,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
                 lastRawX = event.rawX
                 lastRawY = event.rawY
                 travelled = false
+                downAt = SystemClock.uptimeMillis()
                 true
             }
 
@@ -113,7 +115,11 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
             }
 
             MotionEvent.ACTION_UP -> {
-                if (travelled) onDragFinished() else onTap(event.x, event.y)
+                when {
+                    travelled -> onDragFinished()
+                    SystemClock.uptimeMillis() - downAt > LONG_PRESS_MS -> putAway()
+                    else -> onTap(event.x, event.y)
+                }
                 travelled = false
                 true
             }
@@ -153,6 +159,18 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     /** Called when the user finishes dragging this prop somewhere else. */
     protected open fun onDragFinished() {}
 
+    /** Return true to handle the long press yourself — a whole game, for instance. */
+    protected open fun onPutAway(): Boolean = false
+
+    /** What Pip says when this is long-pressed away. */
+    protected open fun putAwayLine(): String = "okay, that's going away. I'll be here."
+
+    private fun putAway() {
+        if (onPutAway()) return
+        host.dropProp(this)
+        host.say(putAwayLine())
+    }
+
     /** Called about 30 times a second, for toys with physics or things to grow. */
     open fun onFrame() {}
 
@@ -162,6 +180,10 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     /** How far this prop has been moved from where it started, in dp. */
     protected fun drift(startX: Float, startY: Float): Float =
         hypot(abs(posX - startX), abs(posY - startY)) / density
+
+    private companion object {
+        const val LONG_PRESS_MS = 450L
+    }
 
     protected fun fill(color: Int): Paint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }

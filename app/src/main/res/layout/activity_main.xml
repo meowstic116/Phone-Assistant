@@ -81,7 +81,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Bring something out on the screen. You can also just ask him for it — “open your lemonade stand”, “let's play soccer”, “paint something”."
+            android:text="Bring something out on the screen. You can also just ask him for it — “open your lemonade stand”, “let's play soccer”, “paint something”. Long-press a toy to put it away, or tell him “no toys for half an hour”."
             android:textColor="@color/textDim"
             android:textSize="13sp" />
 
