@@ -11,14 +11,13 @@ import android.view.accessibility.AccessibilityWindowInfo
  *
  * A floating overlay window is never sent the IME inset unless the keyboard was raised for it,
  * which is why a probe window cannot see someone else's typing. This asks the accessibility
- * framework instead, which knows about every window on the display. It reads window type,
- * visibility and bounds only — never any window's contents, and it never acts on any event.
+ * framework instead, which knows about every window on the display. It reads window type and
+ * bounds only — never any window's contents, and it never acts on any event.
  */
 class ImeWatcher : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        ImeWatch.connected = true
         refresh()
     }
 
@@ -30,13 +29,11 @@ class ImeWatcher : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         ImeWatch.publish(0)
-        ImeWatch.connected = false
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
         ImeWatch.publish(0)
-        ImeWatch.connected = false
         super.onDestroy()
     }
 
@@ -69,8 +66,6 @@ class ImeWatcher : AccessibilityService() {
  * there and whoever listens is expected to hop to the main looper.
  */
 object ImeWatch {
-
-    @Volatile var connected = false
 
     /** Keyboard height in pixels, 0 when none is up or the service is not switched on. */
     @Volatile var heightPx = 0
