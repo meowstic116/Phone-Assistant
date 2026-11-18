@@ -17,6 +17,10 @@ your other apps, and talks back.
 A prebuilt debug APK is committed at `dist/phone-assistant-0.1-debug.apk` if you just want
 to sideload it without building.
 
+Later builds are published as GitHub **Releases** with the APK attached, rather than being
+committed, so the git history does not grow by ~840 KB per build. `dist/` is gitignored for
+that reason.
+
 1. Build and install: `./gradlew installDebug` (or open in Android Studio and Run).
 2. On the setup screen, grant **Display over other apps**, **Usage access**, and
    **Notifications**.
