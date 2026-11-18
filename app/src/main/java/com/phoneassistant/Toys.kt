@@ -219,8 +219,12 @@ object Toys {
 
         return when (toy) {
             Toy.LEMONADE -> {
-                val stand = out.filterIsInstance<LemonadeStand>().firstOrNull()
-                    ?: openStand(host)
+                val existing = out.filterIsInstance<LemonadeStand>().firstOrNull()
+                val stand = existing ?: openStand(host)
+                // A stand that is already out may have been dragged, or he may have wandered
+                // off since it opened: take the counter post again so he is always behind it
+                // when he pours, not serving from whatever spot he happened to be in.
+                if (existing != null) existing.takePost(say = false)
                 when {
                     stand == null -> Outcome(
                         false,
