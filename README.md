@@ -77,7 +77,8 @@ from work" leaves the lemonade stand alone.
   it on the screen. Tap the painting to hear his artist's statement, or ask him about it.
 - **Soccer** — goals at the top and bottom of the pitch, a ball in the middle, and a score
   pill. If a keyboard is showing when the game starts, the pitch fits above it rather than
-  putting his goal behind it, and it re-fits once that keyboard has gone. Tap the ball to
+  putting his goal behind it, and it re-fits once that keyboard has gone — but only if the
+  ball is provably untouched, since a goal line must never move under a ball in play. Tap the ball to
   boot it at Pip's goal (tap left or right of the middle to angle it);
   he walks over and kicks it back at yours. First to three or ninety seconds, and he
   announces the result either way. The goals are draggable, which he notices: he calls it
@@ -122,7 +123,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.46-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.47-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

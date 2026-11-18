@@ -72,6 +72,10 @@ class SoccerGame(private val host: PropHost) {
     private var pitchTop = 0f
     private var pitchBottom = 0f
 
+    /** Where the ball sat when the game began, to prove it has not been touched since. */
+    private var ballHomeX = 0f
+    private var ballHomeY = 0f
+
     private var paused = false
     private var cheats = 0
     private var startedAt = 0L
@@ -89,11 +93,16 @@ class SoccerGame(private val host: PropHost) {
 
         fitPitch()
         layOut()
+        ballHomeX = ball.posX
+        ballHomeY = ball.posY
         // His own chat box's keyboard may still be on its way out, which would leave the
-        // pitch short. Fit it again once that has gone — but only while the ball is still
-        // where it was put, so no goal line can move under a ball in play.
+        // pitch short. One chance to grow it back, and only if the ball is provably where
+        // it was put: not kicked, not dragged, not drifting. If that cannot be shown the
+        // re-fit is dropped rather than risked later.
         ui.postDelayed({
-            if (!over && ball.atRest() && youScore == 0 && pipScore == 0) refitPitch()
+            val untouched = !ball.kicked && ball.atRest() &&
+                abs(ball.posX - ballHomeX) < 1f && abs(ball.posY - ballHomeY) < 1f
+            if (!over && !paused && untouched) refitPitch()
         }, 800L)
 
         host.say("first to three. tap the ball at my goal. I'll defend, badly.")
@@ -114,8 +123,9 @@ class SoccerGame(private val host: PropHost) {
         layOut()
     }
 
-    fun pitchTop(): Float = pitchTop
-    fun pitchFloor(): Float = pitchBottom
+    /** The pitch's edges, for the ball's own physics. */
+    fun pitchTopY(): Float = pitchTop
+    fun pitchFloorY(): Float = pitchBottom
 
     private fun layOut() {
         val w = host.stageWidth().toFloat()
@@ -338,6 +348,10 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
     private var lastAt = SystemClock.uptimeMillis()
     private var spin = 0f
 
+    /** True once anyone has kicked it: the pitch must not move under a ball in play. */
+    var kicked = false
+        private set
+
     var restingSince = 0L
         private set
 
@@ -348,6 +362,7 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
     fun atRest(): Boolean = !moving
 
     fun kick(up: Boolean, aim: Float, power: Float) {
+        kicked = true
         vy = if (up) -power else power
         vx = aim * power * 0.6f
         moving = true
@@ -357,7 +372,7 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
     fun reset() {
         moveTo(
             host.stageWidth() / 2f - windowW / 2f,
-            (game.pitchTop() + game.pitchFloor()) / 2f - windowH / 2f
+            (game.pitchTopY() + game.pitchFloorY()) / 2f - windowH / 2f
         )
         vx = 0f
         vy = 0f
@@ -425,8 +440,8 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
             return
         }
 
-        val topEdge = game.pitchTop()
-        val floorY = game.pitchFloor() - windowH
+        val topEdge = game.pitchTopY()
+        val floorY = game.pitchFloorY() - windowH
         if (ny <= topEdge) {
             ny = topEdge
             vy = -vy * 0.7f
