@@ -6,7 +6,3 @@ local.properties
 *.iml
 .DS_Store
 captures/
-
-# Built APKs are published as GitHub Releases, not committed, to keep history small.
-# The first build (0.1) stays tracked so there is something to sideload immediately.
-dist/

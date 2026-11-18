@@ -14,10 +14,12 @@ your other apps, and talks back.
 
 ## Setup on the phone
 
-A prebuilt APK is committed at `dist/phone-assistant-0.1-debug.apk` if you just want to
-sideload it without building. Newer builds are published as GitHub **Releases** with the
-APK attached, rather than committed, so git history does not grow by ~800 KB per build.
-`dist/` is gitignored for that reason.
+The current build is committed at `dist/phone-assistant-0.3-debug.apk` if you just want to
+sideload it without building. Each new build replaces the file in `dist/`, so there is
+always exactly one APK to grab — easiest thing to download from a phone.
+
+Tagged builds are also published as GitHub Releases by
+`.github/workflows/release.yml`, which is what the in-app update check looks at.
 
 1. Build and install: `./gradlew installDebug` (or open in Android Studio and Run).
 2. On the setup screen, grant **Display over other apps**, **Usage access**, and
