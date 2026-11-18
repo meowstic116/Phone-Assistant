@@ -26,7 +26,6 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     private val tiny = text(0xFF6B4A2C.toInt(), 6.5f)
     private val slicePaint = fill(0xFFFFF1A8.toInt())
 
-
     /** Glasses promised and not yet poured, capped at what the stand can hold. */
     private var owed = 0
 

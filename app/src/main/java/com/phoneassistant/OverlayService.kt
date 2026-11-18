@@ -64,7 +64,7 @@ class OverlayService : Service(), PropHost {
         private const val REPLY_HOLD_MS = 4_000L
 
         /** How long a spoken line keeps him standing there before he gets on with things. */
-        private const val SPEAKING_HOLD_MS = 3_500L
+        private const val SPEAKING_PAUSE_MS = 3_500L
 
         /** How long a toy stays out before he has had enough of it. */
         private const val TOY_LIFE_MS = 4 * 60_000L
@@ -118,6 +118,7 @@ class OverlayService : Service(), PropHost {
         fun startBreak(ms: Long): Boolean {
             val service = instance ?: return false
             Toys.clearAll(service)
+            service.resetToIdle()
             Quiet.start(service, ms)
             service.feel(PetView.Mood.ANNOYED, 4000L)
             service.sayAloud("break time. *puts the tools down* I'll be here, being patient.")
@@ -136,6 +137,9 @@ class OverlayService : Service(), PropHost {
         fun tidyUp(): Boolean {
             val service = instance ?: return false
             Toys.clearAll(service)
+            // Dropping the props does not touch his walk, so tidy up resets it itself: the
+            // place he was heading for is gone with them.
+            service.resetToIdle()
             return true
         }
     }
@@ -178,21 +182,6 @@ class OverlayService : Service(), PropHost {
     private var awaitingReply = false
     private var replyAskedAt = 0L
     private var replyUntil = 0L
-
-    /** True while the pause after a spoken line is his own, not a chat bar or a painting's. */
-    private var speakingHold = false
-
-    /**
-     * Ends the pause a line claimed. Skipped when something else is holding his attention: a
-     * chat bar he is sitting under, or a canvas he is sitting at.
-     */
-    private val endSpeakingHold = Runnable {
-        speakingHold = false
-        if (inputBar == null && pet?.sitting != true) {
-            attentive = false
-            idleUntil = SystemClock.uptimeMillis() + 1200L
-        }
-    }
 
     /**
      * One-shot work waiting at that post — a lemonade to pour. Kept here rather than on the
@@ -419,6 +408,29 @@ class OverlayService : Service(), PropHost {
         post = null
         postArrival = null
         idleUntil = SystemClock.uptimeMillis() + 1500L
+    }
+
+    /**
+     * Puts him back on his own feet with nothing outstanding: not paying attention, not
+     * walking, no target left over from a walk, no arrival still owed to a toy, not sitting.
+     * Clearing the screen has to do this itself, because a dropped prop takes its window and
+     * its post with it but leaves every one of those fields exactly as it found them.
+     */
+    private fun resetToIdle() {
+        // Nothing owns a post any more either, so that release lives in one place.
+        petRelease()
+        // A chat bar he opened outranks this: it holds his attention itself, and clears it
+        // when it closes.
+        if (inputBar == null) attentive = false
+        walking = false
+        toyWalk = false
+        relocating = false
+        arrive = null
+        targetX = posX
+        targetY = posY
+        pet?.walking = false
+        pet?.sitting = false
+        idleUntil = SystemClock.uptimeMillis() + 1200L
     }
 
     /** Called by toys only, so every walk from here is one he has been sent on. */
@@ -841,22 +853,17 @@ class OverlayService : Service(), PropHost {
 
     private fun sayAloud(text: String) {
         hideThinking()
-        // He stands still for the line, then gets on with his own business. This pause used
-        // to be permanent, so any toy line or break line left him rooted to the spot until
-        // something else happened to move him.
-        if (!attentive) {
-            attentive = true
-            speakingHold = true
-        }
-        handler.removeCallbacks(endSpeakingHold)
-        if (speakingHold) handler.postDelayed(endSpeakingHold, SPEAKING_HOLD_MS)
-        // A walk a toy sent him on survives the line he says on the way, so a reply cannot
-        // pull him out from behind the lemonade stand. Ordinary wandering still stops here:
-        // he should not be scampering off while he is talking to you.
+        // Speaking is a pause, not attention. Attention belongs to the chat bar and to sitting
+        // at his easel; claiming it here is what used to root him to the spot, because nothing
+        // ever gave it back.
+        //
+        // A walk a toy sent him on survives the line he says on the way, so a reply cannot pull
+        // him out from behind the lemonade stand. Ordinary wandering stops for the pause.
         if (!toyWalk) {
             walking = false
             pet?.walking = false
         }
+        idleUntil = SystemClock.uptimeMillis() + SPEAKING_PAUSE_MS
         showBubble(text)
         // Being smug or annoyed outranks talking: he wants you to see his face.
         val mood = pet?.mood
