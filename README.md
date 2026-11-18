@@ -13,13 +13,15 @@ your other apps, and talks back.
 - A **Chat history** screen shows the whole conversation and lets you keep talking from
   there; replies still appear in his overlay bubble, which floats above the chat.
 - A **Personality** screen shows the full prompt that defines him, and lets you rewrite it.
+- A **Memory** screen lists the facts he keeps between conversations, and lets you add or
+  delete them.
 - It knows which app you are in (via Usage Access) and can reference it. It never reads
   screen contents.
 - Drag it anywhere. It lives in a foreground service with a persistent notification.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.7-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.8-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
@@ -62,6 +64,14 @@ git push origin v0.3
 
 `.github/workflows/release.yml` builds the APK and publishes it on a GitHub Release, so
 binaries never enter git history.
+
+## Memory
+
+Pip keeps short notes about you between conversations. They are pulled out locally by
+pattern matching — "my name is …", "I'm working on …", "I like …", "I live in …", and
+anything said after "remember" — so remembering costs no extra API calls. The notes are
+appended to the prompt, and the **Memory** screen shows every one of them so you can
+delete a bad capture. The conversation itself is still capped at the last 24 messages.
 
 ## Changing the character
 

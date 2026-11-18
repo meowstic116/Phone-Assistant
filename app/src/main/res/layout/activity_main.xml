@@ -65,6 +65,15 @@
             android:text="Personality"
             android:textColor="@color/text" />
 
+        <Button
+            android:id="@+id/memoryButton"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/surfaceAlt"
+            android:text="Memory"
+            android:textColor="@color/text" />
+
         <TextView
             style="@style/SectionHeader"
             android:text="UPDATES" />

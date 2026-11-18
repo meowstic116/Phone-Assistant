@@ -72,6 +72,10 @@ class MainActivity : Activity() {
             startActivity(Intent(this, PersonaActivity::class.java))
         }
 
+        findViewById<Button>(R.id.memoryButton).setOnClickListener {
+            startActivity(Intent(this, MemoryActivity::class.java))
+        }
+
         updateStatus = findViewById(R.id.updateStatus)
         updateButton = findViewById(R.id.updateButton)
         updateButton.setOnClickListener {

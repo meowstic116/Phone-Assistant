@@ -72,14 +72,21 @@ object Persona {
     fun isCustomised(ctx: Context): Boolean =
         !prefs(ctx).getString(KEY, null).isNullOrBlank()
 
-    /** Instructions plus the live context, which is not part of the editable text. */
+    /** Instructions plus live context and remembered facts, neither of which is editable. */
     fun systemPrompt(ctx: Context, appLabel: String?): String {
         val where = if (appLabel != null) {
             "They currently have $appLabel open."
         } else {
             "You do not know which app they are in right now."
         }
-        return instructions(ctx).trimEnd() + "\n\nCURRENT CONTEXT\n- " + where
+        val facts = Facts.promptBlock(ctx)
+        return buildString {
+            append(instructions(ctx).trimEnd())
+            append("\n\nCURRENT CONTEXT\n- ").append(where)
+            if (facts.isNotEmpty()) {
+                append("\n\n").append(facts)
+            }
+        }
     }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

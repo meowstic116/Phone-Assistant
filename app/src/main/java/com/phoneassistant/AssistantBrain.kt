@@ -51,6 +51,13 @@ object AssistantBrain {
         val appContext = ctx.applicationContext
         val config = config(appContext)
         val history = Memory.history(appContext)
+
+        // Pull durable facts out of the newest message before building the prompt, so
+        // he can use something the user just told him in the very same reply.
+        history.lastOrNull { it.role == "user" }?.let {
+            Facts.rememberFromMessage(appContext, it.content)
+        }
+
         val systemPrompt = Persona.systemPrompt(appContext, appLabel)
 
         executor.execute {
