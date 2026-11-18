@@ -58,6 +58,27 @@
 
         <TextView
             style="@style/SectionHeader"
+            android:text="UPDATES" />
+
+        <TextView
+            android:id="@+id/updateStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Checking for updates…"
+            android:textColor="@color/textDim"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/updateButton"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/surfaceAlt"
+            android:text="Check for updates"
+            android:textColor="@color/text" />
+
+        <TextView
+            style="@style/SectionHeader"
             android:text="BRAIN" />
 
         <TextView

@@ -22,6 +22,9 @@ class MainActivity : Activity() {
     private lateinit var baseUrlField: EditText
     private lateinit var apiKeyField: EditText
     private lateinit var modelField: EditText
+    private lateinit var updateStatus: TextView
+    private lateinit var updateButton: Button
+    private var availableRelease: UpdateChecker.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,6 +68,19 @@ class MainActivity : Activity() {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey")))
         }
 
+        updateStatus = findViewById(R.id.updateStatus)
+        updateButton = findViewById(R.id.updateButton)
+        updateButton.setOnClickListener {
+            val release = availableRelease
+            val target = release?.downloadUrl ?: release?.pageUrl
+            if (release != null && !target.isNullOrBlank()) {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
+            } else {
+                checkForUpdates()
+            }
+        }
+        checkForUpdates()
+
         askForNotifications()
     }
 
@@ -80,6 +96,32 @@ class MainActivity : Activity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         refresh()
+    }
+
+    private fun checkForUpdates() {
+        updateButton.isEnabled = false
+        updateStatus.text = "Checking for updates…"
+        updateButton.text = "Check for updates"
+        availableRelease = null
+
+        UpdateChecker.check(this) { result ->
+            runOnUiThread {
+                updateButton.isEnabled = true
+                if (result == null) {
+                    updateStatus.text = "Couldn't reach GitHub"
+                } else if (result.version.isBlank()) {
+                    updateStatus.text = "No releases published yet (installed " +
+                        result.currentVersion + ")"
+                } else if (result.newer) {
+                    availableRelease = result
+                    updateStatus.text = "Update available: " + result.version +
+                        " (installed " + result.currentVersion + ")"
+                    updateButton.text = "Download " + result.version
+                } else {
+                    updateStatus.text = "Up to date (" + result.currentVersion + ")"
+                }
+            }
+        }
     }
 
     private fun startAssistant() {
