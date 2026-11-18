@@ -43,9 +43,9 @@ bubble, from a local list of lines, so it costs no API call and feels like he wa
 waiting. The timer is checked against the real deadline the moment the screen comes back on,
 so a phone asleep through the end of a break still gets told about it immediately rather than
 whenever the sleeping timer wakes up, and an announcement he never got to make is remembered
-on disk — if Android kills the service mid-break he still says it when he comes back. The app shows a live countdown under the Toys buttons while a break is on, next to
-an **End break** button that cuts it short and gets him talking again. "You can play again"
-does the same from chat. Phrases only count when they are aimed at him, so "I need a break
+on disk — if Android kills the service mid-break he still says it when he comes back. The app can start one too — **Give Pip a break** offers 15 minutes, 30, an hour or two —
+and while a break is on it shows a live countdown next to an **End break** button that cuts
+it short and gets him talking again. "You can play again" does the same from chat. Phrases only count when they are aimed at him, so "I need a break
 from work" leaves the lemonade stand alone.
 
 - **Lemonade stand** — tap the stand and he pours you a glass, to a maximum of two because
@@ -81,7 +81,7 @@ so his reply matches: tell him the lemonade was bad and he will be wounded about
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.19-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.20-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

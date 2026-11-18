@@ -2,6 +2,7 @@ package com.phoneassistant
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -94,6 +95,7 @@ class MainActivity : Activity() {
             if (!OverlayService.endBreak()) Quiet.clear(this)
             showBreakStatus()
         }
+        findViewById<Button>(R.id.breakButton).setOnClickListener { askBreakLength() }
         buildToyButtons()
 
         updateStatus = findViewById(R.id.updateStatus)
@@ -121,6 +123,20 @@ class MainActivity : Activity() {
     override fun onPause() {
         breakStatus.removeCallbacks(breakTicker)
         super.onPause()
+    }
+
+    /** Sends him on a break from the main screen, with the usual lengths to pick from. */
+    private fun askBreakLength() {
+        val labels = arrayOf("15 minutes", "30 minutes", "1 hour", "2 hours")
+        val minutes = longArrayOf(15L, 30L, 60L, 120L)
+        AlertDialog.Builder(this)
+            .setTitle("How long should Pip take a break?")
+            .setItems(labels) { _, which ->
+                val ms = minutes[which] * 60_000L
+                if (!OverlayService.startBreak(ms)) Quiet.start(this, ms)
+                showBreakStatus()
+            }
+            .show()
     }
 
     /** Shows exactly how long Pip has left on a toy break, or hides the line when he is free. */

@@ -90,15 +90,29 @@ class OverlayService : Service(), PropHost {
         /** Main-screen buttons: put one of Pip's toys on the screen. */
         fun bringOut(toy: Toy): Boolean {
             val service = instance ?: return false
-            if (Quiet.active(service)) {
+            // Whether toys are allowed is decided in one place; this only adds his protest
+            // when the reason is the break.
+            val outcome = Toys.summon(service, toy)
+            if (!outcome.ok && Quiet.active(service)) {
                 service.sayAloud("I'm on a break. you asked. I'm honouring it. resentfully.")
-                return false
             }
-            return Toys.summon(service, toy).ok
+            return outcome.ok
         }
 
         /** What is out on the screen right now, for the prompt. Empty when nothing is. */
         fun toysOnStage(): String = instance?.let { Toys.summary(it) } ?: ""
+
+        /** Main-screen button: send Pip on a break of the given length. */
+        fun startBreak(ms: Long): Boolean {
+            val service = instance ?: return false
+            Toys.clearAll(service)
+            Quiet.start(service, ms)
+            service.feel(PetView.Mood.ANNOYED, 4000L)
+            service.sayAloud(
+                "fine. break time. I'll be here, not making anything, being extremely patient."
+            )
+            return true
+        }
 
         /** Main-screen button: cut a toy break short. */
         fun endBreak(): Boolean {
@@ -220,11 +234,9 @@ class OverlayService : Service(), PropHost {
         // A restarted service should know whether anyone is actually looking.
         paused = getSystemService(PowerManager::class.java)?.isInteractive != true
 
-        // Every start, extension and early end re-arms his wake-up for the new deadline.
-        Quiet.onChanged = { armBreakTimer() }
-        armBreakTimer()
-        // A break may have run out while he was dead: that line is still owed.
-        if (Quiet.owed(this)) breakOverPending = true
+        // Every start, extension and early end reconciles the timer with the new deadline.
+        Quiet.onChanged = { settleBreak() }
+        settleBreak()
 
         petParams = WindowManager.LayoutParams(
             petW,
@@ -360,61 +372,38 @@ class OverlayService : Service(), PropHost {
     // --------------------------------------------------------------- toy break
 
     /** Fires once, at the deadline of the break that was running when it was posted. */
-    private val breakAlarm = Runnable { breakEnded() }
-
-    /** A break ended while the screen was off, so the line waits for them to look. */
-    private var breakOverPending = false
-
-    /** A break was running when the timer was last armed, and nothing has been said yet. */
-    private var breakArmed = false
+    private val breakAlarm = Runnable { settleBreak() }
 
     /**
-     * Schedules a single wake-up for the exact end of the break, rather than polling for it
-     * thirty times a second. Called on start, on every change, and when he is created.
+     * Reconciles the stored break with the clock, and is the only place that does: arm a
+     * timer for whatever is left, or pay the line for a deadline that has passed. The
+     * deadline on disk is the single source of truth, so nothing here needs a flag — a
+     * restart, or a phone that slept through the end, is just another call.
+     *
+     * Called on creation, on every change to the break, when the alarm fires, and when the
+     * screen comes back.
      */
-    private fun armBreakTimer() {
-        handler.removeCallbacks(breakAlarm)
-        val left = Quiet.remaining(this)
-        breakArmed = left > 0L
-        if (!breakArmed) return
-        handler.postDelayed(breakAlarm, left + 500L)
-    }
-
-    /**
-     * Handler delays count awake time, so a phone that sleeps through the deadline wakes
-     * with the timer still pending and the line arrives late. Check the wall clock the
-     * moment the screen is back, and re-arm for whatever is genuinely left.
-     */
-    private fun onScreenAwake() {
+    private fun settleBreak() {
         handler.removeCallbacks(breakAlarm)
         val left = Quiet.remaining(this)
         if (left > 0L) {
-            breakArmed = true
             handler.postDelayed(breakAlarm, left + 500L)
             return
         }
-        if (!breakArmed && !breakOverPending && !Quiet.owed(this)) return
+        // Owed, but a bubble said to a dark or locked phone would expire unseen.
+        if (!Quiet.owed(this) || !screenUsable()) return
         announceBreakOver()
     }
 
-    private fun breakEnded() {
-        val left = Quiet.remaining(this)
-        if (left > 0L) {
-            // It was extended while this wake-up was waiting: sit out the rest of it.
-            handler.postDelayed(breakAlarm, left + 500L)
-            return
-        }
-        if (paused) {
-            // Screen is off: a bubble now would expire unseen. Say it when they look.
-            breakOverPending = true
-            return
-        }
-        announceBreakOver()
+    /** Whether anything said right now would actually be seen. */
+    private fun screenUsable(): Boolean {
+        if (paused) return false
+        val keyguard = getSystemService(KeyguardManager::class.java)
+        return keyguard?.isKeyguardLocked != true
     }
 
     private fun announceBreakOver() {
-        breakArmed = false
-        breakOverPending = false
+        // Marked first: a restart mid-sentence must not repeat him forever.
         Quiet.markSaid(this)
         sayAloud(Toys.BREAK_OVER_LINES.random())
         feel(PetView.Mood.HAPPY, 3000L)
@@ -440,13 +429,6 @@ class OverlayService : Service(), PropHost {
         // Toys animate and run their own physics whether or not he is paying attention.
         if (props.isNotEmpty()) {
             props.toList().forEach { prop -> runCatching { prop.onFrame() } }
-        }
-
-        // A break that ended while the screen was off gets announced now they are looking,
-        // but never behind the lock screen.
-        if (breakOverPending) {
-            val keyguard = getSystemService(KeyguardManager::class.java)
-            if (keyguard?.isKeyguardLocked != true) announceBreakOver()
         }
 
         watchCountdown += frameMs
@@ -1038,14 +1020,12 @@ class OverlayService : Service(), PropHost {
                     paused = true
                     pet?.walking = false
                 }
-                Intent.ACTION_SCREEN_ON -> {
+                // Awake or unlocked: check the real deadline, since the timer sleeps with
+                // the phone. A locked one is skipped here and caught by USER_PRESENT.
+                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
                     paused = false
-                    // On a locked phone the bubble would sit behind the keyguard, so wait
-                    // for the unlock instead of talking to the room.
-                    val keyguard = getSystemService(KeyguardManager::class.java)
-                    if (keyguard?.isKeyguardLocked != true) onScreenAwake()
+                    settleBreak()
                 }
-                Intent.ACTION_USER_PRESENT -> onScreenAwake()
             }
         }
     }
