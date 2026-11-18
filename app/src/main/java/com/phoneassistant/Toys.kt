@@ -132,6 +132,14 @@ object Toys {
         if (setsUp && (text.contains("your stand") || text.contains("the stand"))) {
             return Toy.LEMONADE
         }
+        // "pour me a glass", "pour a glass": how they actually ask. Only when pour opens the
+        // message, there is something to pour into, and it is a short order — so a story like
+        // "pour the milk into a glass" does not open the stand.
+        val count = text.trim().split(Regex("\\s+")).size
+        val pourFirst = Regex("^pour\\b").containsMatchIn(text)
+        val intoGlass = text.contains("glass") || text.contains("drink")
+        val addressed = count <= 4 || text.contains(" me ") || text.contains(" us ")
+        if (pourFirst && intoGlass && addressed) return Toy.LEMONADE
         return null
     }
 
@@ -151,7 +159,7 @@ object Toys {
             return true
         }
         // "clean up your stand", "tidy the toys": a cleanup verb aimed at something of his.
-        val cleaning = Regex("\\b(clean|tidy|bin|chuck|close|shut)\\b").containsMatchIn(text)
+        val cleaning = Regex("\\b(clean|clear|tidy|bin|chuck|close|shut)\\b").containsMatchIn(text)
         return cleaning && cleanTargets.containsMatchIn(text)
     }
 
