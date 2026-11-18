@@ -44,10 +44,17 @@ object AssistantBrain {
     }
 
     /**
-     * Replies to the last message in [Memory]. The callback fires on a background
-     * thread and receives (success, text).
+     * Replies to the last message in [Memory]. [stage] is what is on the screen right
+     * now and [event] is anything that just happened because of the message. The callback
+     * fires on a background thread and receives (success, text).
      */
-    fun reply(ctx: Context, appLabel: String?, onDone: (Boolean, String) -> Unit) {
+    fun reply(
+        ctx: Context,
+        appLabel: String?,
+        stage: String? = null,
+        event: String? = null,
+        onDone: (Boolean, String) -> Unit
+    ) {
         val appContext = ctx.applicationContext
         val config = config(appContext)
         val history = Memory.history(appContext)
@@ -58,7 +65,7 @@ object AssistantBrain {
             Facts.rememberFromMessage(appContext, it.content)
         }
 
-        val systemPrompt = Persona.systemPrompt(appContext, appLabel)
+        val systemPrompt = Persona.systemPrompt(appContext, appLabel, stage, event)
 
         executor.execute {
             val result = try {

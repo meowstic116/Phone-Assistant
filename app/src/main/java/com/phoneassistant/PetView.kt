@@ -14,7 +14,7 @@ import android.view.View
  */
 class PetView(context: android.content.Context) : View(context), Choreographer.FrameCallback {
 
-    enum class Mood { NEUTRAL, HAPPY, SLEEPY, THINKING, TALKING }
+    enum class Mood { NEUTRAL, HAPPY, SLEEPY, THINKING, TALKING, SMUG, ANNOYED }
 
     var mood: Mood = Mood.NEUTRAL
         set(value) {
@@ -31,6 +31,15 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         }
 
     var facingRight: Boolean = true
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    /** Plopped down on the floor with a canvas, legs folded. */
+    var sitting: Boolean = false
         set(value) {
             if (field != value) {
                 field = value
@@ -99,21 +108,39 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         val groundY = height - dp(2f)
         val cx = width / 2f
 
-        val bob = if (walking) kotlin.math.abs(kotlin.math.sin(t * 9f)) * dp(2.4f) else kotlin.math.sin(t * 2.1f) * dp(1.1f)
-        val tilt = if (walking) kotlin.math.sin(t * 9f) * 5f else kotlin.math.sin(t * 1.3f) * 1.4f
-        val bodyCenterY = groundY - legH - bodyH / 2f - bob
+        val bob = when {
+            sitting -> 0f
+            walking -> kotlin.math.abs(kotlin.math.sin(t * 9f)) * dp(2.4f)
+            else -> kotlin.math.sin(t * 2.1f) * dp(1.1f)
+        }
+        val tilt = when {
+            sitting -> 0f
+            walking -> kotlin.math.sin(t * 9f) * 5f
+            else -> kotlin.math.sin(t * 1.3f) * 1.4f
+        }
+        val bodyCenterY = if (sitting) {
+            groundY - dp(13f) - bodyH / 2f
+        } else {
+            groundY - legH - bodyH / 2f - bob
+        }
 
-        // Stubby legs, alternating while walking.
-        val stepPhase = if (walking) kotlin.math.sin(t * 9f) else 0f
-        val legW = dp(7f)
-        val legTop = groundY - legH - bob
-        val leftLift = if (walking) maxOf(0f, stepPhase) * dp(3.5f) else 0f
-        val rightLift = if (walking) maxOf(0f, -stepPhase) * dp(3.5f) else 0f
+        if (sitting) {
+            // Folded legs: just a flat little puddle under him.
+            bodyRect.set(cx - dp(24f), groundY - dp(8f), cx + dp(24f), groundY)
+            canvas.drawRoundRect(bodyRect, dp(4f), dp(4f), rimPaint.fillOnly())
+        } else {
+            // Stubby legs, alternating while walking.
+            val stepPhase = if (walking) kotlin.math.sin(t * 9f) else 0f
+            val legW = dp(7f)
+            val legTop = groundY - legH - bob
+            val leftLift = if (walking) maxOf(0f, stepPhase) * dp(3.5f) else 0f
+            val rightLift = if (walking) maxOf(0f, -stepPhase) * dp(3.5f) else 0f
 
-        bodyRect.set(cx - dp(11f), legTop - leftLift, cx - dp(11f) + legW, groundY - leftLift)
-        canvas.drawRoundRect(bodyRect, dp(3f), dp(3f), rimPaint.fillOnly())
-        bodyRect.set(cx + dp(4f), legTop - rightLift, cx + dp(4f) + legW, groundY - rightLift)
-        canvas.drawRoundRect(bodyRect, dp(3f), dp(3f), rimPaint.fillOnly())
+            bodyRect.set(cx - dp(11f), legTop - leftLift, cx - dp(11f) + legW, groundY - leftLift)
+            canvas.drawRoundRect(bodyRect, dp(3f), dp(3f), rimPaint.fillOnly())
+            bodyRect.set(cx + dp(4f), legTop - rightLift, cx + dp(4f) + legW, groundY - rightLift)
+            canvas.drawRoundRect(bodyRect, dp(3f), dp(3f), rimPaint.fillOnly())
+        }
 
         canvas.save()
         canvas.translate(cx, bodyCenterY)
@@ -156,6 +183,35 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
                 drawHappyEye(canvas, faceCx - eyeDx, eyeY, eyeR)
                 drawHappyEye(canvas, faceCx + eyeDx, eyeY, eyeR)
             }
+            mood == Mood.SMUG -> {
+                // Half-lidded and unbearably pleased with himself.
+                canvas.drawCircle(faceCx - eyeDx, eyeY, eyeR, accentPaint)
+                canvas.drawCircle(faceCx + eyeDx, eyeY, eyeR, accentPaint)
+                val lidY = eyeY - eyeR * 0.25f
+                canvas.drawRect(
+                    faceCx - eyeDx - eyeR, eyeY - eyeR,
+                    faceCx - eyeDx + eyeR, lidY, screenPaint
+                )
+                canvas.drawRect(
+                    faceCx + eyeDx - eyeR, eyeY - eyeR,
+                    faceCx + eyeDx + eyeR, lidY, screenPaint
+                )
+                canvas.drawLine(faceCx - eyeDx - eyeR, lidY, faceCx - eyeDx + eyeR, lidY, facePaint)
+                canvas.drawLine(faceCx + eyeDx - eyeR, lidY, faceCx + eyeDx + eyeR, lidY, facePaint)
+            }
+            mood == Mood.ANNOYED -> {
+                canvas.drawCircle(faceCx - eyeDx, eyeY + dp(0.9f), eyeR * 0.85f, accentPaint)
+                canvas.drawCircle(faceCx + eyeDx, eyeY + dp(0.9f), eyeR * 0.85f, accentPaint)
+                // Angry eyebrows: the entire vocabulary of being fed up.
+                canvas.drawLine(
+                    faceCx - eyeDx - eyeR, eyeY - dp(4.6f),
+                    faceCx - eyeDx + eyeR, eyeY - dp(2.3f), facePaint
+                )
+                canvas.drawLine(
+                    faceCx + eyeDx - eyeR, eyeY - dp(2.3f),
+                    faceCx + eyeDx + eyeR, eyeY - dp(4.6f), facePaint
+                )
+            }
             else -> {
                 val lookUp = if (mood == Mood.THINKING) -dp(1.6f) else 0f
                 canvas.drawCircle(faceCx - eyeDx, eyeY + lookUp, eyeR, accentPaint)
@@ -181,6 +237,21 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
                 canvas.drawPath(shape, facePaint)
             }
             Mood.SLEEPY -> canvas.drawLine(faceCx - dp(3f), mouthY, faceCx + dp(3f), mouthY, facePaint)
+            Mood.SMUG -> {
+                shape.reset()
+                shape.moveTo(faceCx - dp(5f), mouthY)
+                shape.quadTo(faceCx + dp(1f), mouthY + dp(3.2f), faceCx + dp(6f), mouthY - dp(2.6f))
+                canvas.drawPath(shape, facePaint)
+            }
+            Mood.ANNOYED -> {
+                shape.reset()
+                shape.moveTo(faceCx - dp(4.5f), mouthY + dp(2.6f))
+                shape.quadTo(faceCx, mouthY - dp(2.2f), faceCx + dp(4.5f), mouthY + dp(2.6f))
+                canvas.drawPath(shape, facePaint)
+                // Steam, because he is being dramatic about it.
+                canvas.drawCircle(faceCx - dp(13f), mouthY - dp(7f), dp(1.8f), facePaint)
+                canvas.drawCircle(faceCx + dp(13f), mouthY - dp(9.5f), dp(1.4f), facePaint)
+            }
             else -> {
                 shape.reset()
                 shape.moveTo(faceCx - dp(3.5f), mouthY)

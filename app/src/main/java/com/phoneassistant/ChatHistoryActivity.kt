@@ -78,7 +78,11 @@ class ChatHistoryActivity : Activity() {
         OverlayService.beginThinking()
         val placeholder = addBubble("…", false)
 
-        AssistantBrain.reply(this, OverlayService.currentAppLabel) { ok, reply ->
+        AssistantBrain.reply(
+            this,
+            OverlayService.currentAppLabel,
+            OverlayService.toysOnStage()
+        ) { ok, reply ->
             runOnUiThread {
                 messageList.removeView(placeholder)
                 addBubble(reply, false)

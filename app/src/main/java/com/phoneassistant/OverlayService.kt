@@ -39,7 +39,7 @@ import kotlin.random.Random
  * Owns the overlay windows: the character, a speech bubble or thinking indicator above
  * him, and an input bar below. Panels track his position, so they follow him around.
  */
-class OverlayService : Service() {
+class OverlayService : Service(), PropHost {
 
     companion object {
         @Volatile
@@ -84,6 +84,19 @@ class OverlayService : Service() {
         fun speak(text: String) {
             instance?.sayAloud(text)
         }
+
+        /** Main-screen buttons: put one of Pip's toys on the screen. */
+        fun bringOut(toy: Toy): Boolean = instance?.let { Toys.summon(it, toy) } ?: false
+
+        /** What is out on the screen right now, for the prompt. Empty when nothing is. */
+        fun toysOnStage(): String = instance?.let { Toys.summary(it) } ?: ""
+
+        /** Put everything away. */
+        fun tidyUp(): Boolean {
+            val service = instance ?: return false
+            Toys.clearAll(service)
+            return true
+        }
     }
 
     private lateinit var windowManager: WindowManager
@@ -107,6 +120,15 @@ class OverlayService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val rnd = Random(System.currentTimeMillis())
+
+    /** Everything Pip has put on the screen: stands, paintings, games, plants. */
+    private val props = mutableListOf<Prop>()
+
+    /** Called when he finishes a walk he was sent on by a toy. */
+    private var arrive: (() -> Unit)? = null
+
+    /** How long until he gets bored and starts something by himself. */
+    private var initiativeIn = 200_000L
 
     private var screenW = 1
     private var screenH = 1
@@ -217,12 +239,90 @@ class OverlayService : Service() {
         hideBubble()
         hideThinking()
         removeInputBar()
+        props.toList().forEach { prop -> runCatching { windowManager.removeView(prop) } }
+        props.clear()
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
         pet = null
         runCatching { unregisterReceiver(screenReceiver) }
         instance = null
         running = false
         super.onDestroy()
+    }
+
+    // ------------------------------------------------------------------- props
+
+    override fun stageContext(): Context = this
+    override fun stageWidth(): Int = screenW
+    override fun stageHeight(): Int = screenH
+    override fun stageTop(): Int = topInset
+    override fun stageBottom(): Int = bottomInset
+    override fun px(value: Float): Float = dp(value)
+    override fun petWidth(): Int = petW
+    override fun petHeight(): Int = petH
+    override fun propsOnScreen(): List<Prop> = props.toList()
+
+    override fun say(line: String) = sayAloud(line)
+
+    override fun feel(mood: PetView.Mood, ms: Long) {
+        val view = pet ?: return
+        view.mood = mood
+        if (ms > 0L) handler.postDelayed({ view.mood = PetView.Mood.NEUTRAL }, ms)
+    }
+
+    override fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?) {
+        targetX = (x - petW / 2f).coerceIn(0f, (screenW - petW).toFloat())
+        targetY = (y - petH / 2f)
+            .coerceIn(topInset + dp(8f), (screenH - petH - bottomInset).toFloat())
+        arrive = done
+        walking = true
+        relocating = false
+        attentive = false
+    }
+
+    override fun petSit(sitting: Boolean) {
+        pet?.sitting = sitting
+        if (sitting) {
+            attentive = true
+            walking = false
+            arrive = null
+            pet?.walking = false
+            idleUntil = SystemClock.uptimeMillis() + 600_000L
+        } else {
+            attentive = false
+            idleUntil = SystemClock.uptimeMillis() + 1200L
+        }
+    }
+
+    override fun updateProp(prop: Prop) {
+        runCatching { windowManager.updateViewLayout(prop, prop.params) }
+    }
+
+    override fun addProp(prop: Prop): Boolean {
+        if (props.contains(prop)) return true
+        val params = WindowManager.LayoutParams(
+            prop.windowW,
+            prop.windowH,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            // Touchable and draggable, but never focusable: a toy must not steal the
+            // keyboard or the taps meant for the app underneath.
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = prop.posX.toInt()
+            y = prop.posY.toInt()
+        }
+        prop.params = params
+        if (!runCatching { windowManager.addView(prop, params) }.isSuccess) return false
+        props += prop
+        return true
+    }
+
+    override fun dropProp(prop: Prop) {
+        props.remove(prop)
+        runCatching { windowManager.removeView(prop) }
     }
 
     // ---------------------------------------------------------------- wandering
@@ -240,11 +340,25 @@ class OverlayService : Service() {
 
         if (bubble != null && now >= bubbleHideAt) hideBubble()
 
+        // Toys animate and run their own physics whether or not he is paying attention.
+        if (props.isNotEmpty()) {
+            props.toList().forEach { prop -> runCatching { prop.onFrame() } }
+        }
+
         watchCountdown += frameMs
         if (watchCountdown >= 15_000L) {
             watchCountdown = 0L
             currentAppLabel =
                 if (AppWatcher.hasPermission(this)) AppWatcher.currentAppLabel(this) else null
+        }
+
+        // Nothing on screen for a few minutes: he gets bored and makes his own fun.
+        if (!attentive && !walking && props.isEmpty()) {
+            initiativeIn -= frameMs
+            if (initiativeIn <= 0L) {
+                initiativeIn = 180_000L + rnd.nextLong(140_000L)
+                Toys.spontaneous(this)
+            }
         }
 
         // Standing still and paying attention, unless he is repositioning for the
@@ -270,6 +384,9 @@ class OverlayService : Service() {
                     idleUntil = now + 600_000L
                 } else {
                     idleUntil = now + idleDelay()
+                    val arrival = arrive
+                    arrive = null
+                    arrival?.invoke()
                 }
             } else {
                 posX += dx / distance * perFrame
@@ -326,6 +443,7 @@ class OverlayService : Service() {
                 dragged = false
                 walking = false
                 relocating = false
+                arrive = null
                 pet?.walking = false
                 true
             }
@@ -444,6 +562,7 @@ class OverlayService : Service() {
         attentive = true
         walking = false
         relocating = false
+        arrive = null
         pet?.walking = false
         pet?.mood = PetView.Mood.THINKING
         showThinking()
@@ -510,8 +629,12 @@ class OverlayService : Service() {
         walking = false
         pet?.walking = false
         showBubble(text)
-        pet?.mood = PetView.Mood.TALKING
-        handler.postDelayed({ pet?.mood = PetView.Mood.NEUTRAL }, 1600L)
+        // Being smug or annoyed outranks talking: he wants you to see his face.
+        val mood = pet?.mood
+        if (mood != PetView.Mood.ANNOYED && mood != PetView.Mood.SMUG) {
+            pet?.mood = PetView.Mood.TALKING
+            handler.postDelayed({ pet?.mood = PetView.Mood.NEUTRAL }, 1600L)
+        }
     }
 
     private fun toggleChat() {
@@ -521,6 +644,7 @@ class OverlayService : Service() {
             attentive = true
             walking = false
             relocating = false
+            arrive = null
             pet?.walking = false
             showInputBar()
         }
@@ -678,6 +802,8 @@ class OverlayService : Service() {
         targetX = posX
         targetY = neededY.coerceAtLeast(topInset + dp(8f))
         if (abs(targetY - posY) < 1f) return
+        // He drops whatever a toy sent him to do: the keyboard wins.
+        arrive = null
         walking = true
         relocating = true
     }
@@ -722,10 +848,13 @@ class OverlayService : Service() {
         relocating = false
 
         Memory.append(this, "user", text)
+        // Some things are done, not said: stands get opened, games get started, and
+        // criticism gets taken personally.
+        val event = Toys.reactTo(this, text)
         attentive = true
         startThinking()
 
-        AssistantBrain.reply(this, currentAppLabel) { ok, reply ->
+        AssistantBrain.reply(this, currentAppLabel, Toys.summary(this), event) { ok, reply ->
             handler.post {
                 if (ok) Memory.append(this, "assistant", reply)
                 sayAloud(reply)

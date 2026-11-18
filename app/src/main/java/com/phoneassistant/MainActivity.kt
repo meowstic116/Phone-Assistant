@@ -76,6 +76,8 @@ class MainActivity : Activity() {
             startActivity(Intent(this, MemoryActivity::class.java))
         }
 
+        buildToyButtons()
+
         updateStatus = findViewById(R.id.updateStatus)
         updateButton = findViewById(R.id.updateButton)
         updateButton.setOnClickListener {
@@ -132,6 +134,45 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    /** One button per thing Pip can put on the screen, so nothing has to be guessed. */
+    private fun buildToyButtons() {
+        val box = findViewById<LinearLayout>(R.id.toyBox)
+        var row: LinearLayout? = null
+
+        fun addButton(label: String, action: () -> Boolean) {
+            if (row == null) {
+                row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, dp(4), 0, 0)
+                }
+                box.addView(row)
+            }
+            val button = Button(this).apply {
+                text = label
+                textSize = 12f
+                isAllCaps = false
+                setOnClickListener {
+                    val ok = action()
+                    val note = when {
+                        ok -> "Pip is on it"
+                        !OverlayService.running -> "Start Pip first"
+                        else -> "Pip says not right now"
+                    }
+                    Toast.makeText(this@MainActivity, note, Toast.LENGTH_SHORT).show()
+                }
+            }
+            row?.addView(
+                button,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+        }
+
+        Toy.values().forEach { toy ->
+            addButton(toy.label) { OverlayService.bringOut(toy) }
+        }
+        addButton("Tidy up") { OverlayService.tidyUp() }
     }
 
     private fun startAssistant() {

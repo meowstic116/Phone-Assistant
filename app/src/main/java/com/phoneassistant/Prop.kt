@@ -1,0 +1,195 @@
+package com.phoneassistant
+
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import kotlin.math.abs
+import kotlin.math.hypot
+
+/**
+ * What a prop may ask of the screen it lives on: where the edges are, how to talk, and
+ * how to make Pip look smug, annoyed or pleased about something.
+ */
+interface PropHost {
+    fun stageContext(): Context
+    fun stageWidth(): Int
+    fun stageHeight(): Int
+    fun stageTop(): Int
+    fun stageBottom(): Int
+
+    /** dp to pixels, for props doing their own arithmetic. */
+    fun px(value: Float): Float
+
+    /** Pip says this in his bubble. */
+    fun say(line: String)
+    fun feel(mood: PetView.Mood, ms: Long)
+
+    fun petWidth(): Int
+    fun petHeight(): Int
+
+    /** Pip walks until his centre sits on (x, y), then runs [done]. */
+    fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?)
+    fun petSit(sitting: Boolean)
+
+    fun addProp(prop: Prop): Boolean
+    fun dropProp(prop: Prop)
+    fun updateProp(prop: Prop)
+    fun propsOnScreen(): List<Prop>
+}
+
+/** The palette every toy is painted with, so they all look like they came from Pip. */
+object Ink {
+    const val BG = 0xF21C202B.toInt()
+    const val EDGE = 0xFF3A4356.toInt()
+    const val ACCENT = 0xFF7DD3FC.toInt()
+    const val TEXT = 0xFFE8ECF4.toInt()
+    const val DIM = 0xFF98A2B6.toInt()
+    const val LEMON = 0xFFF6C445.toInt()
+    const val WOOD = 0xFFB98A5E.toInt()
+    const val GRASS = 0xFF6FBF73.toInt()
+    const val ALERT = 0xFFF2796B.toInt()
+}
+
+/**
+ * Something Pip has put down on the screen: a stand, a painting, a goal, a ball. Each prop
+ * owns one overlay window, paints itself in code, can be dragged wherever the user likes,
+ * and runs its own little mechanic when tapped.
+ */
+abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
+
+    /** Window size in dp. */
+    abstract val boxW: Float
+    abstract val boxH: Float
+
+    var posX = 0f
+        private set
+    var posY = 0f
+        private set
+
+    lateinit var params: WindowManager.LayoutParams
+
+    private val density = resources.displayMetrics.density
+    protected fun dp(v: Float) = v * density
+
+    val windowW: Int get() = (boxW * density).toInt()
+    val windowH: Int get() = (boxH * density).toInt()
+
+    val centreX: Float get() = posX + windowW / 2f
+    val centreY: Float get() = posY + windowH / 2f
+
+    private var downRawX = 0f
+    private var downRawY = 0f
+    private var lastRawX = 0f
+    private var lastRawY = 0f
+    private var travelled = false
+
+    private val touch = View.OnTouchListener { _, event ->
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downRawX = event.rawX
+                downRawY = event.rawY
+                lastRawX = event.rawX
+                lastRawY = event.rawY
+                travelled = false
+                true
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                if (abs(event.rawX - downRawX) > dp(7f) ||
+                    abs(event.rawY - downRawY) > dp(7f)
+                ) {
+                    travelled = true
+                }
+                if (travelled) {
+                    moveTo(posX + event.rawX - lastRawX, posY + event.rawY - lastRawY)
+                    lastRawX = event.rawX
+                    lastRawY = event.rawY
+                }
+                true
+            }
+
+            MotionEvent.ACTION_UP -> {
+                if (travelled) onDragFinished() else onTap(event.x, event.y)
+                travelled = false
+                true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                travelled = false
+                true
+            }
+
+            else -> false
+        }
+    }
+
+    init {
+        setOnTouchListener(touch)
+    }
+
+    /** Move the window, keeping it on the screen. Safe to call before the window exists. */
+    fun moveTo(x: Float, y: Float) {
+        posX = x.coerceIn(0f, (host.stageWidth() - windowW).coerceAtLeast(0).toFloat())
+        val minY = host.stageTop().toFloat()
+        val maxY = (host.stageHeight() - windowH - host.stageBottom()).toFloat()
+            .coerceAtLeast(minY)
+        posY = y.coerceIn(minY, maxY)
+        if (::params.isInitialized) host.updateProp(this)
+    }
+
+    /** Position it and add it to the screen in one step. */
+    fun bring(x: Float, y: Float): Boolean {
+        moveTo(x, y)
+        return host.addProp(this)
+    }
+
+    /** Called for a tap that was not a drag. Coordinates are inside this prop. */
+    protected open fun onTap(x: Float, y: Float) {}
+
+    /** Called when the user finishes dragging this prop somewhere else. */
+    protected open fun onDragFinished() {}
+
+    /** Called about 30 times a second, for toys with physics or things to grow. */
+    open fun onFrame() {}
+
+    /** One line for Pip's prompt describing what this is. */
+    open fun describe(): String = ""
+
+    /** How far this prop has been moved from where it started, in dp. */
+    protected fun drift(startX: Float, startY: Float): Float =
+        hypot(abs(posX - startX), abs(posY - startY)) / density
+
+    protected fun fill(color: Int): Paint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
+
+    protected fun stroke(color: Int, widthDp: Float): Paint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            style = Paint.Style.STROKE
+            strokeWidth = dp(widthDp)
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+
+    protected fun text(color: Int = Ink.TEXT, sizeDp: Float = 10f, bold: Boolean = false): Paint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            textSize = dp(sizeDp)
+            isFakeBoldText = bold
+        }
+
+    protected fun panel(canvas: Canvas, rect: RectF, radiusDp: Float, edge: Paint, body: Paint) {
+        canvas.drawRoundRect(rect, dp(radiusDp), dp(radiusDp), body)
+        canvas.drawRoundRect(rect, dp(radiusDp), dp(radiusDp), edge)
+    }
+
+    protected fun centred(canvas: Canvas, value: String, cx: Float, cy: Float, paint: Paint) {
+        val w = paint.measureText(value)
+        val baseline = cy - (paint.descent() + paint.ascent()) / 2f
+        canvas.drawText(value, cx - w / 2f, baseline, paint)
+    }
+}

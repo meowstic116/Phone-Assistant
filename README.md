@@ -1,18 +1,18 @@
 # Phone-Assistant
 
 A little phone-shaped character named Pip that walks around your Android screen, over
-your other apps, and talks back.
+your other apps, and talks back. He also puts things on the screen and plays with them
+with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
 
 ## What it does
 
 - A floating character drawn entirely in code (no sprite sheets) that wanders the whole
-  screen, blinks, and reacts.
+  screen, blinks, sits down, and reacts.
 - Tap it to open a small input box under his feet. He stops to listen, shows animated
   thinking dots, then answers in a speech bubble that follows him around and flips below
   him near the top of the screen. The box leaves as soon as you send, or when you press
-  back. He steps straight up clear of the keyboard using its measured height, not a guess,
-  keeping his place across the screen instead of jumping to a corner. Replies
-  come from any OpenAI-compatible API.
+  back. He steps straight up clear of the keyboard using its measured height, not a guess.
+  Replies come from any OpenAI-compatible API.
 - A **Chat history** screen shows the whole conversation and lets you keep talking from
   there; replies still appear in his overlay bubble, which floats above the chat.
 - A **Personality** screen shows the full prompt that defines him, and lets you rewrite it.
@@ -22,9 +22,48 @@ your other apps, and talks back.
   screen contents.
 - Drag it anywhere. It lives in a foreground service with a persistent notification.
 
+## Toys
+
+Everything below is real, movable screen furniture. Drag any of it wherever you want; tap
+it to use it. Each piece is its own small overlay window, so it never blocks the app
+underneath. Bring them out from the **Toys** buttons in the app, ask him for one in chat
+("open your lemonade stand", "paint something", "let's play soccer"), or just leave the
+screen alone — he gets bored every few minutes and starts something himself.
+
+- **Lemonade stand** — tap the stand and he pours you a glass, to a maximum of two because
+  he has one jug. The glass is its own prop: tap it once to drink, tap the empty glass
+  again to hand it back. Ask him for "a lemonade" in chat and he pours one.
+- **Canvas** — he walks somewhere, sits down with folded legs, and paints for about seven
+  seconds while the picture fills in brush-stroke by brush-stroke. There are five paintings
+  (a self-portrait, a childlike crayon house, a banana in sunglasses, mountains, and some
+  abstract blobs); each has a title and a personality. When he is done he gets up, says
+  what it is called, and wanders off leaving it on the screen. Tap the painting to hear his
+  artist's statement, or ask him about it.
+- **Soccer** — goals at the top and bottom of the screen, a ball in the middle, and a score
+  pill. Tap the ball to boot it at Pip's goal (tap left or right of the middle to angle it);
+  he walks over and kicks it back at yours. First to three or ninety seconds, and he
+  announces the result either way. The goals are draggable, which he notices: he calls it
+  cheating, and three goalpost moves and he takes his ball home.
+- **Bubble wrap** — a sheet of 35 bubbles. Pop them; he counts and gets competitive. Pop
+  all of them and he clears it away, impressed against his will.
+- **Plant** — tap to water it, three waterings per stage and it grows through four stages
+  to a flower. Water it too fast and he accuses you of drowning it.
+
+## Personality
+
+He is a jokester: cocky, teasing, competitive, and a bit rowdy. He gloats when he wins,
+sulks and accuses you of cheating when he loses, and takes criticism of his painting or his
+lemonade personally. He still helps when you actually need something — usually with a
+theatrical sigh first, then properly. The default prompt is long on purpose and is fully
+rewritable from the **Personality** screen.
+
+Reactions to what you do with his toys are local canned lines, so they cost no API calls.
+Criticism and requests in chat go through the model with a note about what just happened,
+so his reply matches: tell him the lemonade was bad and he will be wounded about it.
+
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.12-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.13-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
@@ -80,9 +119,13 @@ delete a bad capture. The conversation itself is still capped at the last 24 mes
 
 - **Personality**: the **Personality** button in the app opens the prompt in an editor and
   saves it on the device. The built-in version lives in `Persona.kt`, and **reset**
-  restores it. The note about which app you are in is appended automatically and is not
-  part of the editable text.
+  restores it. The note about which app you are in, the list of toys on screen, and the
+  remembered facts are all appended automatically and are not part of the editable text.
 - Look and animation: `app/src/main/java/com/phoneassistant/PetView.kt`
 - Walk speed, idle timing, window size: `OverlayService.kt`
+- Toys: `Prop.kt` is the base class (one overlay window, drag, tap, `onFrame` for
+  animation and physics). Each toy lives in its own file — `Lemonade.kt`, `Painting.kt`,
+  `Soccer.kt`, `BubbleWrap.kt`, `Plant.kt` — and `Toys.kt` decides which chat messages and
+  buttons summon which one, and what he says about the result.
 
 The API key is stored only in this app's private preferences on the device.

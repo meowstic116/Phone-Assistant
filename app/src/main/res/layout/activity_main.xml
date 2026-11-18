@@ -76,6 +76,24 @@
 
         <TextView
             style="@style/SectionHeader"
+            android:text="TOYS" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Bring something out on the screen. You can also just ask him for it — “open your lemonade stand”, “let's play soccer”, “paint something”."
+            android:textColor="@color/textDim"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:id="@+id/toyBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical" />
+
+        <TextView
+            style="@style/SectionHeader"
             android:text="UPDATES" />
 
         <TextView
