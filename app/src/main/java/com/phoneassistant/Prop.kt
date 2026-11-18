@@ -24,6 +24,9 @@ interface PropHost {
     /** dp to pixels, for props doing their own arithmetic. */
     fun px(value: Float): Float
 
+    /** The user poked Pip: do what a tap on him would do, from inside a toy's window. */
+    fun pokePet()
+
     /** Pip says this in his bubble. */
     fun say(line: String)
     fun feel(mood: PetView.Mood, ms: Long)

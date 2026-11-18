@@ -31,34 +31,38 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         val w = width.toFloat()
         val h = height.toFloat()
 
-        // Two uprights carrying the awning, and the legs under the counter.
-        canvas.drawRect(dp(7f), dp(24f), dp(11f), dp(108f), wood)
-        canvas.drawRect(w - dp(11f), dp(24f), w - dp(7f), dp(108f), wood)
-        canvas.drawRect(dp(12f), dp(108f), dp(17f), h - dp(2f), wood)
-        canvas.drawRect(w - dp(17f), dp(108f), w - dp(12f), h - dp(2f), wood)
+        // Two uprights carrying the awning, and the legs under the counter. Every number
+        // here is in the stand's own dp, and the block below is what Pip has to fit around:
+        // awning 2–22, open front 22–96, counter 96–112, legs 112–146, sign 115–137.
+        canvas.drawRect(dp(7f), dp(22f), dp(11f), dp(112f), wood)
+        canvas.drawRect(w - dp(11f), dp(22f), w - dp(7f), dp(112f), wood)
+        canvas.drawRect(dp(12f), dp(112f), dp(17f), h - dp(2f), wood)
+        canvas.drawRect(w - dp(17f), dp(112f), w - dp(12f), h - dp(2f), wood)
 
         // Pitcher and a spare cup, at the ends of the counter: the middle is where Pip
         // stands, so nothing on this stand is painted over his face.
-        val jug = RectF(dp(6f), dp(70f), dp(26f), dp(94f))
+        val jug = RectF(dp(6f), dp(72f), dp(26f), dp(96f))
         panel(canvas, jug, 4f, glassEdge, juice)
-        canvas.drawArc(RectF(dp(24f), dp(74f), dp(34f), dp(90f)), -70f, 140f, false, glassEdge)
-        canvas.drawCircle(dp(10f), dp(72f), dp(4f), slicePaint)
-        val cup = RectF(dp(88f), dp(80f), dp(106f), dp(96f))
+        canvas.drawArc(RectF(dp(24f), dp(76f), dp(34f), dp(92f)), -70f, 140f, false, glassEdge)
+        canvas.drawCircle(dp(10f), dp(74f), dp(4f), slicePaint)
+        val cup = RectF(dp(88f), dp(82f), dp(106f), dp(98f))
         canvas.drawRect(cup, glassFill)
         canvas.drawRect(cup, glassEdge)
 
-        // The counter, at the height of his middle when he serves from behind it.
-        panel(canvas, RectF(dp(2f), dp(94f), w - dp(2f), dp(108f)), 2f, woodEdge, wood)
+        // The counter, drawn over his hips and feet, just below his chin when he stands
+        // behind it. Sixteen dp thick so his feet stay hidden even when he bobs downwards.
+        panel(canvas, RectF(dp(2f), dp(96f), w - dp(2f), dp(112f)), 2f, woodEdge, wood)
 
-        // The sign, which is the entire marketing strategy, hanging on the counter front.
-        val board = RectF(dp(14f), dp(111f), w - dp(14f), dp(133f))
+        // The sign, which is the entire marketing strategy, hanging on the counter front,
+        // below where he stands rather than across his face.
+        val board = RectF(dp(14f), dp(115f), w - dp(14f), dp(137f))
         panel(canvas, board, 3f, woodEdge, cream)
         centred(canvas, "LEMONADE", board.centerX(), board.centerY() - dp(4f), signInk)
         centred(canvas, "50c or a compliment", board.centerX(), board.centerY() + dp(7f), tiny)
 
-        // Striped awning, a canopy over his head.
+        // Striped awning, a canopy over his antenna with a couple of dp to spare.
         val awnTop = dp(2f)
-        val awnBottom = dp(24f)
+        val awnBottom = dp(22f)
         canvas.save()
         canvas.clipRect(dp(2f), awnTop, w - dp(2f), awnBottom)
         canvas.drawRect(dp(2f), awnTop, w - dp(2f), awnBottom, cream)
@@ -75,11 +79,19 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     }
 
     /**
-     * Where Pip's middle has to sit to look like he is serving from behind the counter.
-     * Props are drawn over him, so at this height the counter crosses his waist and the
-     * sign hides his legs, which is exactly the effect we want.
+     * Where Pip's middle has to sit to look like he is serving from behind the counter,
+     * worked out from PetView's own drawing rather than guessed.
+     *
+     * His window is 86dp tall and his middle is 43dp down it, so this puts the top of his
+     * window 24dp below the top of the stand. Measured from there, and from the layout
+     * above: antenna tip 27.8, head 37, face 45–89, mouth 73.2, hips 95 onwards, feet 108.
+     * His idle bob moves him 1.1dp either way and his idle tilt can swing his chin 1.9dp
+     * lower, so the worst cases are an antenna tip at 28.9 against an awning that ends at
+     * 22, and a chin at 92 against a counter that starts at 96. Everything from his hips
+     * down is behind the counter (his feet clear it by 2.9dp), the sign hangs entirely
+     * below him, and no part of his face, head or antenna sits behind wood.
      */
-    fun behindCounterY(): Float = posY + windowH - dp(54f)
+    fun behindCounterY(): Float = posY + windowH - dp(81f)
 
     /** Pours a glass, beside the stand. Returns false when there is no room for another. */
     fun serve(): Boolean {
@@ -106,6 +118,12 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     }
 
     override fun onTap(x: Float, y: Float) {
+        // This window is drawn over his, so taps aimed at him arrive here. Anything in the
+        // box his body occupies above the counter is a poke, not an order.
+        if (y < dp(96f) && x > dp(29f) && x < dp(83f)) {
+            host.pokePet()
+            return
+        }
         serve()
     }
 

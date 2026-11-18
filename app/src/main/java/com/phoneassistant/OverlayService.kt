@@ -310,6 +310,9 @@ class OverlayService : Service(), PropHost {
     override fun petHeight(): Int = petH
     override fun propsOnScreen(): List<Prop> = props.toList()
 
+    /** Same thing a tap on him does, for toys whose windows cover him. */
+    override fun pokePet() = toggleChat()
+
     override fun say(line: String) = sayAloud(line)
 
     override fun feel(mood: PetView.Mood, ms: Long) {
