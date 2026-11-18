@@ -110,8 +110,10 @@ class MainActivity : Activity() {
                 if (result == null) {
                     updateStatus.text = "Couldn't reach GitHub"
                 } else if (result.version.isBlank()) {
-                    updateStatus.text = "No releases published yet (installed " +
-                        result.currentVersion + ")"
+                    // GitHub answers 404 both for "no releases" and for a private repo,
+                    // so the message has to cover both rather than guess.
+                    updateStatus.text = "No releases found — the repo may be private " +
+                        "(installed " + result.currentVersion + ")"
                 } else if (result.newer) {
                     availableRelease = result
                     updateStatus.text = "Update available: " + result.version +
