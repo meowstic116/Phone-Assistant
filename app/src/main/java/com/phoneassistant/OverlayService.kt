@@ -35,9 +35,8 @@ import kotlin.math.hypot
 import kotlin.random.Random
 
 /**
- * Owns three small overlay windows: the character, a speech bubble above it and an
- * input bar below it. The character wanders the whole screen, and stops to listen
- * whenever the input bar is open.
+ * Owns the overlay windows: the character, a speech bubble or thinking indicator above
+ * him, and an input bar below. Panels track his position, so they follow him around.
  */
 class OverlayService : Service() {
 
@@ -56,6 +55,7 @@ class OverlayService : Service() {
         private const val NOTIFICATION_ID = 42
         private const val CHANNEL_ID = "assistant"
         private const val ACTION_STOP = "com.phoneassistant.STOP"
+        private const val BUBBLE_LIFETIME_MS = 12_000L
 
         fun start(ctx: Context) {
             ctx.startForegroundService(Intent(ctx, OverlayService::class.java))
@@ -65,8 +65,9 @@ class OverlayService : Service() {
             ctx.stopService(Intent(ctx, OverlayService::class.java))
         }
 
-        fun setMood(mood: PetView.Mood) {
-            instance?.pet?.mood = mood
+        /** Show the three dots, for messages sent from the history screen. */
+        fun beginThinking() {
+            instance?.startThinking()
         }
 
         /** History screen opened: hold still and step up clear of the input row. */
@@ -89,6 +90,12 @@ class OverlayService : Service() {
     private var pet: PetView? = null
 
     private var bubble: TextView? = null
+    private var bubbleParams: WindowManager.LayoutParams? = null
+    private var bubbleHideAt = 0L
+
+    private var thinking: ThinkingView? = null
+    private var thinkingParams: WindowManager.LayoutParams? = null
+
     private var inputBar: LinearLayout? = null
     private var inputField: EditText? = null
     private var inputParams: WindowManager.LayoutParams? = null
@@ -111,6 +118,7 @@ class OverlayService : Service() {
     private var targetY = 0f
 
     private var walking = false
+    private var relocating = false
     private var idleUntil = 0L
     private var attentive = false
     private var paused = false
@@ -201,6 +209,7 @@ class OverlayService : Service() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         hideBubble()
+        hideThinking()
         removeInputBar()
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
         pet = null
@@ -223,6 +232,8 @@ class OverlayService : Service() {
         val view = pet ?: return
         val now = SystemClock.uptimeMillis()
 
+        if (bubble != null && now >= bubbleHideAt) hideBubble()
+
         watchCountdown += frameMs
         if (watchCountdown >= 15_000L) {
             watchCountdown = 0L
@@ -230,8 +241,9 @@ class OverlayService : Service() {
                 if (AppWatcher.hasPermission(this)) AppWatcher.currentAppLabel(this) else null
         }
 
-        // Standing still and paying attention while the user types.
-        if (attentive) return
+        // Standing still and paying attention, unless he is repositioning for the
+        // input bar to stay above the keyboard.
+        if (attentive && !relocating) return
 
         if (walking) {
             val dx = targetX - posX
@@ -245,7 +257,12 @@ class OverlayService : Service() {
                 applyPetPosition()
                 walking = false
                 view.walking = false
-                idleUntil = now + idleDelay()
+                if (relocating) {
+                    relocating = false
+                    idleUntil = now + 600_000L
+                } else {
+                    idleUntil = now + idleDelay()
+                }
             } else {
                 posX += dx / distance * perFrame
                 posY += dy / distance * perFrame
@@ -253,7 +270,7 @@ class OverlayService : Service() {
                 if (abs(dx) > 1f) view.facingRight = dx > 0
                 view.walking = true
             }
-        } else if (now > idleUntil) {
+        } else if (!attentive && now > idleUntil) {
             pickTarget(now)
         }
     }
@@ -282,8 +299,8 @@ class OverlayService : Service() {
     private fun applyPetPosition() {
         petParams.x = posX.toInt()
         petParams.y = posY.toInt()
-        val view = pet ?: return
-        runCatching { windowManager.updateViewLayout(view, petParams) }
+        pet?.let { view -> runCatching { windowManager.updateViewLayout(view, petParams) } }
+        repositionPanels()
     }
 
     private fun dp(value: Float) = value * resources.displayMetrics.density
@@ -300,6 +317,7 @@ class OverlayService : Service() {
                 lastRawY = event.rawY
                 dragged = false
                 walking = false
+                relocating = false
                 pet?.walking = false
                 true
             }
@@ -333,11 +351,133 @@ class OverlayService : Service() {
         }
     }
 
+    // ------------------------------------------------------------ anchored panels
+
+    /** Places a panel above him, or below when there is no room at the top. */
+    private fun placePanel(width: Int, height: Int, params: WindowManager.LayoutParams) {
+        var x = (posX + petW / 2f - width / 2f).toInt()
+        x = x.coerceIn(dpInt(6f), (screenW - width - dpInt(6f)).coerceAtLeast(dpInt(6f)))
+
+        val above = (posY - height - dpInt(8f)).toInt()
+        val y = if (above >= topInset) above else (posY + petH + dpInt(8f)).toInt()
+
+        params.x = x
+        params.y = y
+    }
+
+    private fun repositionPanels() {
+        bubble?.let { view ->
+            bubbleParams?.let { params ->
+                placePanel(view.width, view.height, params)
+                runCatching { windowManager.updateViewLayout(view, params) }
+            }
+        }
+        thinking?.let { view ->
+            thinkingParams?.let { params ->
+                placePanel(view.width, view.height, params)
+                runCatching { windowManager.updateViewLayout(view, params) }
+            }
+        }
+        positionInputBar()
+    }
+
+    // --------------------------------------------------------------- speech bubble
+
+    private fun showBubble(text: String) {
+        hideBubble()
+
+        val view = TextView(this).apply {
+            this.text = text
+            textSize = 14f
+            setTextColor(0xFFE8ECF4.toInt())
+            setLineSpacing(dp(2f), 1f)
+            setPadding(dpInt(12f), dpInt(9f), dpInt(12f), dpInt(9f))
+            maxWidth = dpInt(232f)
+            setBackgroundResource(R.drawable.overlay_panel)
+        }
+
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(dpInt(240f), View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val width = view.measuredWidth.coerceAtLeast(dpInt(48f))
+        val height = view.measuredHeight.coerceAtLeast(dpInt(26f))
+
+        val params = WindowManager.LayoutParams(
+            width,
+            height,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+        }
+        placePanel(width, height, params)
+
+        if (runCatching { windowManager.addView(view, params) }.isSuccess) {
+            bubble = view
+            bubbleParams = params
+            bubbleHideAt = SystemClock.uptimeMillis() + BUBBLE_LIFETIME_MS
+        }
+    }
+
+    private fun hideBubble() {
+        bubble?.let { view -> runCatching { windowManager.removeView(view) } }
+        bubble = null
+        bubbleParams = null
+        bubbleHideAt = 0L
+    }
+
+    // ---------------------------------------------------------------- thinking
+
+    private fun startThinking() {
+        attentive = true
+        walking = false
+        relocating = false
+        pet?.walking = false
+        pet?.mood = PetView.Mood.THINKING
+        showThinking()
+    }
+
+    private fun showThinking() {
+        hideThinking()
+        val width = dpInt(52f)
+        val height = dpInt(26f)
+        val view = ThinkingView(this)
+
+        val params = WindowManager.LayoutParams(
+            width,
+            height,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+        }
+        placePanel(width, height, params)
+
+        if (runCatching { windowManager.addView(view, params) }.isSuccess) {
+            thinking = view
+            thinkingParams = params
+        }
+    }
+
+    private fun hideThinking() {
+        thinking?.let { view -> runCatching { windowManager.removeView(view) } }
+        thinking = null
+        thinkingParams = null
+    }
+
     // --------------------------------------------------------------------- chat
 
     private fun enterAttention(moveUp: Boolean) {
         attentive = true
         walking = false
+        relocating = false
         pet?.walking = false
         if (moveUp) {
             val comfortable = topInset + screenH * 0.12f
@@ -351,13 +491,13 @@ class OverlayService : Service() {
     private fun leaveAttention() {
         hideKeyboard()
         removeInputBar()
-        hideBubble()
         attentive = false
         pet?.mood = PetView.Mood.NEUTRAL
         idleUntil = SystemClock.uptimeMillis() + 1500L
     }
 
     private fun sayAloud(text: String) {
+        hideThinking()
         attentive = true
         walking = false
         pet?.walking = false
@@ -372,6 +512,7 @@ class OverlayService : Service() {
         } else {
             attentive = true
             walking = false
+            relocating = false
             pet?.walking = false
             showInputBar()
         }
@@ -380,8 +521,8 @@ class OverlayService : Service() {
     private fun closeChat() {
         hideKeyboard()
         removeInputBar()
-        hideBubble()
         attentive = false
+        relocating = false
         pet?.mood = PetView.Mood.NEUTRAL
         idleUntil = SystemClock.uptimeMillis() + 1500L
     }
@@ -461,6 +602,26 @@ class OverlayService : Service() {
 
         field.requestFocus()
         handler.postDelayed({ showKeyboard() }, 80L)
+        walkClearOfKeyboard()
+    }
+
+    /**
+     * If the bar would sit under the keyboard, send him walking up and to one side so
+     * the box stays visible — the bar follows him, so it arrives with him.
+     */
+    private fun walkClearOfKeyboard() {
+        val keyboardTop = screenH * 0.45f
+        val barBottom = posY + petH + dp(6f) + dp(62f)
+        if (barBottom <= keyboardTop) return
+
+        val nextY = (keyboardTop - petH - dp(70f)).coerceAtLeast(topInset + dp(8f))
+        val spread = dp(60f) + rnd.nextFloat() * dp(110f)
+        val direction = if (rnd.nextBoolean()) 1f else -1f
+
+        targetX = (posX + spread * direction).coerceIn(0f, (screenW - petW).toFloat())
+        targetY = nextY.coerceIn(topInset + dp(8f), (screenH - petH - bottomInset).toFloat())
+        walking = true
+        relocating = true
     }
 
     private fun positionInputBar() {
@@ -488,82 +649,29 @@ class OverlayService : Service() {
 
         field.setText("")
         hideKeyboard()
+        // The bar goes away the moment he has the message; he answers in the bubble.
+        removeInputBar()
+        relocating = false
+
         Memory.append(this, "user", text)
         attentive = true
-        pet?.mood = PetView.Mood.THINKING
+        startThinking()
 
         AssistantBrain.reply(this, currentAppLabel) { ok, reply ->
             handler.post {
                 if (ok) Memory.append(this, "assistant", reply)
-                showBubble(reply)
-                pet?.mood = PetView.Mood.TALKING
+                sayAloud(reply)
                 handler.postDelayed({
                     pet?.mood = PetView.Mood.NEUTRAL
-                    // Stay put for a moment after speaking, then wander off again
-                    // unless the user is already typing the next message.
                     handler.postDelayed({
-                        val typing = inputField?.text?.isNotEmpty() == true
-                        if (!typing) closeChat()
+                        if (!typing()) closeChat()
                     }, 2600L)
                 }, 1400L)
             }
         }
     }
 
-    private fun showBubble(text: String) {
-        hideBubble()
-
-        val view = TextView(this).apply {
-            this.text = text
-            textSize = 14f
-            setTextColor(0xFFE8ECF4.toInt())
-            setLineSpacing(dp(2f), 1f)
-            setPadding(dpInt(12f), dpInt(9f), dpInt(12f), dpInt(9f))
-            maxWidth = dpInt(232f)
-            setBackgroundResource(R.drawable.overlay_panel)
-        }
-
-        view.measure(
-            View.MeasureSpec.makeMeasureSpec(dpInt(240f), View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        )
-        val width = view.measuredWidth.coerceAtLeast(dpInt(48f))
-        val height = view.measuredHeight.coerceAtLeast(dpInt(26f))
-
-        var x = (posX + petW / 2f - width / 2f).toInt()
-        x = x.coerceIn(dpInt(6f), (screenW - width - dpInt(6f)).coerceAtLeast(dpInt(6f)))
-
-        val preferred = (posY - height - dpInt(8f)).toInt()
-        // Above him if there is room, otherwise below.
-        val y = if (preferred >= topInset) {
-            preferred
-        } else {
-            (posY + petH + dpInt(8f)).toInt()
-        }
-
-        val params = WindowManager.LayoutParams(
-            width,
-            height,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            this.x = x
-            this.y = y
-        }
-
-        if (runCatching { windowManager.addView(view, params) }.isSuccess) {
-            bubble = view
-        }
-    }
-
-    private fun hideBubble() {
-        bubble?.let { view -> runCatching { windowManager.removeView(view) } }
-        bubble = null
-    }
+    private fun typing(): Boolean = inputField?.text?.isNotEmpty() == true
 
     private fun showKeyboard() {
         val field = inputField ?: return

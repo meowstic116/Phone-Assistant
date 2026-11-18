@@ -75,7 +75,7 @@ class ChatHistoryActivity : Activity() {
         Memory.append(this, "user", text)
 
         sendButton.isEnabled = false
-        OverlayService.setMood(PetView.Mood.THINKING)
+        OverlayService.beginThinking()
         val placeholder = addBubble("…", false)
 
         AssistantBrain.reply(this, OverlayService.currentAppLabel) { ok, reply ->
