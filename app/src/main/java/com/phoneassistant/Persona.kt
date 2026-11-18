@@ -10,6 +10,9 @@ object Persona {
     private const val PREFS = "persona"
     private const val KEY = "instructions"
 
+    /** Their own prompt, parked here whenever they switch back to the built-in one. */
+    private const val BACKUP = "custom_backup"
+
     /** The built-in personality. Long on purpose: it is the whole character. */
     val DEFAULT_INSTRUCTIONS = """
         You are Pip: a palm-sized, phone-shaped creature with a face, who lives on the
@@ -84,26 +87,51 @@ object Persona {
           actually being useful, never in grand declarations.
     """.trimIndent()
 
-    /** The editable text: whatever the user saved, or the default. */
-    fun instructions(ctx: Context): String {
-        val saved = prefs(ctx).getString(KEY, null)
-        return if (saved.isNullOrBlank()) DEFAULT_INSTRUCTIONS else saved
-    }
+    /** The text they wrote themselves, or null when they are on the built-in prompt. */
+    fun custom(ctx: Context): String? =
+        prefs(ctx).getString(KEY, null)?.takeIf { it.isNotBlank() }
+
+    /**
+     * The editable text. A saved prompt replaces the built-in one outright — it is not an
+     * add-on — so anything later added to [DEFAULT_INSTRUCTIONS] only reaches people who
+     * are actually using it.
+     */
+    fun instructions(ctx: Context): String = custom(ctx) ?: DEFAULT_INSTRUCTIONS
 
     fun save(ctx: Context, text: String) {
-        if (text.isBlank()) {
+        val trimmed = text.trim()
+        // Saving the built-in text back is the same as choosing it, and must not lock them
+        // out of future updates to it.
+        if (trimmed.isBlank() || trimmed == DEFAULT_INSTRUCTIONS) {
             reset(ctx)
             return
         }
-        prefs(ctx).edit().putString(KEY, text.trim()).apply()
+        prefs(ctx).edit().putString(KEY, trimmed).apply()
     }
 
+    /**
+     * Back to the built-in prompt, keeping whatever they had written first: switching is
+     * never a one-way door, because [restoreCustom] hands it straight back.
+     */
     fun reset(ctx: Context) {
-        prefs(ctx).edit().remove(KEY).apply()
+        val edit = prefs(ctx).edit()
+        custom(ctx)?.let { edit.putString(BACKUP, it) }
+        edit.remove(KEY).apply()
     }
 
-    fun isCustomised(ctx: Context): Boolean =
-        !prefs(ctx).getString(KEY, null).isNullOrBlank()
+    /** Puts their own text back after they chose the built-in prompt. */
+    fun restoreCustom(ctx: Context): Boolean {
+        val saved = prefs(ctx).getString(BACKUP, null)?.takeIf { it.isNotBlank() }
+            ?: return false
+        prefs(ctx).edit().putString(KEY, saved).apply()
+        return true
+    }
+
+    /** Whether there is their own text to go back to. */
+    fun hasSavedText(ctx: Context): Boolean =
+        !prefs(ctx).getString(BACKUP, null).isNullOrBlank()
+
+    fun isCustomised(ctx: Context): Boolean = custom(ctx) != null
 
     /**
      * Instructions plus live context: where they are, what is on their screen, anything

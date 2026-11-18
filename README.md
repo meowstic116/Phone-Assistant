@@ -79,6 +79,13 @@ for an even better joke. He still helps when you actually need something — usu
 joke first, then properly. The default prompt is long on purpose and is fully rewritable
 from the **Personality** screen.
 
+A prompt you write yourself replaces the built-in one outright rather than adding to it, so
+personality changes shipped in a new version do not reach it. The **Personality** screen
+says so when it is happening, and **use new built-in** swaps in the current default while
+keeping your text — **bring my text back** puts your own wording straight back. Saving the
+built-in text unchanged counts as choosing the built-in prompt, so nobody gets stuck on an
+old copy of the default by accident.
+
 Reactions to what you do with his toys are local canned lines, so they cost no API calls.
 Criticism and requests in chat go through the model with a note about what just happened,
 so his reply matches: tell him the lemonade was bad and he gets mock-indignant about it.
@@ -88,7 +95,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.21-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.22-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
@@ -143,9 +150,11 @@ delete a bad capture. The conversation itself is still capped at the last 24 mes
 ## Changing the character
 
 - **Personality**: the **Personality** button in the app opens the prompt in an editor and
-  saves it on the device. The built-in version lives in `Persona.kt`, and **reset**
-  restores it. The note about which app you are in, the list of toys on screen, and the
-  remembered facts are all appended automatically and are not part of the editable text.
+  saves it on the device. The built-in version lives in `Persona.kt`; **reset** and **use
+  new built-in** both go back to it, and both stash your text in `custom_backup` first so
+  **bring my text back** can restore it. The note about which app you are in, the list of
+  toys on screen, and the remembered facts are all appended automatically and are not part
+  of the editable text.
 - Look and animation: `app/src/main/java/com/phoneassistant/PetView.kt`
 - Walk speed, idle timing, window size: `OverlayService.kt`
 - Toys: `Prop.kt` is the base class (one overlay window, drag, tap, `onFrame` for

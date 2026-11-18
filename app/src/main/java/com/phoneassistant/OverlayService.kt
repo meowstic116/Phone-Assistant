@@ -182,6 +182,9 @@ class OverlayService : Service(), PropHost {
     private var targetY = 0f
 
     private var walking = false
+
+    /** True during a walk a toy sent him on, which a spoken line must not cancel. */
+    private var toyWalk = false
     private var relocating = false
     private var idleUntil = 0L
     private var attentive = false
@@ -314,12 +317,14 @@ class OverlayService : Service(), PropHost {
         if (ms > 0L) handler.postDelayed({ view.mood = PetView.Mood.NEUTRAL }, ms)
     }
 
+    /** Called by toys only, so every walk from here is one he has been sent on. */
     override fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?) {
         targetX = (x - petW / 2f).coerceIn(0f, (screenW - petW).toFloat())
         targetY = (y - petH / 2f)
             .coerceIn(topInset + dp(8f), (screenH - petH - bottomInset).toFloat())
         arrive = done
         walking = true
+        toyWalk = true
         relocating = false
         attentive = false
     }
@@ -329,6 +334,7 @@ class OverlayService : Service(), PropHost {
         if (sitting) {
             attentive = true
             walking = false
+            toyWalk = false
             arrive = null
             pet?.walking = false
             idleUntil = SystemClock.uptimeMillis() + 600_000L
@@ -466,6 +472,7 @@ class OverlayService : Service(), PropHost {
                 posY = targetY
                 applyPetPosition()
                 walking = false
+                toyWalk = false
                 view.walking = false
                 if (relocating) {
                     relocating = false
@@ -507,6 +514,7 @@ class OverlayService : Service(), PropHost {
         targetX = nx
         targetY = ny
         walking = true
+        toyWalk = false
     }
 
     private fun applyPetPosition() {
@@ -530,6 +538,7 @@ class OverlayService : Service(), PropHost {
                 lastRawY = event.rawY
                 dragged = false
                 walking = false
+                toyWalk = false
                 relocating = false
                 arrive = null
                 pet?.walking = false
@@ -649,6 +658,7 @@ class OverlayService : Service(), PropHost {
     private fun startThinking() {
         attentive = true
         walking = false
+        toyWalk = false
         relocating = false
         arrive = null
         pet?.walking = false
@@ -692,6 +702,7 @@ class OverlayService : Service(), PropHost {
     private fun enterAttention(moveUp: Boolean) {
         attentive = true
         walking = false
+        toyWalk = false
         relocating = false
         pet?.walking = false
         if (moveUp) {
@@ -714,8 +725,13 @@ class OverlayService : Service(), PropHost {
     private fun sayAloud(text: String) {
         hideThinking()
         attentive = true
-        // Talking no longer stops him mid-stride: a toy that sent him somewhere must not
-        // have its walk cancelled by the line he says on the way. The bubble follows him.
+        // A walk a toy sent him on survives the line he says on the way, so a reply cannot
+        // pull him out from behind the lemonade stand. Ordinary wandering still stops here:
+        // he should not be scampering off while he is talking to you.
+        if (!toyWalk) {
+            walking = false
+            pet?.walking = false
+        }
         showBubble(text)
         // Being smug or annoyed outranks talking: he wants you to see his face.
         val mood = pet?.mood
@@ -731,6 +747,7 @@ class OverlayService : Service(), PropHost {
         } else {
             attentive = true
             walking = false
+            toyWalk = false
             relocating = false
             arrive = null
             pet?.walking = false
@@ -893,6 +910,7 @@ class OverlayService : Service(), PropHost {
         // He drops whatever a toy sent him to do: the keyboard wins.
         arrive = null
         walking = true
+        toyWalk = false
         relocating = true
     }
 
