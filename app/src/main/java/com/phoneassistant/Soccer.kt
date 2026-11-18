@@ -34,7 +34,7 @@ class SoccerGame(private val host: PropHost) {
         val YOUR_GOAL_LINES = listOf(
             "fine. FINE. that one was lucky and we both know it.",
             "*stares at the ball* ... okay. okay. that happened.",
-            "you got one. enjoy it. I'm not mad. I'm extremely mad."
+            "ooh, one for you. *slow, tiny clap* look at me being gracious. I'm great at this."
         )
         val PIP_KICK_LINES = listOf(
             "my turn. *scuffs it*",
@@ -135,8 +135,8 @@ class SoccerGame(private val host: PropHost) {
             over = true
             paused = true
             host.say(
-                "that's three times you've moved my goalposts. game's off. " +
-                    "you're a cheater and I'm telling the fridge."
+                "that's three goalpost moves, which is the legal limit. I'm calling it. " +
+                    "*flops* rematch later, once I've emotionally recovered."
             )
             ui.postDelayed({ clear() }, 3400L)
         } else {
@@ -198,8 +198,8 @@ class SoccerGame(private val host: PropHost) {
         host.feel(if (youWon) PetView.Mood.ANNOYED else PetView.Mood.SMUG, 6000L)
         host.say(
             if (youWon) {
-                "you won. *sits down heavily* I want it on record that the goals were " +
-                    "obviously cursed and also you cheated somehow."
+                "you won. *sits down heavily* I'd like it noted that this pitch is " +
+                    "obviously cursed and that I let you, for morale reasons."
             } else {
                 "$pipScore to $youScore. I win. I'd like a trophy, or at least a snack. " +
                     "you can be the snack. I mean you can get the snack."

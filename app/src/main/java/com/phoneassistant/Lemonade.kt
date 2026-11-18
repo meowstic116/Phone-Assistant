@@ -12,7 +12,7 @@ import kotlin.random.Random
 class LemonadeStand(host: PropHost) : Prop(host) {
 
     override val boxW = 112f
-    override val boxH = 124f
+    override val boxH = 148f
 
     private val wood = fill(Ink.WOOD)
     private val woodEdge = stroke(0xFF7E5B3B.toInt(), 1f)
@@ -31,12 +31,32 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         val w = width.toFloat()
         val h = height.toFloat()
 
-        // Back legs, then the counter they hold up.
-        canvas.drawRect(dp(12f), h - dp(50f), dp(18f), h - dp(2f), wood)
-        canvas.drawRect(w - dp(18f), h - dp(50f), w - dp(12f), h - dp(2f), wood)
-        panel(canvas, RectF(dp(3f), h - dp(56f), w - dp(3f), h - dp(44f)), 2f, woodEdge, wood)
+        // Two uprights carrying the awning, and the legs under the counter.
+        canvas.drawRect(dp(7f), dp(24f), dp(11f), dp(108f), wood)
+        canvas.drawRect(w - dp(11f), dp(24f), w - dp(7f), dp(108f), wood)
+        canvas.drawRect(dp(12f), dp(108f), dp(17f), h - dp(2f), wood)
+        canvas.drawRect(w - dp(17f), dp(108f), w - dp(12f), h - dp(2f), wood)
 
-        // Striped awning.
+        // Pitcher and a spare cup, at the ends of the counter: the middle is where Pip
+        // stands, so nothing on this stand is painted over his face.
+        val jug = RectF(dp(6f), dp(70f), dp(26f), dp(94f))
+        panel(canvas, jug, 4f, glassEdge, juice)
+        canvas.drawArc(RectF(dp(24f), dp(74f), dp(34f), dp(90f)), -70f, 140f, false, glassEdge)
+        canvas.drawCircle(dp(10f), dp(72f), dp(4f), slicePaint)
+        val cup = RectF(dp(88f), dp(80f), dp(106f), dp(96f))
+        canvas.drawRect(cup, glassFill)
+        canvas.drawRect(cup, glassEdge)
+
+        // The counter, at the height of his middle when he serves from behind it.
+        panel(canvas, RectF(dp(2f), dp(94f), w - dp(2f), dp(108f)), 2f, woodEdge, wood)
+
+        // The sign, which is the entire marketing strategy, hanging on the counter front.
+        val board = RectF(dp(14f), dp(111f), w - dp(14f), dp(133f))
+        panel(canvas, board, 3f, woodEdge, cream)
+        centred(canvas, "LEMONADE", board.centerX(), board.centerY() - dp(4f), signInk)
+        centred(canvas, "50c or a compliment", board.centerX(), board.centerY() + dp(7f), tiny)
+
+        // Striped awning, a canopy over his head.
         val awnTop = dp(2f)
         val awnBottom = dp(24f)
         canvas.save()
@@ -52,25 +72,14 @@ class LemonadeStand(host: PropHost) : Prop(host) {
             i += 2
         }
         canvas.restore()
-
-        // The sign, which is the entire marketing strategy.
-        val board = RectF(dp(12f), dp(27f), w - dp(12f), dp(48f))
-        panel(canvas, board, 3f, woodEdge, cream)
-        centred(canvas, "LEMONADE", board.centerX(), board.centerY(), signInk)
-        centred(canvas, "50c  (or a compliment)", board.centerX(), board.bottom + dp(6f), tiny)
-
-        // Pitcher with a handle, and a spare cup.
-        val jug = RectF(dp(20f), h - dp(84f), dp(46f), h - dp(58f))
-        panel(canvas, jug, 4f, glassEdge, juice)
-        canvas.drawArc(
-            RectF(dp(42f), h - dp(80f), dp(56f), h - dp(64f)),
-            -70f, 140f, false, glassEdge
-        )
-        val cup = RectF(dp(64f), h - dp(76f), dp(84f), h - dp(56f))
-        canvas.drawRect(cup, glassFill)
-        canvas.drawRect(cup, glassEdge)
-        canvas.drawCircle(dp(74f), h - dp(75f), dp(4f), slicePaint)
     }
+
+    /**
+     * Where Pip's middle has to sit to look like he is serving from behind the counter.
+     * Props are drawn over him, so at this height the counter crosses his waist and the
+     * sign hides his legs, which is exactly the effect we want.
+     */
+    fun behindCounterY(): Float = posY + windowH - dp(54f)
 
     /** Pours a glass, beside the stand. Returns false when there is no room for another. */
     fun serve(): Boolean {
@@ -102,7 +111,8 @@ class LemonadeStand(host: PropHost) : Prop(host) {
 
     override fun describe(): String {
         val glasses = host.propsOnScreen().count { it is LemonadeGlass }
-        return "your lemonade stand (glasses out right now: $glasses)"
+        return "your lemonade stand, with you standing behind the counter " +
+            "(glasses out right now: $glasses)"
     }
 
     private fun next(lines: List<String>): String {

@@ -94,7 +94,9 @@ class OverlayService : Service(), PropHost {
             // when the reason is the break.
             val outcome = Toys.summon(service, toy)
             if (!outcome.ok && Quiet.active(service)) {
-                service.sayAloud("I'm on a break. you asked. I'm honouring it. resentfully.")
+                service.sayAloud(
+                    "I'm on a break. you asked, so I'm honouring it. *sits on own hands*"
+                )
             }
             return outcome.ok
         }
@@ -447,9 +449,9 @@ class OverlayService : Service(), PropHost {
             }
         }
 
-        // Standing still and paying attention, unless he is repositioning for the
-        // input bar to stay above the keyboard.
-        if (attentive && !relocating) return
+        // Standing still and paying attention, unless he is finishing a walk he was
+        // already on (a toy sent him, or he is repositioning for the input bar).
+        if (attentive && !walking && !relocating) return
 
         if (walking) {
             val dx = targetX - posX
@@ -712,8 +714,8 @@ class OverlayService : Service(), PropHost {
     private fun sayAloud(text: String) {
         hideThinking()
         attentive = true
-        walking = false
-        pet?.walking = false
+        // Talking no longer stops him mid-stride: a toy that sent him somewhere must not
+        // have its walk cancelled by the line he says on the way. The bubble follows him.
         showBubble(text)
         // Being smug or annoyed outranks talking: he wants you to see his face.
         val mood = pet?.mood

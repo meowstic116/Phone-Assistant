@@ -229,8 +229,10 @@ object Toys {
                     )
                     stand.serve() -> Outcome(
                         true,
-                        "you poured them a lemonade and slid it across. the glass is sitting " +
-                            "on their screen now — they can drag it and tap it to drink it."
+                        "you set up your stand, walked around behind the counter and poured " +
+                            "them a lemonade. the glass is sitting on their screen now — they " +
+                            "can drag it and tap it to drink it. you are standing behind the " +
+                            "stand, ready for business."
                     )
                     else -> Outcome(
                         false,
@@ -333,8 +335,8 @@ object Toys {
             host.propsOnScreen().forEach { host.dropProp(it) }
             host.feel(PetView.Mood.ANNOYED, 4000L)
             notes += "they asked you to put your toys away and not get any out for " +
-                "${describeDuration(length)}. you packed everything up, with a sigh, and " +
-                "you'll honour it. mostly."
+                "${describeDuration(length)}. you packed everything up and you'll honour " +
+                "it, with one small joke about it."
             return notes.joinToString(" ")
         }
 
@@ -353,10 +355,10 @@ object Toys {
             host.feel(PetView.Mood.ANNOYED, 2500L)
             notes += if (named == null) {
                 "they told you to tidy everything away, so you packed every toy and painting " +
-                    "back into your pocket, sulking the entire time."
+                    "back into your pocket, with a theatrical sigh and a joke about it."
             } else {
-                "they asked you to put ${named.label.lowercase()} away, so you did, with " +
-                    "the face of someone doing a favour they resent."
+                "they asked you to put ${named.label.lowercase()} away, so you did, and you " +
+                    "are pretending to be very dignified about it."
             }
             return notes.joinToString(" ")
         }
@@ -364,8 +366,8 @@ object Toys {
         if (dislikesIt(text)) {
             if (host.propsOnScreen().isEmpty()) return notesText(notes)
             host.feel(PetView.Mood.ANNOYED, 6000L)
-            notes += "they just criticised something you made or gave them. you are wounded " +
-                "and pretending you are not. be a bit annoyed, mock them fondly, do not grovel."
+            notes += "they just poked fun at something you made or gave them. take a mock " +
+                "gasp, defend it with a joke, and do not grovel."
             return notes.joinToString(" ")
         }
 
@@ -386,22 +388,31 @@ object Toys {
             blocks += "YOU ARE ON A TOY BREAK\n" +
                 "- They asked you to lay off the toys, and there is about " +
                 describeDuration(left) + " of that break left before you may get one out " +
-                "again. If they ask about it, tell them how long is left and sulk about it. " +
-                "Don't offer to start a game, pour a lemonade or paint anything until it's over."
+                "again. If they ask about it, tell them how long is left and make a joke " +
+                "about waiting. Don't offer to start a game, pour a lemonade or paint " +
+                "anything until it's over."
         }
 
+        // Always sent, even when empty: a missing list read as "no information", and he
+        // filled the gap with whatever toy the conversation had mentioned earlier.
         val lines = host.propsOnScreen()
             .map { it.describe() }
             .filter { it.isNotBlank() }
             .distinct()
-        if (lines.isNotEmpty()) {
-            blocks += buildString {
-                append("WHAT YOU HAVE OUT ON THEIR SCREEN (you put it there, it is yours)\n")
+        blocks += buildString {
+            append("WHAT IS ON THEIR SCREEN RIGHT NOW (this list is the whole truth)\n")
+            if (lines.isEmpty()) {
+                append("- nothing of yours. their screen is completely clear of toys.\n")
+            } else {
                 lines.forEach { append("- ").append(it).append('\n') }
-                append("They can drag any of it anywhere and tap it to use it, and they can ask ")
-                append("you to put one away. Talk about it when it comes up, brag about it, or ")
-                append("complain when they mess with it.")
             }
+            append("Only ever talk about what is listed above. Anything not on that list is ")
+            append("not on their screen: do not mention it, do not act as if a game of it is ")
+            append("happening, do not ask them to tap something that isn't there. A toy that ")
+            append("came up earlier in the conversation is gone unless it is listed again. ")
+            append("They can drag anything on the list anywhere and tap it to use it, and they ")
+            append("can ask you to put one away. React to what is really there — brag, explain ")
+            append("the daft rules, react to the score, or ask how it's going.")
         }
 
         return blocks.joinToString("\n\n")
@@ -433,10 +444,10 @@ object Toys {
 
     private fun openStand(host: OverlayService): LemonadeStand? {
         val stand = LemonadeStand(host)
-        return if (stand.bring(host.stageWidth() * 0.1f, host.stageHeight() * 0.55f)) {
-            stand
-        } else {
-            null
-        }
+        if (!stand.bring(host.stageWidth() * 0.1f, host.stageHeight() * 0.55f)) return null
+        // Opening the stand is a two-step trick: put it down, then take his place behind
+        // the counter so he is actually serving rather than standing next to it.
+        host.petWalkTo(stand.centreX, stand.behindCounterY(), null)
+        return stand
     }
 }

@@ -137,7 +137,12 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
         val maxY = (host.stageHeight() - windowH - host.stageBottom()).toFloat()
             .coerceAtLeast(minY)
         posY = y.coerceIn(minY, maxY)
-        if (::params.isInitialized) host.updateProp(this)
+        if (!::params.isInitialized) return
+        // The window is placed from these params, so they have to carry the new spot:
+        // asking for a layout update without them just re-applies where it already was.
+        params.x = posX.toInt()
+        params.y = posY.toInt()
+        host.updateProp(this)
     }
 
     /** Position it and add it to the screen in one step. */

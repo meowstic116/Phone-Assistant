@@ -50,13 +50,16 @@ from work" leaves the lemonade stand alone.
 
 - **Lemonade stand** — tap the stand and he pours you a glass, to a maximum of two because
   he has one jug. The glass is its own prop: tap it once to drink, tap the empty glass
-  again to hand it back. Ask him for "a lemonade" in chat and he pours one.
+  again to hand it back. Ask him for "a lemonade" in chat and he pours one. When he opens
+  the stand he walks round behind the counter and serves from there; the counter and the
+  sign are drawn over him, so he is standing behind the stand rather than next to it.
 - **Canvas** — he walks somewhere, sits down with folded legs, and paints for about seven
-  seconds while the picture fills in brush-stroke by brush-stroke. There are five paintings
-  (a self-portrait, a childlike crayon house, a banana in sunglasses, mountains, and some
-  abstract blobs); each has a title and a personality. When he is done he gets up, says
-  what it is called, and wanders off leaving it on the screen. Tap the painting to hear his
-  artist's statement, or ask him about it.
+  seconds while the picture fills in brush-stroke by brush-stroke. There are five paintings,
+  all drawn in code: a dog in a tiny hat who owes him twenty bucks, Pip as a hundred-foot
+  city-stomping monster, a crowned sandwich with one small patient person beside it, a
+  toaster in sunglasses plugged into a lemon, and a fish in a space helmet planting a flag
+  on the moon. When he is done he gets up, says what it is called, and wanders off leaving
+  it on the screen. Tap the painting to hear his artist's statement, or ask him about it.
 - **Soccer** — goals at the top and bottom of the screen, a ball in the middle, and a score
   pill. Tap the ball to boot it at Pip's goal (tap left or right of the middle to angle it);
   he walks over and kicks it back at yours. First to three or ninety seconds, and he
@@ -69,19 +72,23 @@ from work" leaves the lemonade stand alone.
 
 ## Personality
 
-He is a jokester: cocky, teasing, competitive, and a bit rowdy. He gloats when he wins,
-sulks and accuses you of cheating when he loses, and takes criticism of his painting or his
-lemonade personally. He still helps when you actually need something — usually with a
-theatrical sigh first, then properly. The default prompt is long on purpose and is fully
-rewritable from the **Personality** screen.
+He is a jokester: daft, playful, cheerful, always up for a bit — cheeky rather than
+rebellious, and never genuinely grumpy. He teases because he is fond of you, gloats in a
+silly way when he wins, laughs off losing, and takes criticism of his painting as an excuse
+for an even better joke. He still helps when you actually need something — usually with a
+joke first, then properly. The default prompt is long on purpose and is fully rewritable
+from the **Personality** screen.
 
 Reactions to what you do with his toys are local canned lines, so they cost no API calls.
 Criticism and requests in chat go through the model with a note about what just happened,
-so his reply matches: tell him the lemonade was bad and he will be wounded about it.
+so his reply matches: tell him the lemonade was bad and he gets mock-indignant about it.
+Every reply also carries an exact list of what is on the screen, and he is told that the
+list is the only truth — if a toy is not on it, it is not there and he must not talk as if
+it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.20-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.21-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
