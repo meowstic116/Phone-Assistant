@@ -203,6 +203,10 @@ object Agent {
         var lastScene = ""
         var lastAnswer = ""
         var sameAnswer = 0
+        // The label he pressed when it was one of several on the screen: a feed's button rather
+        // than a single button on one page. Kept because a job that answers done goes back to
+        // it — a button that repeated down a feed is still repeating further down.
+        var repeatLabel: String? = null
         try {
             // The apps on this phone, read once: searched so a job that names an app starts
             // in that app, and named in every step so the model can only ask for something
@@ -269,6 +273,20 @@ object Agent {
                 // says what is true instead.
                 if (!repeated && decision.say.isNotBlank() && alive()) onSay(decision.say)
                 if (decision.action == DONE) {
+                    // He has read this one screen and decided from it, and a feed is longer than
+                    // one screen. So the answer is checked before it is taken: if the button he
+                    // was pressing is still down there, or the request names what the screen is
+                    // full of, the sweep looks down the feed first and the ending says what it
+                    // found rather than what he assumed. A screen with nothing left to press is
+                    // done as he said, in his words.
+                    val feed = feedLeft(screen, request, repeatLabel)
+                    if (feed != null) {
+                        val swept = sweepFeed(mine, feed, "", onAct)
+                        if (swept.complete) {
+                            finish(swept.line(), swept.reason(feed))
+                            return
+                        }
+                    }
                     finish(
                         decision.say.ifBlank { "Done." },
                         if (decision.say.isBlank()) STOP_DONE else "finished — ${decision.say}"
@@ -373,6 +391,14 @@ object Agent {
                     // any budget. The rest of them are pressed here instead, down the list.
                     if (landed && decision.action == "tap") {
                         val label = target?.label.orEmpty()
+                        // One of several carrying the same label: a feed's button rather than a
+                        // page's single one. Remembered so a done answer can be sent back to it.
+                        if (label.isNotBlank() &&
+                            !STATED.containsMatchIn(label.lowercase()) &&
+                            screen.items.count { it.label.equals(label, ignoreCase = true) } >= 2
+                        ) {
+                            repeatLabel = label
+                        }
                         val swept = sweepFeed(
                             mine,
                             label,
@@ -478,7 +504,11 @@ object Agent {
         alreadyPressed: String,
         onAct: (Boolean) -> Boolean
     ): Sweep {
-        if (label.isBlank() || UNSAFE_REPEAT.containsMatchIn(label.lowercase())) return Sweep()
+        if (label.isBlank()) return Sweep()
+        val plain = label.lowercase()
+        // Money, deletion, and labels that are already the state after the press: a sweep of a
+        // "Buy" spends, and a sweep of a "Given" takes back what was given.
+        if (UNSAFE_REPEAT.containsMatchIn(plain) || STATED.containsMatchIn(plain)) return Sweep()
         var screen = Screen.snapshot() ?: return Sweep()
         // Nothing carrying the label is a button that was pressed and has stopped reading like
         // one. One left is still a sweep: the model's own press has usually changed its label
@@ -566,6 +596,49 @@ object Agent {
         }
         // A sweep the user stopped is not one that finished looking.
         return Sweep(pressed, screens, complete && ticket.get() == mine, why)
+    }
+
+    /**
+     * The label on this screen that the job still has work in, if there is one.
+     *
+     * Two ways a label counts. It is the one he was pressing when it was one of several on the
+     * screen — a feed's button is still a feed's button further down — or the request itself
+     * names what the label says. The second is what catches a job that never found the button:
+     * the request says kudos, the screen is full of kudos, and answering done there is the job
+     * ending on a screen it has not worked.
+     *
+     * Money and deletion never count, for the same reason a sweep refuses them, and a long
+     * label is a row of text rather than a button, so it is left alone.
+     */
+    private fun feedLeft(
+        screen: Screen.Snapshot,
+        request: String,
+        repeatLabel: String?
+    ): String? = screen.items
+        .filter { item ->
+            val label = item.label
+            label.isNotBlank() && label.length <= FEED_LABEL_MAX &&
+                !UNSAFE_REPEAT.containsMatchIn(label.lowercase())
+        }
+        .groupBy { it.label }
+        .filter { (label, where) ->
+            where.size >= 2 &&
+                !STATED.containsMatchIn(label.lowercase()) &&
+                (label == repeatLabel || namesIt(request, label))
+        }
+        .maxByOrNull { it.value.size }
+        ?.key
+
+    /**
+     * Whether the request asks for a button everywhere, and names what the button says in words
+     * of four letters or more. Both halves matter: the scope word is what makes it a sweep, and
+     * the shared word is what makes this label the one it is talking about.
+     */
+    private fun namesIt(request: String, label: String): Boolean {
+        val words = request.lowercase()
+        if (!SCOPE.containsMatchIn(words)) return false
+        val name = label.lowercase()
+        return WORD.findAll(words).any { it.value.length >= 4 && name.contains(it.value) }
     }
 
     /** What is on a screen and where it sits: equal on both sides of a scroll means no movement. */
@@ -1007,6 +1080,27 @@ object Agent {
             "delete|remove|uninstall|erase|wipe|reset)\\b"
     )
 
+    /** A label longer than this is a row of text rather than a button, and is never a feed. */
+    private const val FEED_LABEL_MAX = 40
+
+    /** Words, for finding what a request calls the button it wants pressed. */
+    private val WORD = Regex("[a-z]+")
+
+    /**
+     * A job that wants a button pressed everywhere says so: every, all, each. Without one of
+     * these the request names a thing rather than a sweep — "open the chat with Mum" is not
+     * "open every chat" — so a screen full of that word is not work left over.
+     */
+    private val SCOPE = Regex("\\b(every|everyone|everything|all|each)\\b")
+
+    /**
+     * Labels that read as the state after the press rather than the press itself: a given kudos
+     * is not a kudos waiting to be given, and pressing it again takes it back.
+     */
+    private val STATED = Regex(
+        "\\b(given|added|done|liked|followed|following|subscribed|joined|saved|sent|pressed)\\b"
+    )
+
     /** How long a job is, in the words the bubble uses. */
     private val JOB_MINUTES = JOB_MS / 60_000L
 
@@ -1099,7 +1193,10 @@ object Agent {
           and nothing else: every other one is pressed for you, down the whole feed, and screens
           that already have it are checked on the way in case one was missed. That is usually the
           entire task and the job ends there; add "more":true only when something still has to
-          happen afterwards.
+          happen afterwards. Press it in the row itself rather than opening the row first: an
+          activity opened and backed out of gave no kudos, and the button is still in the row.
+          Do not answer done while the screen still shows that button repeated — it is swept
+          first, and an answer given without looking past one screen is not believed.
         - Never type into an element marked password, and never put a password in "text": a
           password field is only ever filled from a saved login. Never pay, buy, confirm a
           purchase or delete something the user did not name — if the task needs that, stop

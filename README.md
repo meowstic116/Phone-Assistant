@@ -65,7 +65,10 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   front is changing. A button that repeats down a feed — "Give Kudos" on every activity — is
   pressed by him down the whole feed once you have tapped one: rows that already have theirs
   are looked past rather than taken as the end, three screens in a row with nothing to press
-  is what finishing looks like, and that is normally the whole task. If the request names an app he
+  is what finishing looks like, and that is normally the whole task. His answer of "finished"
+  is checked against the screen before it is believed: if the button he was pressing is still
+  repeated down it, or the request asks for something "on every" one of what the screen is
+  full of, the job goes and looks first and says what it found. If the request names an app he
   opens it before his first step — unless you are already in it, in which case he leaves your
   screen alone — so the job happens in front of you rather than somewhere behind   it, and he moves into the bottom corner so he is not covering it. He is given the list of apps really
   installed on the phone, so "open WhatsApp" reaches that WhatsApp and not a guess.
@@ -197,7 +200,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.109-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.110-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
