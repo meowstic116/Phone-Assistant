@@ -345,15 +345,13 @@ object Agent {
                     if (landed) SystemClock.sleep(SETTLE_MS)
                     // A button that repeats down a list — "Give Kudos" on every activity — is
                     // one answer happening many times, and a request per item does not fit in
-                    // any budget. The rest of the ones on screen are pressed here instead.
-                    val label = if (landed && decision.action == "tap") target?.label else null
-                    if (label != null &&
-                        screen.items.count { it.label.equals(label, true) && !it.password } >= 2
-                    ) {
+                    // any budget. The rest of them are pressed here instead, down the list.
+                    if (landed && decision.action == "tap") {
+                        val label = target?.label.orEmpty()
                         val more = replayTap(
                             mine,
                             label,
-                            target?.bounds?.flattenToString(),
+                            target?.bounds?.flattenToString().orEmpty(),
                             onAct
                         )
                         if (more > 0) {
@@ -396,87 +394,81 @@ object Agent {
      *
      * A feed where one button repeats — "Give Kudos", "Like", "Follow" — is the same answer
      * happening many times. Once the model has pressed one, the others are pressed here: read
-     * the screen, find the next, press it. When the screen has none left it scrolls on and
-     * keeps looking, up to [REPEAT_SCROLLS] screens down, until [REPEAT_LIMIT] have been
-     * pressed or the list runs out. A list that used to cost a request an item now costs one
-     * request for a stretch of it.
+     * the screen, find the next, press it, and when this screen has none left, scroll on and
+     * keep going. [REPEAT_LIMIT] presses and [REPEAT_SCROLLS] screens is the whole budget, and
+     * the end of the list ends it sooner. A list that used to cost a request an item now costs
+     * one for a stretch of it.
      *
-     * It is deliberately narrow. Only a plain tap is replayed; only for a label that was
-     * already on the screen more than once; only while the app stays the same; and never for a
-     * label that reads like money or deletion, because a repeated "Buy" is not the sort of
-     * help anyone asked for. Each element is pressed at most once, recognised by where it
-     * sits, and the one the model itself just pressed is not pressed again — so a button that
-     * ignores a press cannot be pressed at all day.
+     * It is deliberately narrow: a plain tap only, never while the app changes underneath it,
+     * and never a label that reads like money or deletion, because a repeated "Buy" is not the
+     * sort of help anyone asked for.
      */
     private fun replayTap(
         mine: Int,
         label: String,
-        alreadyPressed: String?,
+        alreadyPressed: String,
         onAct: (Boolean) -> Boolean
     ): Int {
         if (label.isBlank() || UNSAFE_REPEAT.containsMatchIn(label.lowercase())) return 0
-        val pressed = HashSet<String>()
-        alreadyPressed?.let { pressed += it }
         var screen = Screen.snapshot() ?: return 0
+        // One of them is a button, not a list — and the one the model just pressed was it.
+        if (screen.items.count { it.label.equals(label, ignoreCase = true) } < 2) return 0
         val app = screen.app
-        var count = 0
+        // Where the presses have landed, so a button that ignores one is not pressed at all
+        // day. Bounds rather than labels: the next activity down has the same label.
+        val done = hashSetOf(alreadyPressed)
+        var pressed = 0
         var scrolls = 0
-        // The screen the last scroll was taken from, for noticing the end of the list.
-        var scrolledFrom = ""
-        while (count < REPEAT_LIMIT) {
-            if (ticket.get() != mine) return count
+        while (pressed < REPEAT_LIMIT && ticket.get() == mine) {
             val item = screen.items.firstOrNull { item ->
-                !item.password && item.label.equals(label, ignoreCase = true) &&
-                    item.bounds.flattenToString() !in pressed
+                item.label.equals(label, ignoreCase = true) &&
+                    item.bounds.flattenToString() !in done
             }
             if (item == null) {
-                // None of them left on this screen: the rest of the list is further down. The
-                // pass carries on down it rather than handing back a screenful at a time,
-                // because a feed is one list and a request per screenful is the cost this is
-                // here to remove. Bounded like the pressing is, and it stops at the end of
-                // the list: a scroll that changes nothing means there is nothing below.
-                if (scrolls >= REPEAT_SCROLLS) return count
-                val scene = screen.app + '\u0000' + screen.listing
-                if (scene == scrolledFrom) return count
-                scrolledFrom = scene
-                if (!onAct(true)) return count
+                // None left on this screen: the rest of the list is further down, and one
+                // scroll away is the whole point of carrying on. A scroll that leaves the
+                // screen exactly as it was is the end of the list.
+                if (scrolls >= REPEAT_SCROLLS) return pressed
+                val before = screen.listing
+                if (!onAct(true)) return pressed
                 val moved = try {
                     Screen.scroll(true, null)
                 } finally {
                     onAct(false)
                 }
-                if (!moved) return count
+                if (!moved) return pressed
                 scrolls++
-                Diag.jobStep(mine, "scroll down", "scrolled down, still finding \"$label\"", true)
+                Diag.jobStep(mine, "scroll down", "scrolled down for more \"$label\"", true)
                 SystemClock.sleep(SETTLE_MS)
-                val below = Screen.snapshot() ?: return count
-                if (below.app != app) return count
+                val below = Screen.snapshot() ?: return pressed
+                if (below.app != app || below.listing == before) return pressed
                 screen = below
                 continue
             }
-            pressed += item.bounds.flattenToString()
-            if (!onAct(true)) return count
+            done += item.bounds.flattenToString()
+            if (!onAct(true)) return pressed
             val landed = try {
                 Screen.tap(item)
             } finally {
                 onAct(false)
             }
-            // Recorded like any other press: the count above is model calls, not presses.
+            // Every press is in the record; none of them is a step, because none of them
+            // asked the model anything.
             Diag.jobStep(
                 mine,
                 "tap \"$label\"",
                 if (landed) "tapped it" else "$FAILED the tap did not land",
                 landed
             )
-            if (!landed) return count
-            count++
+            if (!landed) return pressed
+            pressed++
             SystemClock.sleep(SETTLE_MS)
-            val next = Screen.snapshot() ?: return count
+            val next = Screen.snapshot() ?: return pressed
             // Somewhere else entirely: the list is not what is in front any more.
-            if (next.app != app) return count
+            if (next.app != app) return pressed
             screen = next
         }
-        return count
+        return pressed
     }
 
     /** Asks for the next step, with what has happened so far and the screen as it is now. */
