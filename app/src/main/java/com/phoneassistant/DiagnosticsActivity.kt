@@ -233,7 +233,13 @@ class DiagnosticsActivity : Activity() {
             } else {
                 job.steps.forEachIndexed { index, step ->
                     out.append("  ").append(index + 1).append(". ")
-                        .append(if (step.ok) "ok" else "NO").append("  ")
+                        .append(
+                            when {
+                                step.skipped -> "SKIP"
+                                step.ok -> "ok"
+                                else -> "NO"
+                            }
+                        ).append("  ")
                         .append(step.text)
                     if (step.outcome.isNotBlank()) out.append(" → ").append(step.outcome)
                     out.append('\n')
@@ -242,6 +248,10 @@ class DiagnosticsActivity : Activity() {
                 // same as the screen having changed, and a job can look healthy here and
                 // still have gone nowhere.
                 detail("ok = Android accepted it; the screen was read again after every step")
+                if (job.steps.any { it.skipped }) {
+                    detail("SKIP = nothing was pressed: his own window would not get out of " +
+                        "the way in time")
+                }
             }
         }
 

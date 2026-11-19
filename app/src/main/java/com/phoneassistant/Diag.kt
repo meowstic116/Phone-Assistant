@@ -36,8 +36,18 @@ object Diag {
     var lastCaught: Event? = null
         private set
 
-    /** One thing a job tried: what it did, how that went, and whether Android took it. */
-    data class Step(val text: String, val outcome: String, val ok: Boolean)
+    /**
+     * One thing a job tried: what it did, how that went, whether Android took it, and whether
+     * it was pressed at all. [skipped] is the case worth being explicit about — the step was
+     * abandoned rather than failed, because his own window would not get out of its way and a
+     * press might have landed on it.
+     */
+    data class Step(
+        val text: String,
+        val outcome: String,
+        val ok: Boolean,
+        val skipped: Boolean = false
+    )
 
     /**
      * The last phone job from the words that asked for it to the line that ended it.
@@ -68,11 +78,11 @@ object Diag {
     }
 
     /** One step, as it happened, with what it was aimed at and what came back. */
-    fun jobStep(id: Int, text: String, outcome: String, ok: Boolean) {
+    fun jobStep(id: Int, text: String, outcome: String, ok: Boolean, skipped: Boolean = false) {
         val current = lastJob ?: return
         if (current.id != id) return
         lastJob = current.copy(
-            steps = current.steps + Step(oneLine(text, 120), oneLine(outcome, 120), ok)
+            steps = current.steps + Step(oneLine(text, 120), oneLine(outcome, 120), ok, skipped)
         )
     }
 

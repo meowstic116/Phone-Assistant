@@ -145,6 +145,14 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     private var lastRawY = 0f
     private var travelled = false
 
+    /**
+     * True while a finger is on this prop. A step that starts while a toy is being dragged
+     * leaves that one touchable: taking the touch away mid-drag would drop it out of the hand
+     * holding it.
+     */
+    var held = false
+        private set
+
     private val touch = View.OnTouchListener { _, event ->
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -153,6 +161,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
                 lastRawX = event.rawX
                 lastRawY = event.rawY
                 travelled = false
+                held = true
                 lift(true)
                 true
             }
@@ -172,6 +181,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
             }
 
             MotionEvent.ACTION_UP -> {
+                held = false
                 lift(false)
                 if (travelled) onDragFinished() else onTap(event.x, event.y)
                 travelled = false
@@ -179,6 +189,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
             }
 
             MotionEvent.ACTION_CANCEL -> {
+                held = false
                 lift(false)
                 travelled = false
                 true
@@ -234,6 +245,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     /** Shrinks and fades away, for a prop that has already left the stage. */
     fun fadeAway() {
         leaving = true
+        held = false
         // A prop on its way out must not answer a last tap, and must not be picked up by a
         // finger mid-fade and made opaque again for 170ms.
         setOnTouchListener(null)

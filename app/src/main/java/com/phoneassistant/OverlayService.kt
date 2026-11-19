@@ -238,6 +238,16 @@ class OverlayService : Service(), PropHost {
     /** The same for Pip himself: he is a touchable window too, and stands in a corner. */
     private var petDucked = false
 
+    /** True for the moment a step is pressing, so anything created meanwhile starts aside. */
+    private var overlayDucked = false
+
+    /** The same for the floating diagnostics panel and for the toys. */
+    private var hudDucked = false
+    private var propsDucked = false
+
+    /** True while the diagnostics panel is being dragged: it keeps its touch then. */
+    private var hudHeld = false
+
     /** True while a finger is on the chip, so the ticker does not drag it back mid-drag. */
     private var chipDragging = false
     private var chipMoved = false
@@ -447,10 +457,12 @@ class OverlayService : Service(), PropHost {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             // Touchable so it can be dragged, but never focusable: it must not take the
-            // keyboard away from the app whose keyboard it is measuring.
+            // keyboard away from the app whose keyboard it is measuring. A panel opened
+            // while a step is pressing starts out of the way like everything else.
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                (if (overlayDucked) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0),
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -462,6 +474,8 @@ class OverlayService : Service(), PropHost {
         if (!runCatching { windowManager.addView(view, params) }.isSuccess) return
         hud = view
         hudParams = params
+        hudDucked = overlayDucked
+        hudHeld = false
         // Painted straight away, so it never appears hollow for a quarter of a second.
         renderHud()
         handler.postDelayed(hudTicker, HUD_REFRESH_MS)
@@ -472,6 +486,9 @@ class OverlayService : Service(), PropHost {
         hud?.let { view -> runCatching { windowManager.removeView(view) } }
         hud = null
         hudParams = null
+        // The next panel is a new window with new params, so it starts unducked.
+        hudDucked = false
+        hudHeld = false
     }
 
     private val hudTicker = object : Runnable {
@@ -499,6 +516,7 @@ class OverlayService : Service(), PropHost {
                 hudDownY = event.rawY
                 hudLeft = params.x
                 hudTop = params.y
+                hudHeld = true
                 true
             }
 
@@ -514,7 +532,13 @@ class OverlayService : Service(), PropHost {
                 true
             }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                hudHeld = false
+                // A step that began while the panel was held left it alone; let go, it steps
+                // aside for the rest of that step instead of staying in the way.
+                if (overlayDucked) setHudDucked(true)
+                true
+            }
 
             else -> false
         }
@@ -737,10 +761,12 @@ class OverlayService : Service(), PropHost {
             prop.windowH,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             // Touchable and draggable, but never focusable: a toy must not steal the
-            // keyboard or the taps meant for the app underneath.
+            // keyboard or the taps meant for the app underneath. A toy put down while a step
+            // is pressing starts out of the way for that step, as all of them do.
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                (if (overlayDucked) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0),
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -1632,11 +1658,7 @@ class OverlayService : Service(), PropHost {
         val view = jobBar ?: return
         val params = jobBarParams ?: return
         chipDucked = ducked
-        params.flags = if (ducked) {
-            params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        } else {
-            params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-        }
+        params.flags = duckFlags(params.flags, ducked)
         // The fade-in from showJobBar would otherwise bring it back to full while it is
         // still stepping aside, so the animation is stopped before the alpha is set.
         view.animate().cancel()
@@ -1654,24 +1676,64 @@ class OverlayService : Service(), PropHost {
         if (petDucked == ducked) return
         val view = pet ?: return
         petDucked = ducked
-        petParams.flags = if (ducked) {
-            petParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        } else {
-            petParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-        }
+        petParams.flags = duckFlags(petParams.flags, ducked)
         runCatching { windowManager.updateViewLayout(view, petParams) }
     }
+
+    /**
+     * The floating diagnostics panel. It is touchable so it can be dragged, which means it can
+     * catch a press meant for the app underneath, exactly as the chip can.
+     */
+    private fun setHudDucked(ducked: Boolean) {
+        val view = hud ?: return
+        val params = hudParams ?: return
+        if (hudDucked == ducked) return
+        // A panel being dragged keeps its touch: taking it away mid-drag would end the drag
+        // the user is in the middle of, which is worse than the press it might miss.
+        if (ducked && hudHeld) return
+        hudDucked = ducked
+        params.flags = duckFlags(params.flags, ducked)
+        runCatching { windowManager.updateViewLayout(view, params) }
+    }
+
+    /**
+     * The toys. Each one is a touchable window the user can put down anywhere, so any of them
+     * can be sitting exactly where a step wants to press; they all step aside together.
+     *
+     * The one being dragged is left alone — it is in a hand, and taking the touch away would
+     * drop it — so it is ducked at the next step instead of this one.
+     */
+    private fun setPropsDucked(ducked: Boolean) {
+        if (propsDucked == ducked) return
+        propsDucked = ducked
+        props.forEach { prop ->
+            if (ducked && prop.held) return@forEach
+            prop.params.flags = duckFlags(prop.params.flags, ducked)
+            runCatching { windowManager.updateViewLayout(prop, prop.params) }
+        }
+    }
+
+    /** Adds or removes the one flag that decides whether a window can catch a press. */
+    private fun duckFlags(flags: Int, ducked: Boolean): Int =
+        if (ducked) {
+            flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        } else {
+            flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        }
 
     /**
      * Every window of the overlay that can take a touch, aside for a step or back again.
      *
      * The bubble and the thinking dots are already FLAG_NOT_TOUCHABLE for their whole lives, so
-     * a job's press has always gone straight through them. These two — the chip and the
-     * character — are the ones that take fingers.
+     * a job's press has always gone straight through them. Everything else — the chip, the
+     * character, the floating diagnostics panel and every toy — takes fingers and has to move.
      */
     private fun applyDuck(ducked: Boolean) {
+        overlayDucked = ducked
         setChipDucked(ducked)
         setPetDucked(ducked)
+        setHudDucked(ducked)
+        setPropsDucked(ducked)
     }
 
     /**

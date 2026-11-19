@@ -182,25 +182,29 @@ object Agent {
                 // The overlay's own windows get out of the way of the press. This is the one
                 // window in which the phone is being touched, so it is the one window in
                 // which they must not be touchable: a press aimed at a row that happens to
-                // sit exactly where the user left the chip, or under Pip himself, would
-                // otherwise stop the job or drag him instead of pressing the row. An
+                // sit exactly where the user left the chip, or under Pip himself, a toy or
+                // the floating panel, would otherwise land on his window instead of the row.
+                // An
                 // injected gesture keeps running after perform returns — a long press is
                 // 550ms — so they stay away through the settle too, and come back while the
                 // model is thinking, which is most of the time a job runs.
                 val clear = onAct(true)
+                // Not a failure of the step but a step that was never taken: nothing was
+                // pressed, so the record says so instead of blaming the app he was in.
+                val skipped = !clear
                 try {
                     val outcome = if (clear) {
                         perform(ctx, decision, screen)
                     } else {
                         // The overlay could not get out of the way in time. Pressing anyway
-                        // risks the press landing on it, which is the bug being fixed, so
-                        // nothing is pressed and the step says so.
-                        "$FAILED the phone was too busy to press anything safely"
+                        // risks the press landing on one of his own windows, which is the bug
+                        // being fixed, so nothing is pressed and the record says why.
+                        OVERLAY_BUSY
                     }
                     val landed = !outcome.startsWith(FAILED)
                     history.append(steps + 1).append(". ").append(decision.summary(screen))
                         .append(" → ").append(outcome).append('\n')
-                    Diag.jobStep(mine, decision.summary(screen), outcome, landed)
+                    Diag.jobStep(mine, decision.summary(screen), outcome, landed, skipped)
                     steps++
                     if (landed) SystemClock.sleep(SETTLE_MS)
                 } finally {
@@ -394,6 +398,10 @@ object Agent {
     // ---------------------------------------------------------------- the protocol
 
     private const val FAILED = "failed:"
+
+    /** A step that was never pressed, because his own windows would not move off the screen. */
+    private const val OVERLAY_BUSY =
+        "$FAILED his own window would not get out of the way in time"
     private const val DONE = "done"
 
     // Why a job stopped, in the words the diagnostics record uses. Separate from what he
