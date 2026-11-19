@@ -82,6 +82,33 @@ fun main() {
     check(like("Like", checked = true) == JobProgress.ReactionState.APPLIED)
     check(like("Give kudos", "277 likes") == JobProgress.ReactionState.UNKNOWN)
 
+    val kudosReaction = JobProgress.Reaction.KUDOS
+    check(JobProgress.reactionSummary(kudosReaction, "6 gave kudos"))
+    check(JobProgress.reactionSummary(kudosReaction, "You and 1 other gave kudos"))
+    check(JobProgress.reactionSummary(kudosReaction, "You and 2 others gave kudos"))
+    check(!JobProgress.reactionSummary(kudosReaction, "Give Kudos"))
+    check(kudos("You and 2 others gave kudos") == JobProgress.ReactionState.UNKNOWN)
+    val ready = JobProgress.ReactionState.READY
+    val applied = JobProgress.ReactionState.APPLIED
+    check(JobProgress.verifiedReaction(true, listOf(applied)))
+    check(!JobProgress.verifiedReaction(true, emptyList()))
+    check(!JobProgress.verifiedReaction(true, listOf(ready, applied)))
+    check(!JobProgress.verifiedReaction(false, listOf(applied)))
+    val landmarks = setOf("activity A", "activity B", "activity C", "activity D", "old counter")
+    check(JobProgress.similarFeedContent(landmarks, landmarks - "old counter" + "new counter"))
+    check(!JobProgress.similarFeedContent(landmarks, setOf("activity A", "activity details", "comments")))
+
+    val settling = JobProgress.StableFeedRead()
+    check(!settling.observe("card y=500", 2))
+    check(!settling.observe("card y=230", 2)) // A moving viewport isn't ready for taps.
+    check(!settling.observe(null, 2))
+    check(!settling.observe("card y=210", 2))
+    check(settling.observe("card y=210", 2))
+    val delayedScroll = JobProgress.StableFeedRead()
+    repeat(5) { check(!delayedScroll.observe("old viewport", 6)) }
+    check(!delayedScroll.observe("new viewport", 2))
+    check(delayedScroll.observe("new viewport", 2))
+
     // A run with blank or already-reacted screens can still reach a later eligible card.
     val feed = JobProgress.FeedTraversal()
     val viewports = listOf("first ready", "no controls 1", "no controls 2", "no controls 3",

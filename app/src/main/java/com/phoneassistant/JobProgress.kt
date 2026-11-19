@@ -49,6 +49,40 @@ internal object JobProgress {
         }
     }
 
+    // Reaction totals are volatile labels, not buttons or evidence that the viewport moved.
+    private val kudosSummary = Regex(
+        "(?:[0-9][0-9,.]* gave kudos|you(?: and [0-9][0-9,.]* others?)? gave kudos|no kudos yet|be the first to give kudos)"
+    )
+
+    fun reactionSummary(reaction: Reaction?, label: String): Boolean =
+        reaction == Reaction.KUDOS && kudosSummary.matches(normalize(label).trimEnd('.', '!'))
+
+    class StableFeedRead {
+        private var previous: String? = null
+        private var repeats = 0
+
+        fun observe(key: String?, required: Int): Boolean {
+            repeats = when {
+                key.isNullOrBlank() -> 0
+                key == previous -> repeats + 1
+                else -> 1
+            }
+            previous = key
+            return repeats >= required
+        }
+    }
+
+    /** Recovery only: a few live labels can change while the same scroll container stays put. */
+    fun similarFeedContent(before: Set<String>, after: Set<String>): Boolean {
+        val shared = before.count { it in after }
+        val largest = maxOf(before.size, after.size)
+        return shared >= 3 && shared * 5 >= largest * 4
+    }
+
+    /** Confirm the same toggle, not another applied button or new reaction-count text. */
+    fun verifiedReaction(sameContent: Boolean, matchingStates: List<ReactionState>): Boolean =
+        sameContent && matchingStates.size == 1 && matchingStates.single() == ReactionState.APPLIED
+
     private const val ITEMS = "(?:activity|activities|posts?|reels?|videos?|items?|shorts?)"
     private const val SCOPE = "(?:any|all|every|each)"
     private const val MISSING = "(?:that )?(?:i )?(?:have not|haven't|never|have never) (?:already )?"
