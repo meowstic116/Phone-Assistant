@@ -1752,6 +1752,14 @@ class OverlayService : Service(), PropHost {
             onDone = { line ->
                 handler.post {
                     if (!running) return@post
+                    // The chip belongs to the job and the job has just ended, so it goes now
+                    // rather than at the next tick: a finished job must not still offer Stop.
+                    // Guarded on a job being live, so a job started in the meantime keeps its
+                    // own chip.
+                    if (!Agent.running()) {
+                        hideJobBar()
+                        endJobWatch()
+                    }
                     Memory.append(this, "assistant", line)
                     sayAloud(line)
                     feel(PetView.Mood.HAPPY, 2500L)
@@ -1801,6 +1809,9 @@ class OverlayService : Service(), PropHost {
         // A job the user started since this ask was posted owns the screen; a login form
         // opening over it would be worse than the ask going unsaid.
         if (Agent.running()) return
+        // The step that wanted the login ended the job, so its chip goes with it.
+        hideJobBar()
+        endJobWatch()
         // Kept, so the login they are about to save is one he can act on at once.
         loginJob = task
         val host = Vault.host(need.site)

@@ -176,6 +176,11 @@ object Agent {
             }
         }
         val history = StringBuilder()
+        // One search is one search. A model that cannot see whether the first one landed
+        // asks for it again, and every repeat opens another tab on the page already in front
+        // while the user is reading the results. What has been searched is kept here so the
+        // answer to a repeat is the end of the job, not a second tab.
+        val searched = HashSet<String>()
         var steps = 0
         try {
             // The apps on this phone, read once: searched so a job that names an app starts
@@ -219,7 +224,12 @@ object Agent {
                         return
                     }
 
-                if (decision.say.isNotBlank() && alive()) onSay(decision.say)
+                val query = if (decision.action == "search") decision.searchKey() else null
+                val repeated = query != null && query in searched
+                // A repeat does not say the model's line: "searching for it again" is not an
+                // answer to a search that is already open, and the line that ends the job
+                // says what is true instead.
+                if (!repeated && decision.say.isNotBlank() && alive()) onSay(decision.say)
                 if (decision.action == DONE) {
                     finish(
                         decision.say.ifBlank { "Done." },
@@ -235,6 +245,13 @@ object Agent {
                 // a job the user has already ended. This is the last moment before the phone
                 // is touched, so this is where it has to be checked.
                 if (!alive()) return
+                if (repeated) {
+                    finish(
+                        "That was already searched — it's open in your browser.",
+                        "asked for the same search again — the first one is open"
+                    )
+                    return
+                }
                 // The overlay's own windows get out of the way of the press. This is the one
                 // window in which the phone is being touched, so it is the one window in
                 // which they must not be touchable: a press aimed at a row that happens to
@@ -262,6 +279,9 @@ object Agent {
                     history.append(steps + 1).append(". ").append(decision.summary(screen))
                         .append(" → ").append(outcome).append('\n')
                     Diag.jobStep(mine, decision.summary(screen), outcome, landed, skipped)
+                    // Only a search that really went through counts: one that failed is
+                    // worth asking for again.
+                    if (query != null && landed) searched.add(query)
                     steps++
                     if (landed) SystemClock.sleep(SETTLE_MS)
                     // A sign-in he could not do himself. The job ends here, on this thread,
@@ -560,6 +580,13 @@ object Agent {
         val images: Boolean
     ) {
 
+        /**
+         * This search in a form two answers can be compared on. The same words, and whether
+         * it was the pictures or the results, are the same search however it was capitalised.
+         */
+        fun searchKey(): String =
+            text.trim().lowercase().replace(Regex("\\s+"), " ") + if (images) " (images)" else ""
+
         /** What the model tried, in the words the next step will be given it. */
         fun summary(screen: Screen.Snapshot): String {
             val what = screen.items.firstOrNull { it.index == target }?.label
@@ -683,7 +710,8 @@ object Agent {
           app is opened in front of the user first and read on the next turn.
         - search: text is what to look up, e.g. "cats". Add "images":true to land on the
           pictures instead of the results. It opens the phone's own default browser on that
-          search in one action.
+          search in one action. The same search is never worth asking for twice: the first
+          one has already put the page in front of the user.
         - wait: when a screen is still loading.
         - done: the job is finished, or cannot be done at all.
 
