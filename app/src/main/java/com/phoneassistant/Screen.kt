@@ -243,39 +243,95 @@ object Screen {
     private fun global(action: Int): Boolean =
         runCatching { service?.performGlobalAction(action) == true }.getOrDefault(false)
 
+    /** An app on the phone, as a job can name it. */
+    class AppRef(val label: String, val packageName: String, val activity: String)
+
+    /**
+     * Every app with a launcher icon, by label. Read once at the start of a job and named in
+     * each step, so the model can only ask to open something that is really installed — and
+     * so "open Messages" reaches the phone's own Messages rather than a guess.
+     *
+     * Pip's own app is left out: it is not a place a job can do anything.
+     */
+    fun apps(ctx: Context): List<AppRef> {
+        val pm = ctx.packageManager
+        val start = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        @Suppress("DEPRECATION") // The flags overload is the one that works from API 26.
+        val found = runCatching { pm.queryIntentActivities(start, 0) }.getOrDefault(emptyList())
+        return found.mapNotNull { info ->
+            val activity = info.activityInfo
+            if (activity.packageName == ctx.packageName) return@mapNotNull null
+            val label = runCatching { info.loadLabel(pm).toString() }.getOrNull()
+                ?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            AppRef(label, activity.packageName, activity.name)
+        }.distinctBy { it.packageName }
+            .sortedBy { it.label.lowercase() }
+    }
+
+    /**
+     * The labels of those apps, comma-separated, for the prompt. Apps the request already
+     * names come first, so a long list cut to a readable length can never lose the one app the
+     * job is about to the alphabet.
+     */
+    fun appNames(apps: List<AppRef>, request: String = "", limit: Int = 60): String {
+        val relevant = apps.filter { appInRequest(listOf(it), request) != null }
+        return (relevant + apps).distinctBy { it.packageName }.take(limit)
+            .joinToString(", ") { it.label }
+    }
+
+    /**
+     * The app a request names, if any: "text Sam on WhatsApp" is WhatsApp, and the longest
+     * label wins so "Phone Assistant" could never lose to "Phone". Word boundaries keep
+     * "gallery" out of "gallerystuff" and out of a word that merely contains it.
+     */
+    fun appInRequest(apps: List<AppRef>, request: String): AppRef? {
+        val text = request.lowercase()
+        return apps
+            .filter { it.label.length >= 3 }
+            .filter { app ->
+                val label = app.label.lowercase()
+                runCatching {
+                    Regex("\\b" + Regex.escape(label) + "\\b").containsMatchIn(text)
+                }.getOrDefault(false)
+            }
+            .maxByOrNull { it.label.length }
+    }
+
+    /** Launches an app, straight to the activity that owns its icon. */
+    fun open(ctx: Context, app: AppRef): Boolean {
+        val launch = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .setComponent(ComponentName(app.packageName, app.activity))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        return runCatching {
+            ctx.startActivity(launch)
+            true
+        }.getOrDefault(false)
+    }
+
     /**
      * Opens an app by the name the model used. Exact label first, then a prefix, then
      * anything containing it, then the package name — "messages" should reach Messages and
      * not something with the word buried in a longer title.
      */
     fun openApp(ctx: Context, query: String): String? {
+        val app = findApp(ctx, query) ?: return null
+        return if (open(ctx, app)) app.label else null
+    }
+
+    fun findApp(ctx: Context, query: String): AppRef? {
         val wanted = query.trim().lowercase()
         if (wanted.isEmpty()) return null
-        val pm = ctx.packageManager
-        val start = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        @Suppress("DEPRECATION") // The flags overload is the one that works from API 26.
-        val apps = runCatching { pm.queryIntentActivities(start, 0) }.getOrDefault(emptyList())
-        val named = apps.mapNotNull { info ->
-            runCatching { info to info.loadLabel(pm).toString() }.getOrNull()
-        }
-        val match = named.firstOrNull { (_, label) -> label.lowercase() == wanted }
-            ?: named.firstOrNull { (_, label) -> label.lowercase().startsWith(wanted) }
-            ?: named.firstOrNull { (_, label) -> label.lowercase().contains(wanted) }
-            ?: named.firstOrNull { (info, _) ->
-                info.activityInfo.packageName.lowercase().contains(wanted)
-            }
-            ?: return null
-
-        val info = match.first.activityInfo
-        val launch = Intent(Intent.ACTION_MAIN)
-            .addCategory(Intent.CATEGORY_LAUNCHER)
-            .setComponent(ComponentName(info.packageName, info.name))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-        return runCatching {
-            ctx.startActivity(launch)
-            match.second
-        }.getOrNull()
+        val all = apps(ctx)
+        return all.firstOrNull { it.label.lowercase() == wanted }
+            ?: all.firstOrNull { it.label.lowercase().startsWith(wanted) }
+            ?: all.firstOrNull { it.label.lowercase().contains(wanted) }
+            ?: all.firstOrNull { it.packageName.lowercase().contains(wanted) }
     }
+
+    /** The package of the window in front: the app a snapshot would read. */
+    fun inFront(): String? =
+        runCatching { service?.rootInActiveWindow?.packageName?.toString() }.getOrNull()
 
     // ------------------------------------------------------------------ gestures
 

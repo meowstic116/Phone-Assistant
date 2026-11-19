@@ -26,6 +26,9 @@ object Agent {
     /** Time for the screen to settle after an action before it is read again. */
     private const val SETTLE_MS = 650L
 
+    /** Time for an app to come up before its screen is read. Slower than a tap, by design. */
+    private const val OPEN_MS = 1_500L
+
     private val worker = Executors.newSingleThreadExecutor()
 
     /** The job being worked, or null when there is none. */
@@ -111,6 +114,27 @@ object Agent {
         val history = StringBuilder()
         var steps = 0
         try {
+            // The apps on this phone, read once: searched so a job that names an app starts
+            // in that app, and named in every step so the model can only ask for something
+            // that is really installed.
+            val apps = Screen.apps(ctx)
+            val named = Screen.appInRequest(apps, request)
+            // A job that happens in another app should be watched happening there. The app
+            // the request names is opened before the first step, so the user is looking at
+            // the screen his hands are working on instead of at whatever was in front. It is
+            // skipped when that app is already in front: relaunching would throw away a
+            // screen the user had reached themselves.
+            if (named != null && alive() && Screen.inFront() != named.packageName) {
+                val opened = Screen.open(ctx, named)
+                Diag.jobStep(
+                    mine,
+                    "open ${named.label}",
+                    if (opened) "opened it" else "$FAILED ${named.label} would not open",
+                    opened
+                )
+                if (opened) SystemClock.sleep(OPEN_MS)
+            }
+
             while (steps < MAX_STEPS && alive()) {
                 val screen = Screen.snapshot()
                 if (screen == null) {
@@ -121,7 +145,7 @@ object Agent {
                     )
                     return
                 }
-                val decision = decide(ctx, request, history.toString(), screen, steps)
+                val decision = decide(ctx, request, history.toString(), screen, steps, apps)
                     ?: run {
                         finish("My brain stopped answering halfway through.", STOP_BRAIN)
                         return
@@ -165,12 +189,15 @@ object Agent {
         request: String,
         history: String,
         screen: Screen.Snapshot,
-        step: Int
+        step: Int,
+        apps: List<Screen.AppRef>
     ): Decision? {
         val app = Screen.appLabel(ctx, screen.app) ?: screen.app
         val user = buildString {
             append("TASK: ").append(request).append('\n')
             append("APP: ").append(app.ifBlank { "unknown" }).append('\n')
+            val installed = Screen.appNames(apps, request)
+            if (installed.isNotEmpty()) append("APPS ON THIS PHONE: ").append(installed).append('\n')
             if (history.isBlank()) {
                 append("WHAT HAS HAPPENED SO FAR: nothing yet\n")
             } else {
@@ -363,8 +390,8 @@ object Agent {
           the whole field.
         - scroll_down / scroll_up: scrolls the screen, or the element in target.
         - back / home / recents / notifications: no target.
-        - open_app: app is the name of the app, e.g. "Messages". The app is opened first and
-          read on the next turn.
+        - open_app: app is the name of an app from APPS ON THIS PHONE, e.g. "Messages". The
+          app is opened in front of the user first and read on the next turn.
         - wait: when a screen is still loading.
         - done: the job is finished, or cannot be done at all.
 
@@ -375,6 +402,9 @@ object Agent {
           Use it on the first turn to say what you are starting, and on done to report.
         - The labels in the list are the only truth about the screen. Use them exactly as
           written; do not invent a button that is not listed.
+        - If the task belongs in an app that is not the one in APP, make open_app your first
+          action instead of going home and hunting for an icon. The app opening on screen is
+          how the user watches the job happen.
         - If an action failed according to WHAT HAS HAPPENED SO FAR, do something different.
           Never repeat a failing action.
         - Never touch an element marked password, and never pay, buy, confirm a purchase or

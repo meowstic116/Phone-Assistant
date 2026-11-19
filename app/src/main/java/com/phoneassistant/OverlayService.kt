@@ -116,6 +116,9 @@ class OverlayService : Service(), PropHost {
         /** How often the floating readout repaints. Fast enough to watch a keyboard arrive. */
         private const val HUD_REFRESH_MS = 250L
 
+        /** How often the cancel chip checks that there is still a job to cancel. */
+        private const val JOB_REFRESH_MS = 300L
+
         fun status(): Status? = instance?.status()
 
         /**
@@ -199,6 +202,10 @@ class OverlayService : Service(), PropHost {
     /** The floating diagnostics readout, while it has been asked for. */
     private var hud: DiagHud? = null
     private var hudParams: WindowManager.LayoutParams? = null
+
+    /** The cancel chip at the bottom of the screen, while a phone job is running. */
+    private var jobBar: JobBar? = null
+    private var jobBarParams: WindowManager.LayoutParams? = null
 
     /** Where the panel was when the finger went down, so a drag follows it exactly. */
     private var hudDownX = 0f
@@ -499,6 +506,7 @@ class OverlayService : Service(), PropHost {
         hideBubble()
         hideThinking()
         removeInputBar()
+        hideJobBar()
         // The panel is its own window and nothing else owns it, so it goes with the service.
         hud?.let { view -> runCatching { windowManager.removeView(view) } }
         hud = null
@@ -1495,6 +1503,7 @@ class OverlayService : Service(), PropHost {
             }
         )
         if (!started) {
+            hideJobBar()
             sayAloud(
                 if (Screen.available()) {
                     "I'm already in the middle of something."
@@ -1502,7 +1511,128 @@ class OverlayService : Service(), PropHost {
                     Agent.NO_HANDS
                 }
             )
+            return
         }
+        // His hands are busy: he stands out of the way of the app he is working in, and the
+        // way out of the job appears at the bottom of the screen.
+        beginJobWatch()
+        showJobBar()
+    }
+
+    // --------------------------------------------------------------------- job bar
+
+    /**
+     * The cancel chip, for as long as a job is running. It is its own window so it stays over
+     * the app being worked on, and it sits at the bottom because that is where a stop belongs
+     * and where it covers the least of what he is doing.
+     */
+    private fun showJobBar() {
+        if (jobBar != null) return
+        val view = JobBar(this) { stopJob() }
+        val unspecified = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        view.measure(unspecified, unspecified)
+        val width = view.measuredWidth.coerceAtLeast(dpInt(130f))
+        val height = view.measuredHeight.coerceAtLeast(dpInt(32f))
+        val params = WindowManager.LayoutParams(
+            width,
+            height,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            // Touchable for its one button, but never focusable: it must not take the keyboard
+            // away from the field a job is typing into.
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+        }
+        jobBarParams = params
+        jobBar = view
+        positionJobBar()
+        if (!runCatching { windowManager.addView(view, params) }.isSuccess) {
+            jobBar = null
+            jobBarParams = null
+            return
+        }
+        view.alpha = 0f
+        view.animate().alpha(1f).setDuration(140L).start()
+        handler.postDelayed(jobTicker, JOB_REFRESH_MS)
+    }
+
+    private fun hideJobBar() {
+        handler.removeCallbacks(jobTicker)
+        jobBar?.let { view -> runCatching { windowManager.removeView(view) } }
+        jobBar = null
+        jobBarParams = null
+    }
+
+    /**
+     * Bottom centre, and above the keyboard when one is up, so the way out of a job is never
+     * behind the thing the job opened.
+     */
+    private fun positionJobBar() {
+        val view = jobBar ?: return
+        val params = jobBarParams ?: return
+        params.x = ((screenW - params.width) / 2).coerceAtLeast(0)
+        val floor = if (keyboardUp) keyboardCeiling() else (screenH - bottomInset).toFloat()
+        params.y = (floor - params.height - dp(18f)).toInt()
+            .coerceIn(topInset, (screenH - params.height).coerceAtLeast(topInset))
+        runCatching { windowManager.updateViewLayout(view, params) }
+    }
+
+    /**
+     * The chip belongs to the job, so it goes the moment there is no job — finished, cancelled
+     * here, cancelled by a new message, or ended by the service going away. Checking the one
+     * source of truth covers every one of those without each caller having to remember.
+     */
+    private val jobTicker = object : Runnable {
+        override fun run() {
+            if (jobBar == null) return
+            if (!Agent.running()) {
+                hideJobBar()
+                endJobWatch()
+                return
+            }
+            positionJobBar()
+            handler.postDelayed(this, JOB_REFRESH_MS)
+        }
+    }
+
+    /**
+     * He moves out of the way of the app he is working in: the bottom right, low down, where a
+     * header, a list and most keyboards keep clear. He stays there until the job is over
+     * instead of wandering across the screen being watched.
+     */
+    private fun beginJobWatch() {
+        attentive = true
+        toyWalk = false
+        relocating = false
+        arrive = null
+        targetX = (screenW - petW - dpInt(10f)).toFloat().coerceAtLeast(0f)
+        targetY = (screenH - bottomInset - petH - dpInt(10f)).toFloat()
+            .coerceAtLeast(topInset.toFloat())
+        walking = true
+        pet?.walking = true
+    }
+
+    /** Job over: he may wander again, once the line he says has had its moment. */
+    private fun endJobWatch() {
+        // An open chat holds his attention itself and clears it when it closes.
+        if (inputBar != null) return
+        attentive = false
+        idleUntil = SystemClock.uptimeMillis() + 1500L
+    }
+
+    /** The button at the bottom: stop where he is, and say so. */
+    private fun stopJob() {
+        hideJobBar()
+        if (!Agent.running()) {
+            endJobWatch()
+            return
+        }
+        Agent.cancel()
+        endJobWatch()
+        sayAloud("Stopped.")
     }
 
     /**

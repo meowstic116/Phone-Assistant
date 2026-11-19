@@ -46,7 +46,14 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   third one", "turn do not disturb on". He reads the app in front as a short numbered list of
   the things that can be pressed, typed into or scrolled, picks one step, does it, and looks
   again — at most eight steps, so a job cannot run away with your API quota, and the work is
-  visible as it happens because the app in front is changing. He says what he is starting,
+  visible as it happens because the app in front is changing. If the request names an app he
+  opens it before his first step — unless you are already in it, in which case he leaves your
+  screen alone — so the job happens in front of you rather than somewhere behind it, and he
+  moves into the bottom corner so he is not covering it. He is given the list of apps really
+  installed on the phone, so "open WhatsApp" reaches that WhatsApp and not a guess. While a
+  job is running there is a small **Stop** chip at the bottom of the screen, over whatever app
+  he is working in: one tap ends the job where it stands, and the record on Diagnostics says
+  it was cancelled. He says what he is starting,
   then reports in his bubble. His hands go through the accessibility service: he refuses
   password fields, payments, purchases and deletions he was not asked for, whatever the model
   suggests, because those refusals are in the code and not only in the instructions.
@@ -149,7 +156,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.60-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.61-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
