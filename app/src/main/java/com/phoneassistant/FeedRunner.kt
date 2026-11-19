@@ -3,6 +3,7 @@ package com.phoneassistant
 import android.content.Context
 import android.os.Build
 import android.os.SystemClock
+import com.phoneassistant.JobProgress.FeedCheck
 import com.phoneassistant.JobProgress.FeedMode
 import com.phoneassistant.JobProgress.FeedRequest
 import com.phoneassistant.JobProgress.ReactionState
@@ -18,6 +19,7 @@ import java.util.concurrent.TimeoutException
 internal object FeedRunner {
     private const val SETTLE_MS = 700L
     private const val READ_WAIT_MS = 500L
+    private const val CONTROL_READ_WAIT_MS = 350L
     // A slow or abandoned request can't hold up Stop or the browse deadline. Don't queue
     // more work behind an HTTP call that hasn't responded to interruption yet.
     private val likePicker = ThreadPoolExecutor(0, 1, 15, TimeUnit.SECONDS, SynchronousQueue<Runnable>())
@@ -42,7 +44,6 @@ internal object FeedRunner {
         val coverage = JobProgress.FeedCoverage()
         val visited = JobProgress.RecentVisits()
         val reactionFailures = JobProgress.FailureStreak()
-        val hiddenControls = JobProgress.FailureStreak()
         var screens = 0
         var applied = 0
         var sawControls = false
@@ -131,25 +132,31 @@ internal object FeedRunner {
         while (active()) {
             val viewport = fingerprint(screen)
             if (!visited.add(viewport)) return report("The feed showed a screen I'd already checked.", "revisited a viewport")
+            // Some feeds populate their buttons after the card text. Recheck once without
+            // touching anything, and use the new read only if it is still the same viewport.
+            if (bulk && screen.items.none { state(it) != ReactionState.UNKNOWN }) {
+                pause(CONTROL_READ_WAIT_MS)
+                if (!active()) return stopped()
+                look()?.takeIf { it.windowId == screen.windowId && fingerprint(it) == viewport }
+                    ?.let { screen = it }
+            }
             val eligible = screen.items.filter { state(it) == ReactionState.READY }.distinctBy { it.bounds }
             val alreadyApplied = screen.items.filter { state(it) == ReactionState.APPLIED }.distinctBy { it.bounds }.size
             screens++
             sawControls = sawControls || eligible.isNotEmpty() || alreadyApplied > 0
-            val clean = bulk && coverage.complete(viewport, eligible.size, alreadyApplied)
-            val controlsMissing = bulk && hiddenControls.record(eligible.isNotEmpty() || alreadyApplied > 0)
+            val check = if (bulk) coverage.observe(viewport, eligible.size, alreadyApplied) else null
             Diag.jobStep(
                 mine, "check feed screen $screens",
-                "${eligible.size} ready, $alreadyApplied already applied" +
-                    if (bulk) "; ${coverage.clean} clean screens in a row" else "",
+                "${eligible.size} ready, $alreadyApplied already applied" + when (check) {
+                    FeedCheck.NO_RECOGNIZED_CONTROLS -> "; skipping this viewport, looking farther down the feed"
+                    null -> ""
+                    else -> "; ${coverage.clean} clean screens in a row"
+                },
                 true
             )
-            if (clean) return report(
+            if (check == FeedCheck.COMPLETE) return report(
                 "The last ${JobProgress.CLEAN_SCREENS} distinct screens showed only already-applied reaction controls.",
                 "consecutive clean feed screens"
-            )
-
-            if (controlsMissing) return report(
-                "I couldn't read reaction controls on several screens in a row.", "repeated unreadable reaction controls"
             )
 
             var selected = if (!bulk && reaction != null && eligible.isNotEmpty() && choicesAvailable) {
