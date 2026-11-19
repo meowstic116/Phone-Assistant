@@ -754,6 +754,18 @@ class OverlayService : Service(), PropHost {
         runCatching { windowManager.updateViewLayout(prop, prop.params) }
     }
 
+    /**
+     * A toy has been put down. While a step is pressing, a held toy is left touchable — taking
+     * its touch away would end the drag it is in the middle of — but the moment it is let go
+     * that reason is gone, so it steps aside at once, exactly as the diagnostics panel does.
+     */
+    override fun propLetGo(prop: Prop) {
+        if (!overlayDucked) return
+        if (prop.leaving) return
+        prop.params.flags = duckFlags(prop.params.flags, true)
+        runCatching { windowManager.updateViewLayout(prop, prop.params) }
+    }
+
     override fun addProp(prop: Prop): Boolean {
         if (props.contains(prop)) return true
         val params = WindowManager.LayoutParams(

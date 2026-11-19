@@ -63,7 +63,8 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   really out of the way before he presses anything, and if they cannot be moved in time (a
   stuck main thread) he presses nothing and the Diagnostics record marks that step **SKIP**
   rather than blaming the app. Only a toy or panel you are actually dragging keeps its touch,
-  so the drag is never dropped out of your hand. Stop is back the moment the step finishes.
+  so the drag is never dropped out of your hand — it steps aside the instant you let go.
+  Stop is back the moment the step finishes.
   An action already under
   way is not un-pressed, but nothing new happens
   after the Stop — a step the model was still deciding is thrown away instead of carried out,
@@ -170,7 +171,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.66-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.67-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

@@ -86,6 +86,12 @@ interface PropHost {
     fun addProp(prop: Prop): Boolean
     fun dropProp(prop: Prop)
     fun updateProp(prop: Prop)
+
+    /**
+     * The user has let go of [prop]. It was kept touchable while a step was pressing because a
+     * finger was on it; now that the finger is gone it can get out of the way like the rest.
+     */
+    fun propLetGo(prop: Prop)
     fun propsOnScreen(): List<Prop>
 }
 
@@ -182,6 +188,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
 
             MotionEvent.ACTION_UP -> {
                 held = false
+                host.propLetGo(this)
                 lift(false)
                 if (travelled) onDragFinished() else onTap(event.x, event.y)
                 travelled = false
@@ -190,6 +197,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
 
             MotionEvent.ACTION_CANCEL -> {
                 held = false
+                host.propLetGo(this)
                 lift(false)
                 travelled = false
                 true
