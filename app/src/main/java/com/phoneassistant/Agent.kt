@@ -480,18 +480,23 @@ object Agent {
     ): Sweep {
         if (label.isBlank() || UNSAFE_REPEAT.containsMatchIn(label.lowercase())) return Sweep()
         var screen = Screen.snapshot() ?: return Sweep()
-        // One of them is a button, not a feed — and the one the model just pressed was it.
-        if (screen.items.count { it.label.equals(label, ignoreCase = true) } < 2) return Sweep()
+        // Nothing carrying the label is a button that was pressed and has stopped reading like
+        // one. One left is still a sweep: the model's own press has usually changed its label
+        // by now, so a feed that showed three can be down to one on the screen he is looking at.
+        if (screen.items.none { it.label.equals(label, ignoreCase = true) }) return Sweep()
         val app = screen.app
-        // Where the presses have landed, so a row that ignores one is not pressed twice. Bounds
-        // rather than labels: every row down the feed carries the same label.
-        val done = hashSetOf(alreadyPressed)
         var pressed = 0
         var screens = 1
         var barren = 0
         var complete = true
         var why = STOP_SWEEP_PAGES
         while (screens <= SWEEP_PAGES && ticket.get() == mine) {
+            // Which rows have been pressed on this screen, so one that ignores a press is not
+            // pressed again. Bounds rather than labels, because every row carries the same
+            // label — and bounds mean nothing across a scroll: the next screen's rows come
+            // back at the same places, so a set carried over would skip the whole screen below.
+            // The row the model pressed is only there to be skipped on the screen it is on.
+            val done = if (screens == 1) hashSetOf(alreadyPressed) else hashSetOf()
             var onThisScreen = 0
             while (ticket.get() == mine) {
                 val item = screen.items.firstOrNull { item ->
