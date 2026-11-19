@@ -323,7 +323,17 @@ object Agent {
                     val landed = !outcome.startsWith(FAILED)
                     history.append(steps + 1).append(". ").append(decision.summary(screen))
                         .append(" → ").append(outcome).append('\n')
-                    Diag.jobStep(mine, decision.summary(screen), outcome, landed, skipped)
+                    // The only ones marked as turns: everything else in the record — the
+                    // repeat pass, its scrolls, the app opened before the first step — was
+                    // the loop acting on this answer, not another question asked.
+                    Diag.jobStep(
+                        mine,
+                        decision.summary(screen),
+                        outcome,
+                        landed,
+                        skipped,
+                        turn = true
+                    )
                     steps++
                     // A search that went through is the job. Waiting to be told "done"
                     // spends a request on an answer already known, and leaves the chip up

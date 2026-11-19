@@ -269,9 +269,11 @@ class DiagnosticsActivity : Activity() {
             line(
                 "state",
                 if (job.running) {
-                    "started ${Diag.ago(job.startedAt)} · ${job.steps.size} steps so far"
+                    "started ${Diag.ago(job.startedAt)} · ${job.turns} steps · " +
+                        "${job.steps.size} actions so far"
                 } else {
-                    "${Diag.ago(job.startedAt)} · ${job.steps.size} steps · ${took}s"
+                    "${Diag.ago(job.startedAt)} · ${job.turns} steps · " +
+                        "${job.steps.size} actions · ${took}s"
                 }
             )
             line("why it stopped", job.reason ?: "still working — no ending yet")
@@ -294,6 +296,8 @@ class DiagnosticsActivity : Activity() {
                 // Honest about what ok means: the framework accepting an action is not the
                 // same as the screen having changed, and a job can look healthy here and
                 // still have gone nowhere.
+                detail("steps = answers asked of the model · actions = every press, scroll " +
+                    "and open, including the ones made without asking")
                 detail("ok = Android accepted it; the screen was read again after every step")
                 if (job.steps.any { it.skipped }) {
                     detail("SKIP = nothing was pressed: his own window would not get out of " +

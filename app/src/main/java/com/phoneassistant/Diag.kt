@@ -61,6 +61,12 @@ object Diag {
         val request: String,
         val startedAt: Long,
         val steps: List<Step> = emptyList(),
+        /**
+         * How many of those were answers from the model. The rest are the loop's own: the
+         * repeat pass presses a dozen things inside one answer, and counting only the answers
+         * would make a kudos run look like it did almost nothing.
+         */
+        val turns: Int = 0,
         val reason: String? = null,
         val endedAt: Long = 0L
     ) {
@@ -77,12 +83,23 @@ object Diag {
         lastJob = Job(id, oneLine(request, 200), now())
     }
 
-    /** One step, as it happened, with what it was aimed at and what came back. */
-    fun jobStep(id: Int, text: String, outcome: String, ok: Boolean, skipped: Boolean = false) {
+    /**
+     * One action, as it happened, with what it was aimed at and what came back. [turn] marks
+     * the ones the model chose; a press or a scroll the loop made on its own is not one.
+     */
+    fun jobStep(
+        id: Int,
+        text: String,
+        outcome: String,
+        ok: Boolean,
+        skipped: Boolean = false,
+        turn: Boolean = false
+    ) {
         val current = lastJob ?: return
         if (current.id != id) return
         lastJob = current.copy(
-            steps = current.steps + Step(oneLine(text, 120), oneLine(outcome, 120), ok, skipped)
+            steps = current.steps + Step(oneLine(text, 120), oneLine(outcome, 120), ok, skipped),
+            turns = current.turns + if (turn) 1 else 0
         )
     }
 
