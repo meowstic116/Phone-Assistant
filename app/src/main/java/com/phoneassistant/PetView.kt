@@ -101,18 +101,14 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         set(value) {
             if (field == value) return
             field = value
-            // Waking draws at once rather than waiting out the idle gap. The frame callback
-            // itself stays alive either way, so there is only ever one of them and nothing
-            // has to be re-posted — and re-posting on wake could have left two running.
-            if (value) {
-                lastDrawAt = 0L
-                // A fresh counting window from the first frame after waking, but the published
-                // rate is deliberately left alone: it is the last thing actually measured, and
-                // replacing it with a zero for the first second reads as if he had not started
-                // drawing again — when he plainly has.
-                drawsThisSecond = 0
-                windowStartedAt = SystemClock.uptimeMillis()
-            }
+            if (!value) return
+            // Waking draws at once rather than waiting out the gap, and counts a fresh window
+            // so the first figure after the screen comes back is a real one. The published
+            // rate is left alone until then: it is the last thing measured, and zeroing it
+            // would read as though he had not started drawing again.
+            lastDrawAt = 0L
+            drawsThisSecond = 0
+            windowStartedAt = SystemClock.uptimeMillis()
         }
 
     override fun onAttachedToWindow() {
@@ -140,41 +136,34 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         // display nobody is looking at.
         if (!animating) return
         val now = SystemClock.uptimeMillis()
-        var redraw = false
 
-        if (soonToBlink(now)) {
+        val blinkStarts = now >= nextBlinkAt
+        if (blinkStarts) {
             blinkEndsAt = now + 110L
             blinkSeed = (blinkSeed * 1103515245L + 12345L) and 0x7FFFFFFF
             nextBlinkAt = now + 2400L + (blinkSeed % 4200L)
-            redraw = true
         }
         // Both ends of a blink have to be drawn, or a skipped frame leaves him mid-blink.
         val blinking = now < blinkEndsAt
-        if (blinking != drewBlinking) {
-            drewBlinking = blinking
-            redraw = true
-        }
-        if (now - lastDrawAt >= frameGapMs()) redraw = true
+        val eyesChanged = blinking != drewBlinking
+        drewBlinking = blinking
 
-        if (redraw) {
+        if (blinkStarts || eyesChanged || now - lastDrawAt >= frameGapMs()) {
             lastDrawAt = now
             invalidate()
         }
     }
 
     /**
-     * How long may pass between redraws, by how much is moving. Walking is the one thing that
-     * has to be smooth; a talking mouth and a changing mood a little less; the idle sway much
-     * less still.
+     * How long may pass between redraws. Walking is the one thing that has to be smooth; a
+     * talking mouth is the only other thing that moves by itself, since every other mood is a
+     * still picture that is drawn when it is set. Everything else gets the idle rate.
      */
     private fun frameGapMs(): Long = when {
         walking -> GAP_WALKING
         mood == Mood.TALKING -> GAP_TALKING
-        mood != Mood.NEUTRAL -> GAP_MOOD
         else -> GAP_IDLE
     }
-
-    private fun soonToBlink(now: Long) = now >= nextBlinkAt
 
     /** Folds this draw into the once-a-second count the readout shows. */
     private fun countDraw(now: Long) {
@@ -375,7 +364,6 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
          */
         private const val GAP_WALKING = 0L
         private const val GAP_TALKING = 33L
-        private const val GAP_MOOD = 40L
         private const val GAP_IDLE = 50L
 
         /**
@@ -387,9 +375,8 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
          */
         fun ratesText(): String {
             fun rate(gap: Long) = (1_000L / gap).toString()
-            return "about ${rate(GAP_IDLE)} a second idle, ${rate(GAP_MOOD)} changing mood, " +
-                "${rate(GAP_TALKING)} talking, every frame while walking, none with the " +
-                "screen off"
+            return "about ${rate(GAP_IDLE)} a second idle, ${rate(GAP_TALKING)} talking, " +
+                "every frame while walking"
         }
     }
 }
