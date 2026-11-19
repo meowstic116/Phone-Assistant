@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Path
 import android.graphics.Rect
+import android.net.Uri
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import java.util.ArrayDeque
@@ -341,6 +342,45 @@ object Screen {
             ?: all.firstOrNull { it.label.lowercase().startsWith(wanted) }
             ?: all.firstOrNull { it.label.lowercase().contains(wanted) }
             ?: all.firstOrNull { it.packageName.lowercase().contains(wanted) }
+    }
+
+    /**
+     * Hands a web search to the phone's browser: whichever one the user has made their own.
+     *
+     * A search is a URL, so this is one action instead of driving a browser by hand — and a
+     * browser's search box is exactly the thing that cannot be driven, because putting text
+     * in it needs an enter key that the accessibility service has no way to press. Typed in
+     * by hand the field fills, the page never changes, and the job has spent four steps to
+     * get nowhere. [images] lands on the pictures rather than the results page.
+     */
+    fun search(ctx: Context, query: String, images: Boolean): Boolean {
+        val url = buildString {
+            append("https://www.google.com/search?q=").append(Uri.encode(query))
+            if (images) append("&tbm=isch")
+        }
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // ACTION_VIEW is what "the default browser" means: the user's choice, not one guessed
+        // from the list of installed apps. With nothing set to answer it, nothing opens and
+        // the step says so rather than pretending it searched.
+        return runCatching {
+            ctx.startActivity(intent)
+            true
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Whether an app is one that opens web pages. A request that says "the internet" names one
+     * of them, but a web page is opened by the phone's **default** browser, not by whichever
+     * app the request happened to name — so launching that one first would put the wrong
+     * browser in front of a job that is about to use the right one.
+     */
+    fun opensWebPages(ctx: Context, packageName: String): Boolean {
+        val probe = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com"))
+        @Suppress("DEPRECATION") // The flags overload is the one that works from API 26.
+        val found = runCatching { ctx.packageManager.queryIntentActivities(probe, 0) }
+            .getOrDefault(emptyList())
+        return found.any { it.activityInfo.packageName == packageName }
     }
 
     /** The package of the window in front: the app a snapshot would read. */

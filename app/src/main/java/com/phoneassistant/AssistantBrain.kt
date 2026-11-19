@@ -149,8 +149,11 @@ object AssistantBrain {
 
         val connection = (URL(endpointFor(config.baseUrl)).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 20_000
-            readTimeout = 60_000
+            // Short enough that a request which is never going to be answered does not hold a
+            // job's step — and the floating character — for a minute. Answers are capped at a
+            // couple of hundred tokens, so a good one is nowhere near this long.
+            connectTimeout = 10_000
+            readTimeout = 25_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Authorization", "Bearer " + config.apiKey)

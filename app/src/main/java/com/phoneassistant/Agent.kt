@@ -36,6 +36,15 @@ object Agent {
     /** How many screens down a login form is looked for before he gives up on finding it. */
     private const val HUNT_TRIES = 2
 
+    /** Time for a page a search was handed to to have something on it worth reading. */
+    private const val SEARCH_MS = 1_200L
+
+    /** Time a "wait" step actually waits, so the screen it waits for is not the same one. */
+    private const val WAIT_MS = 1_500L
+
+    /** Time before the one retry of a brain call that did not come back. */
+    private const val RETRY_MS = 800L
+
     private val worker = Executors.newSingleThreadExecutor()
 
     /** The job being worked, or null when there is none. */
@@ -179,7 +188,11 @@ object Agent {
             // the screen his hands are working on instead of at whatever was in front. It is
             // skipped when that app is already in front: relaunching would throw away a
             // screen the user had reached themselves.
-            if (named != null && alive() && Screen.inFront() != named.packageName) {
+            // A browser named by the request is not opened here: a web page goes to the
+            // phone's default browser instead, and putting a different one in front first is
+            // how a request for "the internet" ended up in an app the user never uses.
+            val web = named != null && Screen.opensWebPages(ctx, named.packageName)
+            if (named != null && !web && alive() && Screen.inFront() != named.packageName) {
                 val opened = Screen.open(ctx, named)
                 Diag.jobStep(
                     mine,
@@ -310,7 +323,15 @@ object Agent {
                 append("\nNo steps left after this one: get as close as you can, then finish.\n")
             }
         }
-        val (ok, raw) = AssistantBrain.complete(ctx, SYSTEM, user)
+        // One retry. A call that never comes back is usually a dropped connection or a hiccup
+        // in the free tier's queue rather than a refusal, and a job the user has watched for
+        // half a minute should not be thrown away on one of them. Only the call is repeated;
+        // nothing on the phone has been touched at this point.
+        val first = AssistantBrain.complete(ctx, SYSTEM, user)
+        val (ok, raw) = if (first.first) first else {
+            SystemClock.sleep(RETRY_MS)
+            AssistantBrain.complete(ctx, SYSTEM, user)
+        }
         if (!ok) return null
         return Decision.parse(raw)
     }
@@ -384,7 +405,27 @@ object Agent {
                 }
             }
 
-            "wait" -> "waited"
+            // A wait that returns at once is not a wait: the next step would read the very
+            // same screen, spend another request, and be told to wait again.
+            "wait" -> {
+                SystemClock.sleep(WAIT_MS)
+                "waited"
+            }
+
+            "search" -> {
+                val query = decision.text.trim()
+                when {
+                    query.isBlank() -> "$FAILED there was nothing to search for"
+                    Screen.search(ctx, query, decision.images) -> {
+                        // The browser needs longer than a tap's settle to show results, and a
+                        // step spent reading a loading page is a step wasted.
+                        SystemClock.sleep(SEARCH_MS)
+                        val kind = if (decision.images) "images" else "the web"
+                        "searched $kind for \"$query\" in the default browser"
+                    }
+                    else -> "$FAILED no browser took the search"
+                }
+            }
 
             else -> "$FAILED I don't know how to ${decision.action}"
         }
@@ -514,7 +555,9 @@ object Agent {
         val text: String,
         val app: String,
         /** The site a sign-in is for. A name, never a credential. */
-        val site: String
+        val site: String,
+        /** Whether a search should land on the pictures. */
+        val images: Boolean
     ) {
 
         /** What the model tried, in the words the next step will be given it. */
@@ -545,18 +588,21 @@ object Agent {
                         target = 0,
                         text = "",
                         app = "",
-                        site = ""
+                        site = "",
+                        images = false
                     )
-                val action = normalise(
-                    json.optString("action").ifBlank { json.optString("do") }
-                )
+                val rawAction = json.optString("action").ifBlank { json.optString("do") }
                 return Decision(
                     say = json.optString("say").trim().take(200),
-                    action = action,
+                    action = normalise(rawAction),
                     target = json.optInt("target", json.optInt("index", 0)),
                     text = textOf(json),
                     app = json.optString("app").trim().take(60),
-                    site = json.optString("site").trim().take(80)
+                    site = json.optString("site").trim().take(80),
+                    // "images":true is the documented way; an action that names pictures is
+                    // taken as meaning it too, since that is what it was asked for.
+                    images = json.optBoolean("images", false) ||
+                        rawAction.contains("image", ignoreCase = true)
                 )
             }
 
@@ -575,6 +621,8 @@ object Agent {
                 "home_screen", "go_home" -> "home"
                 "shade", "pull_down", "notification_shade" -> "notifications"
                 "launch", "open", "start_app" -> "open_app"
+                "google", "web_search", "look_up", "search_web", "image_search",
+                "search_images", "images" -> "search"
                 "signin", "log_in", "login", "log_into", "sign_into", "authenticate" ->
                     "sign_in"
                 "finish", "stop", "complete" -> DONE
@@ -633,6 +681,9 @@ object Agent {
         - back / home / recents / notifications: no target.
         - open_app: app is the name of an app from APPS ON THIS PHONE, e.g. "Messages". The
           app is opened in front of the user first and read on the next turn.
+        - search: text is what to look up, e.g. "cats". Add "images":true to land on the
+          pictures instead of the results. It opens the phone's own default browser on that
+          search in one action.
         - wait: when a screen is still loading.
         - done: the job is finished, or cannot be done at all.
 
@@ -648,6 +699,12 @@ object Agent {
         - If the task belongs in an app that is not the one in APP, make open_app your first
           action instead of going home and hunting for an icon. The app opening on screen is
           how the user watches the job happen.
+        - Anything found on the web is a search: a lookup, a question, "show me", "take me to
+          the images". Do it with search on the first turn — never by opening a browser and
+          typing in its search box. That box cannot be submitted by typing, so it leaves the
+          text sitting there and nothing searched; the browser is also then whichever one the
+          app list offered rather than the one the user actually uses. Follow a search with
+          done unless more was asked for.
         - If an action failed according to WHAT HAS HAPPENED SO FAR, do something different.
           Never repeat a failing action.
         - Never type into an element marked password, and never put a password in "text": a

@@ -53,9 +53,15 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   again — at most eight steps, so a job cannot run away with your API quota, and the work is
   visible as it happens because the app in front is changing. If the request names an app he
   opens it before his first step — unless you are already in it, in which case he leaves your
-  screen alone — so the job happens in front of you rather than somewhere behind it, and he
-  moves into the bottom corner so he is not covering it. He is given the list of apps really
-  installed on the phone, so "open WhatsApp" reaches that WhatsApp and not a guess. While a
+  screen alone — so the job happens in front of you rather than somewhere behind   it, and he moves into the bottom corner so he is not covering it. He is given the list of apps really
+  installed on the phone, so "open WhatsApp" reaches that WhatsApp and not a guess.
+  Looking something up is one action, not a browser driven by hand: the query goes to
+  whichever browser Android has been told to use — yours, wherever you set it — as a search
+  URL, and "take me to the images" is the pictures page of it. A browser's search box
+  cannot be typed into usefully, because submitting it needs an enter key the accessibility
+  service has no way to press: the field fills, the page never changes, and the job ends
+  having spent four steps to get nowhere. A `wait` step really waits, rather than re-reading
+  the same loading screen and asking to wait again. While a
   job is running there is a small **Stop** chip in the bottom left corner, over whatever app
   he is working in — a corner rather than the middle of the bottom edge, which is where a job
   is most likely to need to press: one tap ends the job where it stands, and the record on
@@ -177,7 +183,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.73-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.74-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
