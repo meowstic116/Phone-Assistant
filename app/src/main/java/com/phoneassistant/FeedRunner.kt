@@ -7,23 +7,42 @@ import com.phoneassistant.JobProgress.FeedMode
 import com.phoneassistant.JobProgress.FeedRequest
 import com.phoneassistant.JobProgress.ReactionState
 import org.json.JSONArray
+import java.util.concurrent.Future
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
-/** One bounded feed loop, independent of the app and how an item is selected for a reaction. */
+/** Feed completion and retry rules are shared across apps. Verified progress has no step cap. */
 internal object FeedRunner {
     private const val SETTLE_MS = 700L
     private const val READ_WAIT_MS = 500L
-    private const val MAX_PER_VIEWPORT = 16
+    // A slow or abandoned request can't hold up Stop or the browse deadline. Don't queue
+    // more work behind an HTTP call that hasn't responded to interruption yet.
+    private val likePicker = ThreadPoolExecutor(0, 1, 15, TimeUnit.SECONDS, SynchronousQueue<Runnable>())
 
     fun run(
         ctx: Context, mine: Int, plan: FeedRequest,
-        active: () -> Boolean, onSay: (String) -> Unit, onAct: (Boolean) -> Boolean
+        jobActive: () -> Boolean, onSay: (String) -> Unit
     ): Pair<String, String> {
+        val bulk = plan.mode == FeedMode.ALL_MISSING
+        val limit = plan.browseLimit
+        if (!bulk && limit == null) {
+            return "Give me a positive duration or a whole reel count, like 2 minutes or 10 reels." to "invalid browse limit"
+        }
         val app = Screen.apps(ctx).singleOrNull { JobProgress.normalize(it.label) == plan.app }
             ?: return "I couldn't identify an installed app named ${plan.app}." to "feed app not resolved"
-        val bulk = plan.mode == FeedMode.ALL_MISSING
         val reaction = plan.reaction
+        val singleItemSurface = !bulk && (plan.surface == "reels" || plan.surface == "shorts")
+        var session: JobProgress.BrowseSession? = null
+        fun remaining() = session?.remainingMs(SystemClock.elapsedRealtime())
+        fun active() = jobActive() && remaining() != 0L
+        fun pause(ms: Long) = SystemClock.sleep(minOf(ms, remaining() ?: ms))
         val coverage = JobProgress.FeedCoverage()
-        val visited = mutableSetOf<String>()
+        val visited = JobProgress.RecentVisits()
+        val reactionFailures = JobProgress.FailureStreak()
+        val hiddenControls = JobProgress.FailureStreak()
         var screens = 0
         var applied = 0
         var sawControls = false
@@ -38,32 +57,34 @@ internal object FeedRunner {
             return "I checked $screens feed screens$count. $detail$inaccessible$noChoices" to
                 "${app.label}: $screens screens, $applied verified — $reason"
         }
-        fun stopped() = report("I stopped before finishing.", "feed scan interrupted or deadline reached")
+        fun stopped() = if (jobActive() && remaining() == 0L) {
+            report("Browsing time is up.", "browse duration reached")
+        } else report("I stopped before finishing.", "feed scan interrupted")
         fun look() = Screen.snapshot(feed = true)?.takeIf { it.app == app.packageName }
         fun state(item: Screen.Item) = reaction?.let { Screen.reactionState(item, it) } ?: ReactionState.UNKNOWN
         fun fingerprint(screen: Screen.Snapshot) = screen.items.asSequence()
-            .filter { !it.editable && it.label.isNotBlank() && state(it) == ReactionState.UNKNOWN }
-            .map { "${it.bounds.flattenToString()}:${it.label}" }.distinct().sorted().joinToString("\n")
-        fun act(block: () -> Boolean): Boolean {
-            if (!active()) return false
-            try {
-                if (!onAct(true) || !active()) return false
-                return block().also { if (it) SystemClock.sleep(SETTLE_MS) }
-            } finally {
-                onAct(false)
+            .filter { item ->
+                !item.editable && item.label.isNotBlank() && state(item) == ReactionState.UNKNOWN &&
+                    (bulk || Screen.reactionState(item, JobProgress.Reaction.LIKE) == ReactionState.UNKNOWN)
             }
-        }
+            .map { item ->
+                if (singleItemSurface) item.label
+                else "${item.bounds.flattenToString()}:${item.label}"
+            }.distinct().sorted().joinToString("\n")
+        fun act(block: () -> Boolean): Boolean =
+            active() && block().also { if (it) pause(SETTLE_MS) }
+
         fun initialRead(): Screen.Snapshot? {
             repeat(6) {
                 if (!active()) return null
                 look()?.takeIf { it.items.isNotEmpty() }?.let { return it }
-                SystemClock.sleep(READ_WAIT_MS)
+                pause(READ_WAIT_MS)
             }
             return null
         }
 
         Diag.jobStep(mine, "route", if (bulk) "verified feed scan" else "selective feed browsing", true)
-        onSay(if (bulk) "I'll check ${app.label}'s feed for missing reactions." else "I'll browse ${app.label} for a bit.")
+        if (bulk) onSay("I'll check ${app.label}'s feed for missing reactions.")
         if (!active()) return stopped()
         if (Screen.inFront() != app.packageName) {
             if (!active()) return stopped()
@@ -92,7 +113,22 @@ internal object FeedRunner {
                 screen = after
             }
         }
-        while (active() && screens < JobProgress.MAX_FEED_SCREENS) {
+        session = limit?.session(SystemClock.elapsedRealtime())
+        session?.let { browse ->
+            val unit = when (plan.surface) {
+                "reels" -> "reel"
+                "shorts" -> "short"
+                else -> "feed screen"
+            }
+            val targets = listOfNotNull(
+                browse.durationMs?.let { formatDuration(it) },
+                browse.screens?.let { "$it $unit" + if (it != 1) "s" else "" }
+            )
+            val goal = targets.joinToString(" or ")
+            onSay("I'll browse ${app.label} for $goal.")
+            Diag.jobStep(mine, "browse goal", goal, true)
+        }
+        while (active()) {
             val viewport = fingerprint(screen)
             if (!visited.add(viewport)) return report("The feed showed a screen I'd already checked.", "revisited a viewport")
             val eligible = screen.items.filter { state(it) == ReactionState.READY }.distinctBy { it.bounds }
@@ -100,6 +136,7 @@ internal object FeedRunner {
             screens++
             sawControls = sawControls || eligible.isNotEmpty() || alreadyApplied > 0
             val clean = bulk && coverage.complete(viewport, eligible.size, alreadyApplied)
+            val controlsMissing = bulk && hiddenControls.record(eligible.isNotEmpty() || alreadyApplied > 0)
             Diag.jobStep(
                 mine, "check feed screen $screens",
                 "${eligible.size} ready, $alreadyApplied already applied" +
@@ -111,8 +148,13 @@ internal object FeedRunner {
                 "consecutive clean feed screens"
             )
 
+            if (controlsMissing) return report(
+                "I couldn't read reaction controls on several screens in a row.", "repeated unreadable reaction controls"
+            )
+
             var selected = if (!bulk && reaction != null && eligible.isNotEmpty() && choicesAvailable) {
-                val choice = pickLike(ctx, screen, eligible)
+                val choice = pickLike(ctx, screen, eligible, ::active)
+                if (!active()) return stopped()
                 if (choice == null) {
                     choicesAvailable = false
                     choiceUnavailable = true
@@ -135,10 +177,11 @@ internal object FeedRunner {
                 }
                 if (fresh != null) screen = fresh
             }
-            var pressedHere = 0
-            while (reaction != null && active() && pressedHere < MAX_PER_VIEWPORT) {
-                val target = (if (bulk) screen.items.firstOrNull { state(it) == ReactionState.READY } else selected)
-                    ?: break
+            val skipped = mutableSetOf<String>()
+            fun key(item: Screen.Item) = "${item.id}:${item.bounds.flattenToString()}"
+            while (reaction != null && active()) {
+                val target = (if (bulk) screen.items.firstOrNull { state(it) == ReactionState.READY && key(it) !in skipped }
+                    else selected) ?: break
                 val accepted = act { Screen.pressReaction(target, screen, reaction) }
                 fun changed(after: Screen.Snapshot?): Boolean {
                     val controls = after?.takeIf { it.windowId == screen.windowId }?.items
@@ -146,38 +189,54 @@ internal object FeedRunner {
                     return controls.any { state(it) == ReactionState.APPLIED } &&
                         controls.none { state(it) == ReactionState.READY }
                 }
-                var after = if (accepted && active()) look() else null
+                // A reaction already dispatched may be verified after the timer expires;
+                // the timer only forbids starting another action.
+                var after = if (accepted && jobActive()) look() else null
                 if (after != null && !changed(after) && active()) {
-                    SystemClock.sleep(READ_WAIT_MS)
-                    after = look()
+                    pause(READ_WAIT_MS)
+                    after = if (jobActive()) look() else null
                 }
                 val confirmed = changed(after)
                 Diag.jobStep(mine, reaction.verb, if (confirmed) "changed to applied" else "not verified", confirmed)
+                if (confirmed) applied++
                 if (!active()) return stopped()
-                if (!confirmed || after == null) return report(
-                    "I couldn't verify the last reaction, so I didn't retry it.", "control didn't visibly change to applied"
-                )
-                applied++
-                pressedHere++
-                screen = after
+                if (!confirmed || after == null) {
+                    // A toggle might already have landed even if Android didn't expose the
+                    // changed state. Skip this control instead of risking toggling it back.
+                    skipped += key(target)
+                    if (reactionFailures.record(false)) return report(
+                        "I stopped after several reactions couldn't be verified.", "repeated unverified reactions"
+                    )
+                    // Work off a fresh read before trying a different control. Don't follow
+                    // a modal or changed viewport opened unexpectedly by the first press.
+                    val fresh = after ?: look()
+                    if (fresh == null || fresh.windowId != screen.windowId || fingerprint(fresh) != fingerprint(screen)) {
+                        return report("The feed changed before I could verify the reaction.", "unexpected screen change during reaction")
+                    }
+                    screen = fresh
+                } else {
+                    reactionFailures.record(true)
+                    screen = after
+                }
                 if (!bulk) break
             }
             if (!active()) return stopped()
-            if (bulk && pressedHere >= MAX_PER_VIEWPORT && screen.items.any { state(it) == ReactionState.READY }) {
-                return report("I reached the reaction limit on this screen.", "viewport reaction budget reached")
-            }
-            if (screens >= JobProgress.MAX_FEED_SCREENS) break
+            if (session?.reachedCount(screens) == true) return report(
+                "I reached your browsing count.", "browse count reached"
+            )
 
             val before = fingerprint(screen)
             var next: Screen.Snapshot? = null
-            repeat(2) { attempt ->
+            repeat(JobProgress.FAILURES_BEFORE_STOP) { attempt ->
                 if (next != null || !active()) return@repeat
-                val moved = act { Screen.scrollFeed(screen, byTouch = attempt == 1) }
+                val moved = act { Screen.scrollFeed(screen, byTouch = attempt == 1, active = ::active) }
                 if (!active()) return stopped()
                 val below = look() ?: return report("I lost the feed before finishing.", "app changed or became unreadable")
-                val changed = fingerprint(below) != before
+                val nextFingerprint = fingerprint(below)
+                val changed = nextFingerprint != before && !visited.contains(nextFingerprint)
                 Diag.jobStep(mine, "scroll feed", when {
                     changed -> "new viewport"
+                    nextFingerprint != before -> "feed returned to an already-checked viewport"
                     moved -> "scroll accepted but viewport unchanged"
                     else -> "scroll not accepted"
                 }, changed)
@@ -185,14 +244,26 @@ internal object FeedRunner {
             }
             if (!active()) return stopped()
             screen = next ?: return report(
-                "I couldn't verify that the feed moved farther.", "no distinct viewport after two scroll attempts"
+                "I couldn't verify that the feed moved farther after several tries.", "no new viewport after repeated scroll attempts"
             )
         }
-        return if (!active()) stopped() else report("I reached the browsing limit.", "viewport budget reached")
+        return stopped()
+    }
+
+    private fun formatDuration(ms: Long): String {
+        if (ms % 1000 != 0L) return "${ms / 1000.0} seconds"
+        var seconds = ms / 1000
+        return listOf(3600L to "hour", 60L to "minute", 1L to "second").mapNotNull { (unit, name) ->
+            val n = seconds / unit
+            seconds %= unit
+            if (n == 0L) null else "$n $name" + if (n != 1L) "s" else ""
+        }.joinToString(" ")
     }
 
     /** The model picks one allowed control or zero, based only on visible text, not the video. */
-    private fun pickLike(ctx: Context, screen: Screen.Snapshot, eligible: List<Screen.Item>): Int? {
+    private fun pickLike(
+        ctx: Context, screen: Screen.Snapshot, eligible: List<Screen.Item>, active: () -> Boolean
+    ): Int? {
         val text = screen.items.asSequence()
             .filter { !it.editable && !it.password }
             .map { it.label }.filter { it.count { ch -> ch == ' ' } >= 2 }.distinct().take(18).toList()
@@ -203,11 +274,34 @@ internal object FeedRunner {
                 .take(3).map { it.label }.distinct().toList()
             "${item.index}: ${JSONArray(nearby)}"
         }
-        val reply = runCatching {
-            AssistantBrain.complete(ctx, PICK_PROMPT, controls.joinToString("\n"), maxTokens = 30)
-        }.getOrNull() ?: return null
+        if (!active()) return null
+        val pending: Future<Pair<Boolean, String>> = try {
+            likePicker.submit<Pair<Boolean, String>> {
+                AssistantBrain.complete(ctx, PICK_PROMPT, controls.joinToString("\n"), maxTokens = 30)
+            }
+        } catch (_: RejectedExecutionException) {
+            return null
+        }
+        val reply = try {
+            awaitChoice(pending, active) ?: return null
+        } finally {
+            pending.cancel(true)
+        }
         if (!reply.first) return null
         return reply.second.trim().toIntOrNull()?.takeIf { index -> eligible.any { it.index == index } } ?: 0
+    }
+
+    private fun <T> awaitChoice(pending: Future<T>, active: () -> Boolean): T? {
+        while (active()) {
+            try {
+                return pending.get(100, TimeUnit.MILLISECONDS)
+            } catch (_: TimeoutException) {
+                // Recheck Stop and the browsing timer even while the request is outstanding.
+            } catch (_: Exception) {
+                return null
+            }
+        }
+        return null
     }
 
     private const val PICK_PROMPT = "You are Pip browsing a feed for fun, allowed to like one item only if it sounds interesting. " +

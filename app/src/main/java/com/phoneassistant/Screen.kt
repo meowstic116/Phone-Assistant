@@ -11,9 +11,15 @@ import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import java.util.ArrayDeque
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.math.ceil
+import kotlin.math.floor
 
 /**
  * The phone under Pip's hands: reading the app in front as a short list of usable elements,
@@ -320,13 +326,13 @@ object Screen {
             } && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }.getOrDefault(false)
 
-    internal fun scrollFeed(screen: Snapshot, byTouch: Boolean): Boolean {
-        if (!sameWindow(screen)) return false
-        if (byTouch) return gestureScroll(true)
+    internal fun scrollFeed(screen: Snapshot, byTouch: Boolean, active: () -> Boolean): Boolean {
+        if (!sameWindow(screen) || !active()) return false
+        if (byTouch) return gestureScroll(true, active)
         val scroller = screen.items.filter { it.scrollable }
             .maxByOrNull { it.bounds.width().toLong() * it.bounds.height() }
         val start = scroller?.node ?: runCatching { service?.rootInActiveWindow }.getOrNull() ?: return false
-        return actUpwards(start, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, SCROLL_ANCESTORS) { it.isScrollable }
+        return active() && actUpwards(start, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, SCROLL_ANCESTORS) { it.isScrollable }
     }
 
     fun longPress(item: Item): Boolean =
@@ -341,7 +347,16 @@ object Screen {
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        return runCatching { node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) }.getOrDefault(false)
+        return runCatching {
+            val before = node.text?.toString()
+            if (before == text || !node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return false
+            repeat(3) {
+                if (gestureGuard.get()?.active?.invoke() == false) return false
+                if (node.refresh() && !node.isPassword && node.text?.toString() == text) return true
+                android.os.SystemClock.sleep(150L)
+            }
+            false
+        }.getOrDefault(false)
     }
 
     /**
@@ -565,17 +580,30 @@ object Screen {
 
     // ------------------------------------------------------------------ gestures
 
+    private class GestureGuard(val active: () -> Boolean, val overlay: (Rect?) -> Boolean)
+    private val gestureGuard = ThreadLocal<GestureGuard>()
+
+    // Only the job's worker can inject raw touches. Direct accessibility actions don't use this.
+    internal fun withGestureGuard(active: () -> Boolean, overlay: (Rect?) -> Boolean, block: () -> Unit) {
+        gestureGuard.set(GestureGuard(active, overlay))
+        try {
+            block()
+        } finally {
+            gestureGuard.remove()
+        }
+    }
+
     private fun gestureTap(x: Float, y: Float): Boolean {
         val path = Path().apply { moveTo(x, y) }
-        return dispatch(path, 60L)
+        return dispatch(path, 60L, x, y, y)
     }
 
     private fun gestureLongPress(x: Float, y: Float): Boolean {
         val path = Path().apply { moveTo(x, y) }
-        return dispatch(path, 550L)
+        return dispatch(path, 550L, x, y, y)
     }
 
-    private fun gestureScroll(forward: Boolean): Boolean {
+    private fun gestureScroll(forward: Boolean, active: () -> Boolean = { true }): Boolean {
         val metrics = service?.resources?.displayMetrics ?: return false
         val x = metrics.widthPixels * 0.5f
         val middle = metrics.heightPixels * 0.5f
@@ -587,15 +615,49 @@ object Screen {
             moveTo(x, from)
             lineTo(x, to)
         }
-        return dispatch(path, 300L)
+        return dispatch(path, 300L, x, from, to, active)
     }
 
-    private fun dispatch(path: Path, durationMs: Long): Boolean {
+    private fun dispatch(
+        path: Path, durationMs: Long, x: Float, from: Float, to: Float, active: () -> Boolean = { true }
+    ): Boolean {
         val svc = service ?: return false
-        val stroke = GestureDescription.StrokeDescription(path, 0L, durationMs)
-        return runCatching {
-            svc.dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
-        }.getOrDefault(false)
+        val guard = gestureGuard.get() ?: return false
+        if (!active() || !guard.active() || Looper.myLooper() == Looper.getMainLooper()) return false
+        val root = runCatching { svc.rootInActiveWindow }.getOrNull() ?: return false
+        val app = root.packageName?.toString()
+        val window = root.windowId
+        // Include a small margin around both the contact point and the entire swipe path.
+        val footprint = Rect(
+            floor(x).toInt() - 4, floor(minOf(from, to)).toInt() - 4,
+            ceil(x).toInt() + 5, ceil(maxOf(from, to)).toInt() + 5
+        )
+        try {
+            if (!guard.overlay(footprint) || !guard.active() || service !== svc) return false
+            val front = svc.rootInActiveWindow ?: return false
+            if (front.windowId != window || front.packageName?.toString() != app) return false
+            val complete = CountDownLatch(1)
+            var landed = false
+            val callback = object : AccessibilityService.GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription) {
+                    landed = true
+                    complete.countDown()
+                }
+
+                override fun onCancelled(gestureDescription: GestureDescription) {
+                    complete.countDown()
+                }
+            }
+            val stroke = GestureDescription.StrokeDescription(path, 0L, durationMs)
+            val gesture = GestureDescription.Builder().addStroke(stroke).build()
+            if (!active() || !guard.active() || !svc.dispatchGesture(gesture, callback, Handler(Looper.getMainLooper()))) return false
+            return complete.await(durationMs + 1_000L, TimeUnit.MILLISECONDS) && landed
+        } catch (e: Exception) {
+            Diag.caught("dispatch gesture", e)
+            return false
+        } finally {
+            guard.overlay(null)
+        }
     }
 
     private val WHITESPACE = Regex("\\s+")

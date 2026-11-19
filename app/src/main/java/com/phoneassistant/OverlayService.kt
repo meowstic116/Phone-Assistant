@@ -13,6 +13,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.Icon
 import android.os.Build
@@ -593,6 +594,7 @@ class OverlayService : Service(), PropHost {
             }
 
             MotionEvent.ACTION_MOVE -> {
+                if (overlayDucked) return@OnTouchListener true
                 // The window has no height until it is laid out; its real one is only known
                 // after the first frame.
                 val height = hud?.height?.takeIf { it > 0 } ?: params.height
@@ -606,9 +608,6 @@ class OverlayService : Service(), PropHost {
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 hudHeld = false
-                // A step that began while the panel was held left it alone; let go, it steps
-                // aside for the rest of that step instead of staying in the way.
-                if (overlayDucked) setHudDucked(true)
                 true
             }
 
@@ -839,16 +838,7 @@ class OverlayService : Service(), PropHost {
         runCatching { windowManager.updateViewLayout(prop, prop.params) }
     }
 
-    /**
-     * A toy has been put down. While a step is pressing, a held toy is left touchable — taking
-     * its touch away would end the drag it is in the middle of — but the moment it is let go
-     * that reason is gone, so it steps aside at once, exactly as the diagnostics panel does.
-     */
-    override fun propLetGo(prop: Prop) {
-        if (!overlayDucked) return
-        if (prop.leaving) return
-        duckLayout(prop, prop.params, true)
-    }
+    override fun propLetGo(prop: Prop) = Unit
 
     override fun addProp(prop: Prop): Boolean {
         if (props.contains(prop)) return true
@@ -970,6 +960,9 @@ class OverlayService : Service(), PropHost {
             keyboardWatch = 400L
             watchKeyboard()
         }
+
+        // Hold positions until Android has finished with the prepared gesture path.
+        if (overlayDucked) return
 
         // Toys animate and run their own physics whether or not he is paying attention.
         if (props.isNotEmpty()) {
@@ -1170,6 +1163,7 @@ class OverlayService : Service(), PropHost {
             }
 
             MotionEvent.ACTION_MOVE -> {
+                if (overlayDucked) return@OnTouchListener true
                 if (abs(event.rawX - downRawX) > 4 * resources.displayMetrics.density ||
                     abs(event.rawY - downRawY) > 4 * resources.displayMetrics.density
                 ) {
@@ -1820,7 +1814,7 @@ class OverlayService : Service(), PropHost {
             // step out of the way of the press instead of catching it. This call does not
             // return until they really are out of the way — a gesture dispatched before the
             // window was updated is exactly the press the duck is there to protect.
-            onAct = { touching -> duckOverlay(touching) },
+            onGesture = { footprint -> duckOverlay(footprint) },
             originalRequest = original
         )
         if (!started) {
@@ -1940,28 +1934,39 @@ class OverlayService : Service(), PropHost {
     }
 
     /** Refuse a touch if any overlay couldn't move aside rather than press through it. */
-    private fun applyDuck(ducked: Boolean): Boolean {
+    private fun applyDuck(path: Rect?): Boolean {
         if (instance !== this) return false
-        if (ducked && (inputBar != null || chipDragging || hudHeld || props.any { it.held })) return false
-        overlayDucked = ducked
-        var ok = setChipDucked(ducked)
-        pet?.let { if (!duckLayout(it, petParams, ducked)) ok = false }
-        if (!setHudDucked(ducked)) ok = false
-        props.forEach { prop -> if (!duckLayout(prop, prop.params, ducked)) ok = false }
+        fun overlaps(view: View): Boolean {
+            if (path == null) return false
+            if (!view.isLaidOut) return true // it could finish layout before the gesture lands
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            return path.intersects(location[0], location[1], location[0] + view.width, location[1] + view.height)
+        }
+        if (path != null && (inputBar != null ||
+                (chipDragging && jobBar?.let(::overlaps) == true) ||
+                (hudHeld && hud?.let(::overlaps) == true) || props.any { it.held && overlaps(it) })
+        ) return false
+        overlayDucked = path != null
+        var ok = setChipDucked(jobBar?.let(::overlaps) == true)
+        pet?.let { if (!duckLayout(it, petParams, overlaps(it), DUCK_ALPHA)) ok = false }
+        if (!setHudDucked(hud?.let(::overlaps) == true)) ok = false
+        props.forEach { prop -> if (!duckLayout(prop, prop.params, overlaps(prop))) ok = false }
         (fading + listOfNotNull(bubble, thinking)).forEach { view ->
             val params = view.layoutParams as? WindowManager.LayoutParams
-            if (params != null && !duckLayout(view, params, ducked, alwaysUntouchable = true)) ok = false
+            if (params != null && !duckLayout(view, params, overlaps(view), alwaysUntouchable = true)) ok = false
         }
         return ok
     }
 
-    private fun duckOverlay(ducked: Boolean): Boolean {
-        if (Looper.myLooper() == Looper.getMainLooper()) return applyDuck(ducked)
+    private fun duckOverlay(path: Rect?): Boolean {
+        if (Looper.myLooper() == Looper.getMainLooper()) return applyDuck(path)
         val done = CountDownLatch(1)
+        val deadline = SystemClock.uptimeMillis() + DUCK_WAIT_MS
         var clear = false
         if (!handler.post {
                 try {
-                    clear = applyDuck(ducked)
+                    if (path == null || SystemClock.uptimeMillis() < deadline) clear = applyDuck(path)
                 } catch (e: Exception) {
                     Diag.caught("move overlay aside", e)
                 } finally {
@@ -2033,7 +2038,7 @@ class OverlayService : Service(), PropHost {
                 val dx = event.rawX - chipDownX
                 val dy = event.rawY - chipDownY
                 if (abs(dx) > dp(6f) || abs(dy) > dp(6f)) chipMoved = true
-                if (chipMoved) {
+                if (chipMoved && !overlayDucked) {
                     params.x = (chipLeft + dx).toInt()
                         .coerceIn(0, (screenW - params.width).coerceAtLeast(0))
                     params.y = (chipTop + dy).toInt()
@@ -2061,7 +2066,7 @@ class OverlayService : Service(), PropHost {
                 chipDragging = false
                 // A press the system took away is not a stop: the chip just goes back to where
                 // it belongs.
-                if (chipMoved) rememberChipSpot(params) else positionJobBar()
+                if (chipMoved) rememberChipSpot(params) else if (!overlayDucked) positionJobBar()
                 true
             }
 
@@ -2104,7 +2109,7 @@ class OverlayService : Service(), PropHost {
             }
             // A chip being held follows the finger; only one that is resting is put back in
             // its place (or lifted above a keyboard that has just arrived).
-            if (!chipDragging) positionJobBar()
+            if (!chipDragging && !overlayDucked) positionJobBar()
             handler.postDelayed(this, JOB_REFRESH_MS)
         }
     }
@@ -2122,15 +2127,21 @@ class OverlayService : Service(), PropHost {
         targetX = (screenW - petW - dpInt(10f)).toFloat().coerceAtLeast(0f)
         targetY = (screenH - bottomInset - petH - dpInt(10f)).toFloat()
             .coerceAtLeast(topInset.toFloat())
-        walking = true
-        pet?.walking = true
+        // Park immediately; an in-flight walk could cross a prepared gesture path.
+        posX = targetX
+        posY = minOf(targetY, if (keyboardUp) keyboardCeiling() - petH else targetY)
+            .coerceAtLeast(topInset.toFloat())
+        walking = false
+        pet?.walking = false
+        applyPetPosition()
     }
 
     /** Job over: he may wander again, once the line he says has had its moment. */
     private fun endJobWatch() {
         // A job that ended in the middle of a step — cancelled, or the service going away —
         // must not leave his windows unable to be tapped afterwards.
-        duckOverlay(false)
+        // Screen restores any overlapping windows when the in-flight Android gesture ends.
+        // Don't restore them here: Stop may arrive in the middle of a swipe.
         // An open chat holds his attention itself and clears it when it closes.
         if (inputBar != null) return
         attentive = false

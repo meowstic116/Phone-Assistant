@@ -1,36 +1,13 @@
 package com.phoneassistant
 
 import android.content.Context
+import android.graphics.Rect
 import android.os.SystemClock
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
-/**
- * Pip's hands, working: a short loop that reads the screen, asks the brain for one action,
- * does it, and looks again.
- *
- * It is deliberately small. Each step is one request, so a job cannot quietly spend an
- * afternoon of the user's API quota, and every step is shown on the screen as it happens —
- * the app in front changes, which is the only progress report that means anything. Any
- * failure and any refusal ends the job with a line instead of retrying forever.
- *
- * The model is never given the whole screen, only a numbered list of the things that can be
- * pressed, typed into or scrolled, plus their labels. It answers with the number of the
- * element it wants, so no coordinates are guessed and no element is invented.
- */
+/** Reads the screen, takes one action, and checks whether the task is making progress. */
 object Agent {
-
-    /**
-     * How long a job may run. There is no step count any more: a task that works down a feed
-     * needs as many presses as the feed has rows, and a ceiling on steps stopped those jobs
-     * half done — which is what "gave kudos to two and stopped" was. Time is the fence now,
-     * and it is the quota fence too: the free tier allows a few requests a minute, so six
-     * minutes is about as much as one job can usefully spend.
-     */
-    private const val JOB_MS = 6 * 60_000L
-
-    /** Time left at which the model is told to bring the job to a close. */
-    private const val WRAP_UP_MS = 90_000L
 
     /** Time for the screen to settle after an action before it is read again. */
     private const val SETTLE_MS = 650L
@@ -92,7 +69,7 @@ object Agent {
         request: String,
         onSay: (Int, String) -> Unit,
         onDone: (Int, String) -> Unit,
-        onAct: (Boolean) -> Boolean,
+        onGesture: (Rect?) -> Boolean,
         originalRequest: String = request
     ): Boolean {
         if (!Screen.available() && JobProgress.explicitUrl(originalRequest) == null) return false
@@ -100,7 +77,15 @@ object Agent {
         Diag.jobStarted(mine, originalRequest)
         val appContext = ctx.applicationContext
         worker.execute {
-            loop(appContext, request, originalRequest, mine, { onSay(mine, it) }, { onDone(mine, it) }, onAct)
+            Screen.withGestureGuard({ lifetime.active(mine) }, { bounds ->
+                val clear = onGesture(bounds)
+                if (bounds != null && !clear) {
+                    Diag.jobStep(mine, "prepare touch", "an overlay couldn't move out of the touch path", false, skipped = true)
+                }
+                clear
+            }) {
+                loop(appContext, request, originalRequest, mine, { onSay(mine, it) }, { onDone(mine, it) })
+            }
         }
         return true
     }
@@ -113,8 +98,7 @@ object Agent {
         originalRequest: String,
         mine: Int,
         onSay: (String) -> Unit,
-        onDone: (String) -> Unit,
-        onAct: (Boolean) -> Boolean
+        onDone: (String) -> Unit
     ) {
         // Still the job the user is waiting on? A cancelled or replaced job is silent.
         fun alive(): Boolean = lifetime.active(mine)
@@ -128,16 +112,14 @@ object Agent {
         val history = StringBuilder()
         var steps = 0
         val web = JobProgress.WebProgress(JobProgress.needsWebDestination(originalRequest))
-        val deadline = SystemClock.uptimeMillis() + JOB_MS
-        fun active() = alive() && SystemClock.uptimeMillis() < deadline
+        val failures = JobProgress.FailureStreak()
+        val transitions = JobProgress.RecentVisits()
+        var madeProgress = false
         var searched = false
         var correctedEarlyFinish = false
-        var lastScene = ""
-        var lastAnswer = ""
-        var sameAnswer = 0
         try {
             JobProgress.explicitUrl(originalRequest)?.let { url ->
-                if (!active()) return
+                if (!alive()) return
                 val opened = Screen.openUrl(ctx, url)
                 Diag.jobStep(mine, "open link", if (opened) "handed to Android" else "no app opened it", opened)
                 finish(if (opened) "I handed the link to your browser." else "I couldn't open that link.",
@@ -145,7 +127,7 @@ object Agent {
                 return
             }
             JobProgress.feedRequest(originalRequest)?.let { plan ->
-                val result = FeedRunner.run(ctx, mine, plan, ::active, onSay, onAct)
+                val result = FeedRunner.run(ctx, mine, plan, ::alive, onSay)
                 finish(result.first, result.second)
                 return
             }
@@ -164,7 +146,7 @@ object Agent {
             // how a request for "the internet" ended up in an app the user never uses.
             val isBrowser = named != null && Screen.opensWebPages(ctx, named.packageName)
             if (named != null && !isBrowser && !web.destinationRequested &&
-                active() && Screen.inFront() != named.packageName
+                alive() && Screen.inFront() != named.packageName
             ) {
                 val opened = Screen.open(ctx, named)
                 Diag.jobStep(
@@ -177,14 +159,6 @@ object Agent {
             }
 
             while (alive()) {
-                val leftMs = deadline - SystemClock.uptimeMillis()
-                if (leftMs <= 0L) {
-                    finish(
-                        "I've been at this for $JOB_MINUTES minutes, so I'm stopping here.",
-                        STOP_TIME
-                    )
-                    return
-                }
                 val read = readScreen(web = web.followUp)
                 val screen = read.screen
                 if (screen == null) {
@@ -201,13 +175,12 @@ object Agent {
                     return
                 }
                 val decision =
-                    decide(ctx, request, originalRequest, history.takeLast(7000).toString(), screen, steps, leftMs, apps, web, ::active) ?: run {
+                    decide(ctx, request, originalRequest, history.takeLast(7000).toString(), screen, steps, apps, web, ::alive) ?: run {
                         finish("My brain stopped answering halfway through.", STOP_BRAIN)
                         return
                     }
 
                 if (!alive()) return
-                if (!active()) continue
                 if (decision.action == "sign_in" || decision.action == "type" &&
                     screen.items.any { it.password }
                 ) {
@@ -235,6 +208,10 @@ object Agent {
                         )
                         return
                     }
+                    if (!madeProgress && failures.failures > 0) {
+                        finish("I couldn't verify that this worked.", "model finished without observable progress")
+                        return
+                    }
                     finish(
                         decision.say.ifBlank { "Done." },
                         if (decision.say.isBlank()) STOP_DONE else "finished — ${decision.say}"
@@ -242,115 +219,66 @@ object Agent {
                     return
                 }
 
-                // Cancelled while the model was thinking: its answer must not be acted on. The
-                // check at the top of the loop is not enough, because deciding is the slow
-                // part — Stop, a new message or the service going away all land in the middle
-                // of that call, and the answer that follows would otherwise press a button on
-                // a job the user has already ended. This is the last moment before the phone
-                // is touched, so this is where it has to be checked.
-                if (!alive()) return
-                // The screen has not changed and this is the same press as last time: the
-                // last step did nothing he can see. Twice is a slow app; three times is a job
-                // that will spend every step it has on it.
-                //
-                // A different element is progress even when the screen reads the same — the
-                // next kudos down a feed is not the same press as the last one — so the
-                // answer is compared with the element it names, where it sits, not only with
-                // the numbers in the listing.
                 val target = screen.items.firstOrNull { it.index == decision.target }
-                val scene = screen.app + '\u0000' + screen.listing
-                val answer = decision.action + ':' + decision.target + ':' + decision.text +
-                    ':' + (target?.label ?: "") + '@' + (target?.bounds?.flattenToString() ?: "")
-                if (scene == lastScene && answer == lastAnswer) sameAnswer++ else sameAnswer = 0
-                lastScene = scene
-                lastAnswer = answer
-                if (sameAnswer >= 2) {
-                    finish(
-                        "I'm stuck on this screen — pressing it again isn't changing anything.",
-                        STOP_STUCK
-                    )
-                    return
+                if (!alive()) return
+                val browserTarget = target?.takeIf {
+                    web.followUp && decision.action == "tap" && !it.editable && it.label.isNotBlank()
                 }
-                if (repeated) {
-                    finish(
-                        if (web.unverified) "The results are open, but I couldn't verify the requested page."
-                        else "I stopped at one search — it's open in your browser.",
-                        "asked for a second search in the same job — the first one is open"
-                    )
-                    return
+                val outcome = when {
+                    repeated -> "$FAILED the search is already open; continue from the current page"
+                    browserTarget != null -> pressBrowserTarget(mine, screen, browserTarget, web, ::alive)
+                    decision.action in WINDOW_ACTIONS && !Screen.sameWindow(screen) ->
+                        "$FAILED the foreground window changed; read it again"
+                    decision.action in TARGET_ACTIONS && target != null && !Screen.targetStillVisible(screen, target) ->
+                        "$FAILED the control changed; read the screen again"
+                    !alive() -> return
+                    else -> simple(ctx, decision, screen, apps)
                 }
-                // The overlay's own windows get out of the way of the press. This is the one
-                // window in which the phone is being touched, so it is the one window in
-                // which they must not be touchable: a press aimed at a row that happens to
-                // sit exactly where the user left the chip, or under Pip himself, a toy or
-                // the floating panel, would otherwise land on his window instead of the row.
-                // An
-                // injected gesture keeps running after perform returns — a long press is
-                // 550ms — so they stay away through the settle too, and come back while the
-                // model is thinking, which is most of the time a job runs.
-                val clear = onAct(true)
-                // Not a failure of the step but a step that was never taken: nothing was
-                // pressed, so the record says so instead of blaming the app he was in.
-                val skipped = !clear
-                try {
+                if (!alive()) return
+                val accepted = !outcome.startsWith(FAILED)
+                var progress = accepted
+                var detail = outcome
+                if (accepted && browserTarget == null && decision.action in OBSERVE_ACTIONS) {
+                    if (decision.action != "wait") SystemClock.sleep(SETTLE_MS)
                     if (!alive()) return
-                    if (!active()) continue
-                    val browserTarget = target?.takeIf {
-                        web.followUp && decision.action == "tap" && !it.editable && it.label.isNotBlank()
-                    }
-                    val act = when {
-                        !clear -> OVERLAY_BUSY
-                        browserTarget != null -> pressBrowserTarget(mine, screen, browserTarget, web, ::active)
-                        decision.action in WINDOW_ACTIONS && !Screen.sameWindow(screen) ->
-                            "$FAILED the foreground window changed; read it again"
-                        decision.action in TARGET_ACTIONS && target != null && !Screen.targetStillVisible(screen, target) ->
-                            "$FAILED the control changed; read the screen again"
-                        !active() -> return
-                        else -> simple(ctx, decision, screen, apps)
-                    }
-                    val outcome = act
-                    val landed = !outcome.startsWith(FAILED)
-                    history.append(steps + 1).append(". ").append(decision.summary(screen))
-                        .append(" → ").append(outcome).append('\n')
-                    // The only ones marked as turns: everything else in the record — the
-                    // repeat pass, its scrolls, the app opened before the first step — was
-                    // the loop acting on this answer, not another question asked.
-                    Diag.jobStep(
-                        mine,
-                        decision.summary(screen),
-                        outcome,
-                        landed,
-                        skipped,
-                        turn = true
-                    )
-                    steps++
-                    // A search that went through is the job. Waiting to be told "done"
-                    // spends a request on an answer already known, and leaves the chip up
-                    // over results the user can already read. Only a search the model says
-                    // it will follow up, one that failed, or the task's own later steps
-                    // keep it going.
-                    if (search && landed) {
-                        searched = true
-                        if (web.searchFinishes(decision.more)) {
-                            val query = decision.text.trim()
-                            finish(
-                                if (decision.images) "Pictures of \"$query\" are up in your browser."
-                                else "\"$query\" is up in your browser.",
-                                "the search was the whole task — it is open in the browser"
-                            )
-                            return
-                        }
-                    }
-                    if (web.attemptsExhausted) {
+                    val next = Screen.snapshot(web = web.followUp)
+                    val before = screen.app + '\n' + screen.listing
+                    val after = next?.let { it.app + '\n' + it.listing }
+                    progress = after != null && after != before &&
+                        transitions.add("$before\u0000${decision.action}:${target?.label}\u0000$after")
+                    if (!progress) detail += "; no new screen progress observed"
+                }
+                history.append(steps + 1).append(". ").append(decision.summary(screen))
+                    .append(" → ").append(detail).append('\n')
+                // The prompt only reads the tail; don't keep the full transcript in memory.
+                if (history.length > 10_000) history.delete(0, history.length - 7_000)
+                Diag.jobStep(mine, decision.summary(screen), detail, progress, turn = true)
+                steps++
+                madeProgress = madeProgress || progress
+                if (search && accepted) {
+                    searched = true
+                    if (web.searchFinishes(decision.more)) {
+                        val query = decision.text.trim()
                         finish(
-                            "I couldn't open the requested page. I stopped rather than repeat the same taps.",
-                            "two distinct browser targets didn't navigate"
+                            if (decision.images) "Pictures of \"$query\" are up in your browser."
+                            else "\"$query\" is up in your browser.",
+                            "the search was the whole task — it is open in the browser"
                         )
                         return
                     }
-                    if (landed && browserTarget == null) SystemClock.sleep(SETTLE_MS)
-                } finally {
-                    onAct(false)
+                }
+                if (web.attemptsExhausted) {
+                    finish("I couldn't open the requested page. I stopped rather than repeat the same taps.",
+                        "two distinct browser targets didn't navigate")
+                    return
+                }
+                if (failures.record(progress)) {
+                    finish("I stopped after several attempts without progress.",
+                        "${failures.failures} consecutive failed or unproductive actions")
+                    return
+                }
+                if (accepted && browserTarget == null && decision.action !in OBSERVE_ACTIONS) {
+                    SystemClock.sleep(SETTLE_MS)
                 }
             }
             // Only a cancelled job reaches here: every other ending returns from inside the
@@ -457,7 +385,6 @@ object Agent {
         history: String,
         screen: Screen.Snapshot,
         step: Int,
-        leftMs: Long,
         apps: List<Screen.AppRef>,
         web: JobProgress.WebProgress,
         alive: () -> Boolean
@@ -489,10 +416,7 @@ object Agent {
                 append("\nThis is the first step: say what you are doing in one short line, ")
                 append("then act.\n")
             }
-            if (leftMs < WRAP_UP_MS) {
-                append("\nThis job has about a minute and a half left in it: do what matters ")
-                append("most now, then finish.\n")
-            }
+
         }
         // A call that throws is caught here, not left to the loop below: a dropped connection
         // arrives as an exception rather than as a failed reply, and that is exactly the case
@@ -719,12 +643,7 @@ object Agent {
     private val TARGET_ACTIONS = setOf("tap", "long_press", "type", "scroll_down", "scroll_up")
     private val WINDOW_ACTIONS = TARGET_ACTIONS + setOf("back", "home", "recents", "notifications")
 
-    /** How long a job is, in the words the bubble uses. */
-    private val JOB_MINUTES = JOB_MS / 60_000L
-
-    /** A step that was never pressed, because his own windows would not move off the screen. */
-    private const val OVERLAY_BUSY =
-        "$FAILED his own window would not get out of the way in time"
+    private val OBSERVE_ACTIONS = WINDOW_ACTIONS - "type" + setOf("wait", "open_app")
     private const val DONE = "done"
 
     // Why a job stopped, in the words the diagnostics record uses. Separate from what he
@@ -735,8 +654,6 @@ object Agent {
     private const val STOP_NO_HANDS = "the accessibility service is not connected"
     private const val STOP_BRAIN = "the brain stopped answering"
     private const val STOP_DONE = "the job said it was finished"
-    private const val STOP_STUCK = "the same press kept landing on the same screen"
-    private const val STOP_TIME = "stopped at the time limit"
 
     const val NO_HANDS =
         "Switch me on in accessibility first — Settings › Accessibility › Pip — and then " +
@@ -790,8 +707,9 @@ object Agent {
           text sitting there and nothing searched; the browser is also then whichever one the
           app list offered rather than the one the user actually uses. A search is normally
           the whole job and ends it; "more":true is only for a task that goes on afterwards.
-        - If an action failed according to WHAT HAS HAPPENED SO FAR, do something different.
-          Never repeat a failing action.
+        - If an action failed or the screen did not make progress according to WHAT HAS
+          HAPPENED SO FAR, try a different approach. Say done when you have evidence the task
+          is complete, or report what you could not verify.
         - An action can land and still take you where you did not mean to go — a profile
           instead of a feed, settings instead of a list. Use back and choose a different
           element; never carry on pressing about in a screen you did not mean to be in.

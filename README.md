@@ -58,19 +58,26 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   Messages and tell Mum I'm late", "search for the parcel number", "scroll down and tap the
   third one", "turn do not disturb on". He reads the app in front as a short numbered list of
   the things that can be pressed, typed into or scrolled, picks one step, does it, and looks
-  again. Each job has a six-minute time limit. A shared feed runner can apply missing
+  again. General jobs have no fixed step or elapsed-time limit. Pip keeps going while he can
+  verify progress and stops after repeated failures or when the task is complete.
+  A shared feed runner can apply missing
   reactions across apps — for example, **“Please open Strava and give kudos to every
   activity that I haven't given kudos to yet”** or **“Open Instagram and like every post I
   haven't liked yet.”** Pip reads the reaction controls Android exposes, skips already-applied
   reactions, and counts a press only after verifying that the control changed. Three distinct
   screens in a row with already-applied reactions and none ready are enough to stop, not proof
-  that the entire feed was checked. He can also stop earlier if the feed won't move, a press
-  can't be verified, or the job reaches its limit.
+  that the entire feed was checked. A failed reaction isn't tapped again; Pip can try a
+  different control, but stops after several unverified reactions or scrolls that don't
+  reveal new content.
   For something more selective, try **“Doomscroll Instagram Reels and like any you want.”**
   Pip may pick one like per screen or skip it. He judges only the captions and labels Android
   exposes, not the video or audio. **“Doomscroll Instagram Reels for me”** browses without
-  reacting. These runs are capped at 12 distinct screens. If Pip can't find the requested tab,
-  open it in the app and retry. If a request names an app, Pip opens it before his first step
+  reacting. Say **“Doomscroll Instagram Reels for 2 minutes”** or **“Doomscroll 10 reels on
+  Instagram”** to set a time or count. The timer starts when the feed opens. A count means
+  distinct reel screens Android exposes, including the first one, not full videos played.
+  With neither limit specified, Pip picks a random duration from 30 seconds to 5 minutes.
+  He may stop sooner if the feed stalls, and **Stop** works at any time. If Pip can't find
+  the requested tab, open it in the app and retry. If a request names an app, Pip opens it before his first step
   unless you're already in it, in which case he leaves your
   screen alone — so the job happens in front of you rather than somewhere behind   it, and he moves into the bottom corner so he is not covering it. He is given the list of apps really
   installed on the phone, so "open WhatsApp" reaches that WhatsApp and not a guess.
@@ -82,21 +89,21 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   title is still in the same spot on the same page, he can try one touch on that title.
   He stops rather than keep cycling through unchanged results. A browser's search box
   cannot be typed into usefully, because submitting it needs an enter key the accessibility
-  service has no way to press: the field fills, the page never changes, and the job ends
-  having spent four steps to get nowhere. A `wait` step really waits, rather than re-reading
+  service has no way to press. Pip uses a search URL instead. A `wait` step really waits, rather than re-reading
   the same loading screen and asking to wait again. While a
   job is running there is a small **Stop** chip in the bottom left corner, over whatever app
   he is working in — a corner rather than the middle of the bottom edge, which is where a job
   is most likely to need to press: one tap ends the job where it stands, and the record on
   Diagnostics says it was cancelled. Drag the chip anywhere you like and it stays there, for
   this job and the next one; it lifts above the keyboard when one comes up, so it is never
-  behind the app. For the moment a step is actually performing, everything of his that can
-  take a finger goes inert. The Stop chip dims and other overlay windows briefly clear
-  the screen so Android doesn't block touches underneath them. If a drag or failed window
-  update prevents this, no press is made and Diagnostics marks the step **SKIP**.
-  Stop returns between actions. An action already dispatched cannot be undone, but Stop or
-  sending a newer message prevents previous model replies from starting another action.
-  Before touching a control Pip rechecks that its window and target are still current.
+  behind the app. Pip and Stop stay visible during accessibility clicks and scrolls, which go straight to the
+  app without going through Pip's windows. Pip parks in the bottom right and Stop stays in
+  its usual corner. For a simulated touch, only an overlay in the actual touch path moves
+  aside; Pip and Stop dim rather than disappear even if the touch crosses them. An
+  overlapping Stop chip is briefly untappable until Android finishes the touch. If an
+  overlapping window can't move aside, Diagnostics marks the attempted gesture **SKIP**.
+  An action already dispatched can't be undone, but Stop or a newer message prevents later
+  actions. Before touching a control Pip rechecks that its window and target are still current.
 - Drag it anywhere. It lives in a foreground service with a persistent notification.
 
 ## Toys
