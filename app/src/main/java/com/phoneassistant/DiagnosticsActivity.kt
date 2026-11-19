@@ -288,17 +288,20 @@ class DiagnosticsActivity : Activity() {
                                 step.ok -> "ok"
                                 else -> "NO"
                             }
-                        ).append("  ")
+                        )
+                        // Where each step begins: the answer is marked, the presses and
+                        // scrolls it turned into run underneath it unmarked.
+                        .append(if (step.turn) "  ASK " else "      ")
                         .append(step.text)
                     if (step.outcome.isNotBlank()) out.append(" → ").append(step.outcome)
                     out.append('\n')
                 }
+                detail("steps = the ASK lines, one per answer from the model; actions = " +
+                    "every line, presses and scrolls alike")
                 // Honest about what ok means: the framework accepting an action is not the
                 // same as the screen having changed, and a job can look healthy here and
                 // still have gone nowhere.
-                detail("steps = answers asked of the model · actions = every press, scroll " +
-                    "and open, including the ones made without asking")
-                detail("ok = Android accepted it; the screen was read again after every step")
+                detail("ok = Android accepted it; the screen was read again after every action")
                 if (job.steps.any { it.skipped }) {
                     detail("SKIP = nothing was pressed: his own window would not get out of " +
                         "the way in time")

@@ -40,13 +40,15 @@ object Diag {
      * One thing a job tried: what it did, how that went, whether Android took it, and whether
      * it was pressed at all. [skipped] is the case worth being explicit about — the step was
      * abandoned rather than failed, because his own window would not get out of its way and a
-     * press might have landed on it.
+     * press might have landed on it. [turn] marks the ones the model chose: everything else in
+     * the record is the loop acting on that answer, not another question asked.
      */
     data class Step(
         val text: String,
         val outcome: String,
         val ok: Boolean,
-        val skipped: Boolean = false
+        val skipped: Boolean = false,
+        val turn: Boolean = false
     )
 
     /**
@@ -61,16 +63,17 @@ object Diag {
         val request: String,
         val startedAt: Long,
         val steps: List<Step> = emptyList(),
-        /**
-         * How many of those were answers from the model. The rest are the loop's own: the
-         * repeat pass presses a dozen things inside one answer, and counting only the answers
-         * would make a kudos run look like it did almost nothing.
-         */
-        val turns: Int = 0,
         val reason: String? = null,
         val endedAt: Long = 0L
     ) {
         val running: Boolean get() = reason == null
+
+        /**
+         * How many answers were asked of the model, counted from the marks on the lines
+         * rather than kept beside them. A separate tally is a second thing that can disagree
+         * with what the record shows, and the marks are what the reader is looking at.
+         */
+        val turns: Int get() = steps.count { it.turn }
     }
 
     /** The last job, live while it runs and left in place afterwards. Null until one starts. */
@@ -98,8 +101,13 @@ object Diag {
         val current = lastJob ?: return
         if (current.id != id) return
         lastJob = current.copy(
-            steps = current.steps + Step(oneLine(text, 120), oneLine(outcome, 120), ok, skipped),
-            turns = current.turns + if (turn) 1 else 0
+            steps = current.steps + Step(
+                oneLine(text, 120),
+                oneLine(outcome, 120),
+                ok,
+                skipped,
+                turn
+            )
         )
     }
 
