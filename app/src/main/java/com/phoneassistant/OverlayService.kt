@@ -1598,6 +1598,11 @@ class OverlayService : Service(), PropHost {
      * and re-targeting on every probe sample used to drag him into a corner.
      */
     private fun walkClearOfKeyboard() {
+        // Only while a keyboard is actually on screen. The height is remembered between
+        // keyboards so he can step clear the instant one opens, but the area it describes is
+        // nobody's business when the keyboard is not there — taken as a floor it kept him out
+        // of the bottom of the screen the whole time, keyboard or no keyboard.
+        if (!keyboardShowing()) return
         val neededY = keyboardCeiling() - keyboardAbove() - petH - dp(6f)
         if (neededY >= posY) return
 
@@ -1675,8 +1680,16 @@ class OverlayService : Service(), PropHost {
     }
 
     /**
-     * Top of the keyboard in his own coordinates, less the room he keeps above it, or a guess
-     * before one has ever been measured.
+     * Whether a keyboard is on screen at this moment: another app's, which the accessibility
+     * service reports, or the one his own box raised, which needs no reporting because the box
+     * is the thing that asked for it and is up before its keyboard finishes rising.
+     */
+    private fun keyboardShowing(): Boolean = keyboardUp || inputBar != null
+
+    /**
+     * Top of the keyboard in his own coordinates, less the room he keeps above it. With no
+     * keyboard on screen this is simply the bottom of the screen: there is no area to keep out
+     * of, and he is free to stand where he likes.
      *
      * The keyboard's top is measured from the top of the display, so the window's own offset
      * comes off it first. After that, nearly a fifth of the keyboard's height is held back on
@@ -1687,7 +1700,7 @@ class OverlayService : Service(), PropHost {
      */
     private fun keyboardCeiling(): Float {
         val px = keyboardPx()
-        if (px <= 0) return screenH * 0.52f
+        if (px <= 0 || !keyboardShowing()) return (screenH - bottomInset).toFloat()
         return (screenH - px).toFloat() - windowOffset - px * 0.18f - dp(10f)
     }
 
