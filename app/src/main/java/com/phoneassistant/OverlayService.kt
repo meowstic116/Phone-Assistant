@@ -137,48 +137,25 @@ class OverlayService : Service(), PropHost {
         /** What is out on the screen right now, for the prompt. Empty when nothing is. */
         fun toysOnStage(): String = instance?.let { Toys.summary(it) } ?: ""
 
-        /**
-         * A login was just saved from the form he opened for it, so he has an answer in the
-         * bubble instead of the form closing into silence — and, when that form was opened by
-         * a job that stopped for it, the job is picked back up once the user leaves the screen.
-         */
-        fun loginSaved(site: String) {
-            val service = instance ?: return
-            // Read before the resume is armed: a bubble promising to pick the job back up when
-            // there are no hands to pick it up with is a promise nothing will keep.
-            val hands = Screen.available()
-            val resume = service.armResume()
-            service.sayAloud(
-                when {
-                    resume ->
-                        "saved. I'll pick that job back up once you're out of this screen."
-                    !hands -> "saved. I'll use it once I can work your phone."
-                    site.isBlank() -> "saved. I'll use it next time."
-                    else ->
-                        "saved the login for ${Vault.host(site)}. name the job and I'll sign in."
-                }
-            )
-        }
+        /** Dispatch from chat history, but never accept a late reply for an older message. */
+        fun runPhoneJob(task: String, original: String, turn: Long): Boolean =
+            instance?.startJob(task, original, turn) ?: false
 
-        /**
-         * Runs a phone job handed over from a screen that is not the overlay's own chat —
-         * the history screen — where the reply is a JSON object that would otherwise be
-         * shown to the user as if it were something he said. False when nothing started:
-         * not running, already busy, or no hands to work with.
-         */
-        fun runPhoneJob(task: String): Boolean = instance?.startJob(task) ?: false
+        fun clearConversationFeedback() {
+            Agent.cancel()
+            instance?.let {
+                it.awaitingReply = false
+                it.hideThinking()
+                it.hideBubble()
+                it.leaveAttention()
+            }
+        }
 
         /** How often the floating readout repaints. Fast enough to watch a keyboard arrive. */
         private const val HUD_REFRESH_MS = 250L
 
         /** How often the cancel chip checks that there is still a job to cancel. */
         private const val JOB_REFRESH_MS = 300L
-
-        /** How long a saved login keeps the stopped job waiting to be picked back up. */
-        private const val RESUME_WINDOW_MS = 60_000L
-
-        /** How often the way out of the Logins screen is checked. */
-        private const val RESUME_POLL_MS = 400L
 
         fun status(): Status? = instance?.status()
 
@@ -283,19 +260,6 @@ class OverlayService : Service(), PropHost {
     private var jobBarParams: WindowManager.LayoutParams? = null
 
     /**
-     * The job that stopped to ask for a login, kept so the login the user is about to save can
-     * pick it back up. Cleared by a new job, a new message, or by the ask being answered.
-     */
-    private var loginJob: String? = null
-
-    /**
-     * A stopped job waiting for the user to leave the Logins screen, and the moment it stops
-     * waiting. Starting it while that screen is in front would read Pip's own form.
-     */
-    private var resumeJob: String? = null
-    private var resumeBy = 0L
-
-    /**
      * Where the chip was left after a drag, as a fraction of the room it has to move in. Null
      * means it has never been moved and sits in its corner. Stored as a fraction rather than
      * pixels so the same spot means the same corner after a rotation.
@@ -306,17 +270,13 @@ class OverlayService : Service(), PropHost {
      * True while a step is touching the phone. The chip is not touchable then, so a press
      * meant for the app underneath can never land on the way out of the job instead.
      */
-    private var chipDucked = false
 
     /** The same for Pip himself: he is a touchable window too, and stands in a corner. */
-    private var petDucked = false
 
     /** True for the moment a step is pressing, so anything created meanwhile starts aside. */
     private var overlayDucked = false
 
     /** The same for the floating diagnostics panel and for the toys. */
-    private var hudDucked = false
-    private var propsDucked = false
 
     /** True while the diagnostics panel is being dragged: it keeps its touch then. */
     private var hudHeld = false
@@ -587,7 +547,7 @@ class OverlayService : Service(), PropHost {
         if (!runCatching { windowManager.addView(view, params) }.isSuccess) return
         hud = view
         hudParams = params
-        hudDucked = overlayDucked
+        if (overlayDucked) setHudDucked(true)
         hudHeld = false
         // Painted straight away, so it never appears hollow for a quarter of a second.
         renderHud()
@@ -600,7 +560,6 @@ class OverlayService : Service(), PropHost {
         hud = null
         hudParams = null
         // The next panel is a new window with new params, so it starts unducked.
-        hudDucked = false
         hudHeld = false
     }
 
@@ -706,9 +665,7 @@ class OverlayService : Service(), PropHost {
         // A job outlives no service: its next step would be acting on a screen nothing is
         // watching any more.
         Agent.cancel()
-        // Nor does a login it was waiting for, nor a job waiting on that login.
-        loginJob = null
-        resumeJob = null
+        ChatTurns.begin()
         ImeWatch.onChange = null
         keyboardUp = false
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
@@ -777,10 +734,10 @@ class OverlayService : Service(), PropHost {
     override fun feel(mood: PetView.Mood, ms: Long) {
         val view = pet ?: return
         view.mood = mood
+        val mine = ++moodSeq
         if (ms > 0L) {
             // Only the newest mood may clear itself: a smug 2.5 s stretch followed by an
             // annoyed 4 s one used to be cut short by the first one's timer.
-            val mine = ++moodSeq
             handler.postDelayed({ if (mine == moodSeq) view.mood = PetView.Mood.NEUTRAL }, ms)
         }
     }
@@ -890,8 +847,7 @@ class OverlayService : Service(), PropHost {
     override fun propLetGo(prop: Prop) {
         if (!overlayDucked) return
         if (prop.leaving) return
-        prop.params.flags = duckFlags(prop.params.flags, true)
-        runCatching { windowManager.updateViewLayout(prop, prop.params) }
+        duckLayout(prop, prop.params, true)
     }
 
     override fun addProp(prop: Prop): Boolean {
@@ -914,6 +870,7 @@ class OverlayService : Service(), PropHost {
             y = prop.posY.toInt()
         }
         prop.params = params
+        if (overlayDucked) params.alpha = 0f
         if (!runCatching { windowManager.addView(prop, params) }.isSuccess) return false
         props += prop
         prop.appear()
@@ -1316,6 +1273,7 @@ class OverlayService : Service(), PropHost {
         }
         placePanel(width, height, params)
 
+        if (overlayDucked) params.alpha = 0f
         if (runCatching { windowManager.addView(view, params) }.isSuccess) {
             bubble = view
             bubbleParams = params
@@ -1366,7 +1324,7 @@ class OverlayService : Service(), PropHost {
         relocating = false
         arrive = null
         pet?.walking = false
-        pet?.mood = PetView.Mood.THINKING
+        feel(PetView.Mood.THINKING, 0L)
         showThinking()
     }
 
@@ -1389,6 +1347,7 @@ class OverlayService : Service(), PropHost {
         }
         placePanel(width, height, params)
 
+        if (overlayDucked) params.alpha = 0f
         if (runCatching { windowManager.addView(view, params) }.isSuccess) {
             thinking = view
             thinkingParams = params
@@ -1458,8 +1417,7 @@ class OverlayService : Service(), PropHost {
         // Being smug or annoyed outranks talking: he wants you to see his face.
         val mood = pet?.mood
         if (mood != PetView.Mood.ANNOYED && mood != PetView.Mood.SMUG) {
-            pet?.mood = PetView.Mood.TALKING
-            handler.postDelayed({ pet?.mood = PetView.Mood.NEUTRAL }, 1600L)
+            feel(PetView.Mood.TALKING, 1600L)
         }
     }
 
@@ -1784,13 +1742,9 @@ class OverlayService : Service(), PropHost {
         removeInputBar()
         relocating = false
 
+        val turn = ChatTurns.begin()
         Memory.append(this, "user", text)
-        // A new message outranks whatever he was doing with his hands: half-finished work in
-        // another app would be acting on an instruction the user has already replaced.
         Agent.cancel()
-        // And the login a stopped job asked for is no longer what the user is being asked
-        // about, so saving one now must not start that job again.
-        loginJob = null
         // His answer takes priority from this moment on, so the toys' own lines stay quiet.
         beginReply()
         // Thinking comes before the toys act. The other way round, thinking cancelled the
@@ -1799,29 +1753,29 @@ class OverlayService : Service(), PropHost {
         startThinking()
         // Some things are done, not said: stands get opened, games get started, and
         // criticism gets taken personally.
+        if (JobProgress.feedRequest(text) != null || JobProgress.explicitUrl(text) != null) {
+            startJob(text, text, turn)
+            return
+        }
         val event = Toys.reactTo(this, text)
 
-        AssistantBrain.reply(this, currentAppLabel, Toys.summary(this), event) { ok, reply ->
+        AssistantBrain.reply(this, currentAppLabel, Toys.summary(this), event, turn) { ok, reply ->
             handler.post {
+                if (instance !== this || !ChatTurns.isCurrent(turn)) return@post
                 // Sometimes the answer is not a line but a job for his hands to do.
                 val job = if (ok) Agent.delegated(reply) else null
                 if (job != null) {
-                    startJob(job)
+                    startJob(job, text, turn)
                     return@post
                 }
                 if (ok) Memory.append(this, "assistant", reply)
                 modelSays(reply)
                 handler.postDelayed({
-                    pet?.mood = PetView.Mood.NEUTRAL
-                    handler.postDelayed({
-                        if (!typing()) closeChat()
-                    }, 2600L)
-                }, 1400L)
+                    if (ChatTurns.isCurrent(turn) && inputBar == null && !Agent.running()) closeChat()
+                }, 4000L)
             }
         }
     }
-
-    private fun typing(): Boolean = inputField?.text?.isNotEmpty() == true
 
     // ------------------------------------------------------------------ phone jobs
 
@@ -1833,19 +1787,22 @@ class OverlayService : Service(), PropHost {
      * The job speaks and finishes on its own thread, so both callbacks come back to the main
      * looper before they touch a window.
      */
-    private fun startJob(job: String): Boolean {
+    private fun startJob(job: String, original: String, turn: Long): Boolean {
+        if (instance !== this || !ChatTurns.isCurrent(turn)) return false
         // The chat model has answered, so nothing is waiting on it any more: the toys may
         // talk again while the job runs.
         awaitingReply = false
-        // A job of its own replaces any login a stopped one was waiting for.
-        loginJob = null
         val started = Agent.start(
             this,
             job,
-            onSay = { line -> handler.post { if (running) sayAloud(line) } },
-            onDone = { line ->
+            onSay = { id, line ->
                 handler.post {
-                    if (!running) return@post
+                    if (instance === this && ChatTurns.isCurrent(turn) && Agent.isCurrent(id)) sayAloud(line)
+                }
+            },
+            onDone = { id, line ->
+                handler.post {
+                    if (instance !== this || !ChatTurns.isCurrent(turn) || !Agent.isCurrent(id)) return@post
                     // The chip belongs to the job and the job has just ended, so it goes now
                     // rather than at the next tick: a finished job must not still offer Stop.
                     // Guarded on a job being live, so a job started in the meantime keeps its
@@ -1864,14 +1821,10 @@ class OverlayService : Service(), PropHost {
             // return until they really are out of the way — a gesture dispatched before the
             // window was updated is exactly the press the duck is there to protect.
             onAct = { touching -> duckOverlay(touching) },
-            // A step wanted a login he could not supply. The ask comes from the main looper,
-            // like everything else that touches a window, and the password itself is never
-            // anything he has seen: it will be typed into the form by the user. The job is
-            // kept with the ask, so the login they save can pick it back up.
-            onNeedLogin = { need -> handler.post { if (running) askForLogin(need, job) } }
+            originalRequest = original
         )
         if (!started) {
-            hideJobBar()
+            if (!Agent.running()) hideJobBar()
             sayAloud(
                 if (Screen.available()) {
                     "I'm already in the middle of something."
@@ -1888,109 +1841,6 @@ class OverlayService : Service(), PropHost {
         return true
     }
 
-    /**
-     * A step needed a login and could not do without one. He says so in one line and opens the
-     * form with the site already in it, because Android will not let him read a password the
-     * user types into a site — asking here is the only way to remember one.
-     *
-     * The job has already stopped itself by the time this runs — the agent ends it the moment
-     * the step comes back with an ask — because the form is about to be the screen in front,
-     * and a next step would read Pip's own login form and start pressing about in it. All this
-     * has to do is say the line, in the words the ask actually earned, remember what the job
-     * was, and open the form.
-     */
-    private fun askForLogin(need: Agent.NeedLogin, task: String) {
-        // A job the user started since this ask was posted owns the screen; a login form
-        // opening over it would be worse than the ask going unsaid.
-        if (Agent.running()) return
-        // The step that wanted the login ended the job, so its chip goes with it.
-        hideJobBar()
-        endJobWatch()
-        // Kept, so the login they are about to save is one he can act on at once.
-        loginJob = task
-        val host = Vault.host(need.site)
-        // A saved login he could not put in. He has already looked behind the page's own log-in
-        // link and a scroll or two, so the line says that much and no more: a web page, a form
-        // that never appeared and a link he could not see all look the same from here, and
-        // naming one of them would be a guess. Nothing has been lost, and he says that too —
-        // it is the part the user needs to know.
-        val seen =
-            if (need.looked) "I looked, and there's no password box here"
-            else "I couldn't find a password box here"
-        sayAloud(
-            when {
-                need.saved -> "$seen, so " +
-                    (if (host.isEmpty()) "your login" else "your $host login") +
-                    " didn't go in. it's still saved."
-                host.isEmpty() -> "I don't have a login for that. give me one and I'll use it."
-                else -> "I don't have a login for $host. give me one and I'll use it."
-            }
-        )
-        val site = need.site
-        val form = Intent(this, VaultActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (site.isNotBlank()) form.putExtra(VaultActivity.EXTRA_SITE, site)
-        // His own app asking for a login is exactly the kind of start the overlay permission
-        // allows; if the system refuses anyway, the bubble has already said where to go.
-        runCatching { startActivity(form) }
-    }
-
-    /**
-     * Stands the stopped job back up, now that the login it was waiting for is saved. It is not
-     * started here: the Logins form is the screen in front, and a job started on it would read
-     * Pip's own form and press about in it. So this watches for the moment the user leaves that
-     * screen — the only signal there is that they are back on the page they asked about — and
-     * gives up if the minute after it passes with no job.
-     *
-     * False when no job was waiting for a login, or when there are no hands to pick one up
-     * with: a job armed without the accessibility service would be dropped by the wait a
-     * moment later, so it is dropped here instead and nothing is promised in the bubble.
-     */
-    private fun armResume(): Boolean {
-        val task = loginJob ?: return false
-        // Either way the ask is answered, so it is not left standing for a later save.
-        loginJob = null
-        if (!Screen.available()) return false
-        resumeJob = task
-        resumeBy = SystemClock.uptimeMillis() + RESUME_WINDOW_MS
-        handler.removeCallbacks(resumeWatch)
-        handler.post(resumeWatch)
-        return true
-    }
-
-    /** Watches for the way out of the Logins screen, then hands the job back to his hands. */
-    private val resumeWatch = object : Runnable {
-        override fun run() {
-            val task = resumeJob ?: return
-            // No hands, no job: there is nothing left to pick up with.
-            if (!Screen.available()) {
-                resumeJob = null
-                return
-            }
-            val front = Screen.inFront()
-            // Still in his own screens: the way out has not happened yet, and a step taken now
-            // would read the Logins form. The minute is only spent once the user is actually
-            // elsewhere, so filling the form in slowly costs nothing.
-            if (front == packageName) {
-                resumeBy = SystemClock.uptimeMillis() + RESUME_WINDOW_MS
-                handler.postDelayed(this, RESUME_POLL_MS)
-                return
-            }
-            // A screen that cannot be read is not a way out of the form, but it is not a reason
-            // to watch for ever either: the clock is not put back, so this wait ends like any
-            // other where nothing happened.
-            if (front == null) {
-                if (SystemClock.uptimeMillis() > resumeBy) resumeJob = null
-                else handler.postDelayed(this, RESUME_POLL_MS)
-                return
-            }
-            resumeJob = null
-            // A job the user started meanwhile is the one they want, not this one.
-            if (Agent.running()) return
-            startJob(task)
-        }
-    }
-
     // --------------------------------------------------------------------- job bar
 
     /**
@@ -2000,7 +1850,6 @@ class OverlayService : Service(), PropHost {
      */
     private fun showJobBar() {
         if (jobBar != null) return
-        chipDucked = false
         // The listener is for TalkBack, which activates the chip without a finger: a real
         // touch goes through the service's own listener so it can become a drag.
         val view = JobBar(this) { stopJob() }
@@ -2040,7 +1889,6 @@ class OverlayService : Service(), PropHost {
         jobBar?.let { view -> runCatching { windowManager.removeView(view) } }
         jobBar = null
         jobBarParams = null
-        chipDucked = false
         chipDragging = false
         chipMoved = false
     }
@@ -2053,111 +1901,75 @@ class OverlayService : Service(), PropHost {
      * ending the job. The dimming is only so the moment it cannot be tapped is visible; Stop
      * is back the instant the step has finished.
      */
-    private fun setChipDucked(ducked: Boolean) {
-        if (jobBar == null) return
-        if (chipDucked == ducked) return
-        val view = jobBar ?: return
-        val params = jobBarParams ?: return
-        chipDucked = ducked
-        params.flags = duckFlags(params.flags, ducked)
-        // The fade-in from showJobBar would otherwise bring it back to full while it is
-        // still stepping aside, so the animation is stopped before the alpha is set.
-        view.animate().cancel()
-        view.alpha = if (ducked) DUCK_ALPHA else 1f
-        runCatching { windowManager.updateViewLayout(view, params) }
+    private fun setChipDucked(ducked: Boolean): Boolean {
+        val view = jobBar ?: return true
+        val params = jobBarParams ?: return false
+        if (!duckLayout(view, params, ducked, DUCK_ALPHA)) return false
+        return true
     }
 
-    /**
-     * Pip gets out of the way too. He is a touchable window and he stands in a corner for the
-     * whole job, so a step pressing a row that happens to be under him would drag him about
-     * instead of pressing the row. He is not dimmed — he is not a way out of anything, so
-     * there is nothing to warn the user about — he just stops taking the touch for a moment.
-     */
-    private fun setPetDucked(ducked: Boolean) {
-        if (petDucked == ducked) return
-        val view = pet ?: return
-        petDucked = ducked
-        petParams.flags = duckFlags(petParams.flags, ducked)
-        runCatching { windowManager.updateViewLayout(view, petParams) }
+    private fun setHudDucked(ducked: Boolean): Boolean {
+        val view = hud ?: return true
+        val params = hudParams ?: return false
+        if (ducked && hudHeld) return false
+        if (!duckLayout(view, params, ducked)) return false
+        return true
     }
 
-    /**
-     * The floating diagnostics panel. It is touchable so it can be dragged, which means it can
-     * catch a press meant for the app underneath, exactly as the chip can.
-     */
-    private fun setHudDucked(ducked: Boolean) {
-        val view = hud ?: return
-        val params = hudParams ?: return
-        if (hudDucked == ducked) return
-        // A panel being dragged keeps its touch: taking it away mid-drag would end the drag
-        // the user is in the middle of, which is worse than the press it might miss.
-        if (ducked && hudHeld) return
-        hudDucked = ducked
-        params.flags = duckFlags(params.flags, ducked)
-        runCatching { windowManager.updateViewLayout(view, params) }
+    private fun duckFlags(flags: Int, ducked: Boolean): Int = if (ducked) {
+        flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    } else {
+        flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
     }
 
-    /**
-     * The toys. Each one is a touchable window the user can put down anywhere, so any of them
-     * can be sitting exactly where a step wants to press; they all step aside together.
-     *
-     * The one being dragged is left alone — it is in a hand, and taking the touch away would
-     * drop it — so it is ducked at the next step instead of this one.
-     */
-    private fun setPropsDucked(ducked: Boolean) {
-        if (propsDucked == ducked) return
-        propsDucked = ducked
-        props.forEach { prop ->
-            if (ducked && prop.held) return@forEach
-            prop.params.flags = duckFlags(prop.params.flags, ducked)
-            runCatching { windowManager.updateViewLayout(prop, prop.params) }
-        }
+    /** Android 12+ measures obscuring opacity on the window, not on the View. */
+    private fun duckLayout(
+        view: View, params: WindowManager.LayoutParams, ducked: Boolean, alpha: Float = 0f,
+        alwaysUntouchable: Boolean = false
+    ): Boolean {
+        val oldFlags = params.flags
+        val oldAlpha = params.alpha
+        params.flags = duckFlags(oldFlags, ducked || alwaysUntouchable)
+        params.alpha = if (ducked) alpha else 1f
+        if (params.flags == oldFlags && params.alpha == oldAlpha) return true
+        return runCatching { windowManager.updateViewLayout(view, params) }.onFailure {
+            params.flags = oldFlags
+            params.alpha = oldAlpha
+            Diag.caught("move overlay aside", it)
+        }.isSuccess
     }
 
-    /** Adds or removes the one flag that decides whether a window can catch a press. */
-    private fun duckFlags(flags: Int, ducked: Boolean): Int =
-        if (ducked) {
-            flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        } else {
-            flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-        }
-
-    /**
-     * Every window of the overlay that can take a touch, aside for a step or back again.
-     *
-     * The bubble and the thinking dots are already FLAG_NOT_TOUCHABLE for their whole lives, so
-     * a job's press has always gone straight through them. Everything else — the chip, the
-     * character, the floating diagnostics panel and every toy — takes fingers and has to move.
-     */
-    private fun applyDuck(ducked: Boolean) {
+    /** Refuse a touch if any overlay couldn't move aside rather than press through it. */
+    private fun applyDuck(ducked: Boolean): Boolean {
+        if (instance !== this) return false
+        if (ducked && (inputBar != null || chipDragging || hudHeld || props.any { it.held })) return false
         overlayDucked = ducked
-        setChipDucked(ducked)
-        setPetDucked(ducked)
-        setHudDucked(ducked)
-        setPropsDucked(ducked)
+        var ok = setChipDucked(ducked)
+        pet?.let { if (!duckLayout(it, petParams, ducked)) ok = false }
+        if (!setHudDucked(ducked)) ok = false
+        props.forEach { prop -> if (!duckLayout(prop, prop.params, ducked)) ok = false }
+        (fading + listOfNotNull(bubble, thinking)).forEach { view ->
+            val params = view.layoutParams as? WindowManager.LayoutParams
+            if (params != null && !duckLayout(view, params, ducked, alwaysUntouchable = true)) ok = false
+        }
+        return ok
     }
 
-    /**
-     * [applyDuck] on the main looper, waited for.
-     *
-     * A step calls this from the worker thread and then injects its gesture, so returning
-     * before the windows have been updated would leave the press able to land on them — the
-     * whole point is that the windows are out of play first. The wait is bounded, so a main
-     * thread that is not running cannot hang the job: the answer is then false, and a step
-     * that gets false presses nothing at all.
-     */
     private fun duckOverlay(ducked: Boolean): Boolean {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            applyDuck(ducked)
-            return true
-        }
+        if (Looper.myLooper() == Looper.getMainLooper()) return applyDuck(ducked)
         val done = CountDownLatch(1)
-        val posted = handler.post {
-            runCatching { applyDuck(ducked) }
-            done.countDown()
-        }
-        if (!posted) return false
-        return runCatching { done.await(DUCK_WAIT_MS, TimeUnit.MILLISECONDS) }.getOrDefault(false)
+        var clear = false
+        if (!handler.post {
+                try {
+                    clear = applyDuck(ducked)
+                } catch (e: Exception) {
+                    Diag.caught("move overlay aside", e)
+                } finally {
+                    done.countDown()
+                }
+            }
+        ) return false
+        return runCatching { done.await(DUCK_WAIT_MS, TimeUnit.MILLISECONDS) && clear }.getOrDefault(false)
     }
 
     /**

@@ -270,18 +270,19 @@ class DiagnosticsActivity : Activity() {
                 "state",
                 if (job.running) {
                     "started ${Diag.ago(job.startedAt)} · ${job.turns} steps · " +
-                        "${job.steps.size} actions so far"
+                        "${job.actions} actions so far"
                 } else {
                     "${Diag.ago(job.startedAt)} · ${job.turns} steps · " +
-                        "${job.steps.size} actions · ${took}s"
+                        "${job.actions} actions · ${took}s"
                 }
             )
             line("why it stopped", job.reason ?: "still working — no ending yet")
             if (job.steps.isEmpty()) {
                 detail("no step was taken")
             } else {
+                if (job.omitted > 0) detail("${job.omitted} earlier actions omitted")
                 job.steps.forEachIndexed { index, step ->
-                    out.append("  ").append(index + 1).append(". ")
+                    out.append("  ").append(job.omitted + index + 1).append(". ")
                         .append(
                             when {
                                 step.skipped -> "SKIP"
@@ -301,10 +302,10 @@ class DiagnosticsActivity : Activity() {
                 // Honest about what ok means: the framework accepting an action is not the
                 // same as the screen having changed, and a job can look healthy here and
                 // still have gone nowhere.
-                detail("ok = Android accepted it; the screen was read again after every action")
+                detail("ok = action accepted or check passed; read the outcome for what was verified")
                 if (job.steps.any { it.skipped }) {
                     detail("SKIP = nothing was pressed: his own window would not get out of " +
-                        "the way in time, or a sweep looked and there was nothing to press")
+                        "the way in time, or the target was no longer available")
                 }
             }
         }

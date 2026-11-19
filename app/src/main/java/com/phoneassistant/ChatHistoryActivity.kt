@@ -22,6 +22,7 @@ class ChatHistoryActivity : Activity() {
     private lateinit var scroller: ScrollView
     private lateinit var input: EditText
     private lateinit var sendButton: Button
+    private var pendingTurn: Long? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,6 +42,9 @@ class ChatHistoryActivity : Activity() {
         }
 
         findViewById<TextView>(R.id.clearButton).setOnClickListener {
+            ChatTurns.begin()
+            OverlayService.clearConversationFeedback()
+            sendButton.isEnabled = true
             Memory.clear(this)
             messageList.removeAllViews()
             addBubble("Clean slate.", false)
@@ -67,16 +71,23 @@ class ChatHistoryActivity : Activity() {
     }
 
     private fun send() {
+        if (!sendButton.isEnabled) return
         val text = input.text.toString().trim()
         if (text.isEmpty()) return
 
+        val turn = ChatTurns.begin()
+        pendingTurn = turn
         input.setText("")
         addBubble(text, true)
         Memory.append(this, "user", text)
 
         sendButton.isEnabled = false
+        Agent.cancel()
         OverlayService.beginThinking()
-        // Same order as the overlay: the toys act on the message, then he thinks about it.
+        if (JobProgress.feedRequest(text) != null || JobProgress.explicitUrl(text) != null) {
+            showJobStarted(OverlayService.runPhoneJob(text, text, turn))
+            return
+        }
         val event = OverlayService.reactTo(text)
         val placeholder = addBubble("…", false)
 
@@ -84,22 +95,22 @@ class ChatHistoryActivity : Activity() {
             this,
             OverlayService.currentAppLabel,
             OverlayService.toysOnStage(),
-            event
+            event,
+            turn
         ) { ok, reply ->
             runOnUiThread {
+                if (isDestroyed || isFinishing) return@runOnUiThread
                 messageList.removeView(placeholder)
+                if (!ChatTurns.isCurrent(turn)) {
+                    if (pendingTurn == turn) sendButton.isEnabled = true
+                    return@runOnUiThread
+                }
                 // A delegated job is a JSON object, not a line: it belongs to his hands, and
                 // the overlay is where it is watched happening. Printed here it would show
                 // the user the protocol instead of an answer.
                 val job = if (ok) Agent.delegated(reply) else null
                 if (job != null) {
-                    val started = OverlayService.runPhoneJob(job)
-                    addBubble(
-                        if (started) "On it — watch the bubble."
-                        else "Start me first and I'll do that one.",
-                        false
-                    )
-                    sendButton.isEnabled = true
+                    showJobStarted(OverlayService.runPhoneJob(job, text, turn))
                     return@runOnUiThread
                 }
                 addBubble(reply, false)
@@ -108,6 +119,15 @@ class ChatHistoryActivity : Activity() {
                 OverlayService.speak(reply)
             }
         }
+    }
+
+    private fun showJobStarted(started: Boolean) {
+        addBubble(
+            if (started) "On it — watch the bubble."
+            else "I couldn't start that job. Check that I'm running and accessibility is enabled.",
+            false
+        )
+        sendButton.isEnabled = true
     }
 
     private fun addBubble(text: String, fromUser: Boolean): View {

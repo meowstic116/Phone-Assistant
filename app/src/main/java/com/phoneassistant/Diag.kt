@@ -14,9 +14,10 @@ import android.os.SystemClock
  * what makes one readable: a job that goes wrong says one sentence in a bubble and stops, and
  * from the outside that is indistinguishable from a job that did nothing at all.
  *
- * Everything is in memory only. This is a readout, not a log the app depends on.
+ * Everything is in memory only; action traces retain a bounded recent window.
  */
 object Diag {
+    private const val MAX_STEPS = 120
 
     /** One failure: what it was, when it first happened, and how many times since. */
     data class Event(val text: String, val at: Long, val count: Int = 1)
@@ -64,16 +65,12 @@ object Diag {
         val startedAt: Long,
         val steps: List<Step> = emptyList(),
         val reason: String? = null,
-        val endedAt: Long = 0L
+        val endedAt: Long = 0L,
+        val actions: Int = 0,
+        val turns: Int = 0
     ) {
         val running: Boolean get() = reason == null
-
-        /**
-         * How many answers were asked of the model, counted from the marks on the lines
-         * rather than kept beside them. A separate tally is a second thing that can disagree
-         * with what the record shows, and the marks are what the reader is looking at.
-         */
-        val turns: Int get() = steps.count { it.turn }
+        val omitted: Int get() = actions - steps.size
     }
 
     /** The last job, live while it runs and left in place afterwards. Null until one starts. */
@@ -82,6 +79,7 @@ object Diag {
         private set
 
     /** A job is beginning; the previous record is replaced rather than added to. */
+    @Synchronized
     fun jobStarted(id: Int, request: String) {
         lastJob = Job(id, oneLine(request, 200), now())
     }
@@ -90,6 +88,7 @@ object Diag {
      * One action, as it happened, with what it was aimed at and what came back. [turn] marks
      * the ones the model chose; a press or a scroll the loop made on its own is not one.
      */
+    @Synchronized
     fun jobStep(
         id: Int,
         text: String,
@@ -99,9 +98,12 @@ object Diag {
         turn: Boolean = false
     ) {
         val current = lastJob ?: return
-        if (current.id != id) return
+        if (current.id != id || !current.running) return
+        val recent = if (current.steps.size >= MAX_STEPS) current.steps.drop(1) else current.steps
         lastJob = current.copy(
-            steps = current.steps + Step(
+            actions = current.actions + 1,
+            turns = current.turns + if (turn) 1 else 0,
+            steps = recent + Step(
                 oneLine(text, 120),
                 oneLine(outcome, 120),
                 ok,
@@ -112,6 +114,7 @@ object Diag {
     }
 
     /** Why the job stopped. The first reason wins: only one thing ends a job. */
+    @Synchronized
     fun jobEnded(id: Int, reason: String) {
         val current = lastJob ?: return
         if (current.id != id || !current.running) return

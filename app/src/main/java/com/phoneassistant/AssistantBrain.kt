@@ -53,6 +53,7 @@ object AssistantBrain {
         appLabel: String?,
         stage: String? = null,
         event: String? = null,
+        turn: Long,
         onDone: (Boolean, String) -> Unit
     ) {
         val appContext = ctx.applicationContext
@@ -76,12 +77,16 @@ object AssistantBrain {
         )
 
         executor.execute {
+            if (!ChatTurns.isCurrent(turn)) {
+                onDone(false, "")
+                return@execute
+            }
             val result = try {
                 request(config, systemPrompt, history)
             } catch (t: Throwable) {
                 Diag.apiFailed(
                     "did not finish",
-                    "${t.javaClass.simpleName}: ${t.message.orEmpty()}"
+                    t.javaClass.simpleName
                 )
                 false to "I can't reach my brain right now. (${t.javaClass.simpleName})"
             }
@@ -149,6 +154,8 @@ object AssistantBrain {
 
         val connection = (URL(endpointFor(config.baseUrl)).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
+            // Do not forward an authenticated POST or its chat contents to a redirect target.
+            instanceFollowRedirects = false
             // Short enough that a request which is never going to be answered does not hold a
             // job's step — and the floating character — for a minute. Answers are capped at a
             // couple of hundred tokens, so a good one is nowhere near this long.
@@ -163,14 +170,27 @@ object AssistantBrain {
             connection.outputStream.use { it.write(body.toString().toByteArray()) }
 
             val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val raw = stream?.bufferedReader()?.use { it.readText() } ?: ""
-
             if (code !in 200..299) {
-                val detail = raw.replace("\n", " ").take(160)
-                // The status code is the useful part; the body says which quota or field.
+                val detail = when (code) {
+                    in 300..399 -> "Use the provider's final API URL; redirects are disabled."
+                    401, 403 -> "Check the API key and its permissions."
+                    429 -> "The provider is limiting requests. Try again shortly."
+                    else -> "Check the endpoint and model in Settings."
+                }
+                // An external error body can echo secrets or private prompt content.
                 Diag.apiFailed("HTTP $code", detail)
                 return false to "My brain said no ($code). $detail"
+            }
+            val raw = connection.inputStream.bufferedReader().use { reader ->
+                buildString {
+                    val buffer = CharArray(4096)
+                    while (true) {
+                        val count = reader.read(buffer)
+                        if (count < 0) break
+                        if (length + count > 256 * 1024) error("API response too large")
+                        append(buffer, 0, count)
+                    }
+                }
             }
 
             val text = JSONObject(raw)
