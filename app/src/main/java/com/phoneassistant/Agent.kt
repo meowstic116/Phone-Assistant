@@ -246,12 +246,18 @@ object Agent {
                 // The step before this one is done with its screen, so that read goes back
                 // before this one is taken.
                 held?.release()
-                val screen = readScreen()
+                val read = readScreen()
+                val screen = read.screen
                 if (screen == null) {
                     val hands = Screen.available()
+                    val looks = "${read.looks} look" + if (read.looks == 1) "" else "s"
                     finish(
                         if (hands) "I can't see the screen, so I've stopped." else NO_HANDS,
-                        if (hands) STOP_NO_SCREEN else STOP_NO_HANDS
+                        if (hands) {
+                            "$STOP_NO_SCREEN after $looks — in front: ${Screen.frontWindow()}"
+                        } else {
+                            STOP_NO_HANDS
+                        }
                     )
                     return
                 }
@@ -426,15 +432,25 @@ object Agent {
      * moment too early ended there with "I can't see the screen". A few more looks cost no API
      * request and nothing but a second of patience.
      */
-    private fun readScreen(): Screen.Snapshot? {
-        repeat(READ_TRIES - 1) {
-            Screen.snapshot()?.let { return it }
+    private fun readScreen(): Read {
+        var looks = 0
+        while (looks < READ_TRIES) {
+            looks++
+            Screen.snapshot()?.let { return Read(it, looks) }
             // No hands at all is not a screen that is slow to arrive.
-            if (!Screen.available()) return null
-            SystemClock.sleep(READ_WAIT_MS)
+            if (!Screen.available()) return Read(null, looks)
+            if (looks < READ_TRIES) SystemClock.sleep(READ_WAIT_MS)
         }
-        return Screen.snapshot()
+        return Read(null, looks)
     }
+
+    /**
+     * A look at the screen, and how many looks it took to get one. The count is for the record:
+     * a job that ends unable to see the screen has to say whether it looked once or six times,
+     * because "opened the app and looked too early" and "the service stopped answering" are
+     * different faults and only one of them is worth waiting longer for.
+     */
+    private class Read(val screen: Screen.Snapshot?, val looks: Int)
 
     /**
      * Presses the rest of a repeated label down a list, without asking the model again.

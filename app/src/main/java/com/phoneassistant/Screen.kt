@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import java.util.ArrayDeque
 
 /**
@@ -86,14 +87,18 @@ object Screen {
          * job that reads the screen every second without returning them is how that pool runs
          * out — the reads then start coming back short.
          */
-        // Recycling is how a node goes back into the framework's pool, which is what every
-        // version below API 33 needs; on 33 and up the call does nothing and is not reached.
-        @Suppress("DEPRECATION")
+        /**
+         * Ends the read: after this its nodes may not be acted through.
+         *
+         * The nodes the read kept are deliberately not recycled. Below API 33 they come out of
+         * the framework's own pool, and a read's root is the window's own node rather than one
+         * asked of it — giving those back was followed by a job that opened an app and then
+         * could not read it at all. A job that hands the framework a node it is still using
+         * loses the next read, which is a worse fault than the churn it was saving. Only nodes
+         * asked for and dropped on the way are handed back now.
+         */
         fun release() {
-            if (released) return
             released = true
-            if (Build.VERSION.SDK_INT >= 33) return
-            items.forEach { item -> runCatching { item.node.recycle() } }
         }
     }
 
@@ -144,7 +149,7 @@ object Screen {
             seen++
             // His own windows are skipped whole: a child of one cannot be pressed either.
             if (ownPackage != null && node.packageName?.toString() == ownPackage) {
-                hand(node)
+                if (node !== root) hand(node)
                 continue
             }
             val kept = node.isVisibleToUser && consider(node, out)
@@ -153,7 +158,9 @@ object Screen {
             for (child in 0 until node.childCount) {
                 node.getChild(child)?.let { queue.add(it) }
             }
-            if (!kept) hand(node)
+            // The root is the window rather than a node asked of it, so it is left alone even
+            // when nothing on it was usable.
+            if (!kept && node !== root) hand(node)
         }
         // A walk that stopped at the item or node ceiling still has what it had queued: those
         // were asked of the framework like any other, and go back the same way.
@@ -161,9 +168,10 @@ object Screen {
     }
 
     /**
-     * Gives a node back that is not being kept. Most nodes in a tree are not: a container with
-     * no label, no press and nothing in it is walked for its children and then dropped, and
-     * those are the bulk of a snapshot's churn.
+     * Gives back a node that was asked of the framework and not kept — a container walked for
+     * its children, an ancestor tried on the way up a press. Only those: a read's root and the
+     * nodes it turned into items are left for the framework to collect, because handing them
+     * back has cost a read before.
      */
     @Suppress("DEPRECATION") // Below API 33 nodes come from a pool and have to go back into it.
     private fun hand(node: AccessibilityNodeInfo) {
@@ -248,10 +256,10 @@ object Screen {
      * Tries [action] on [start], then on its ancestors, [hops] of them at most — the one thing
      * all three walks up the tree do. True when something took the action.
      *
-     * Nodes are owned by whoever asked the framework for them: [start] belongs to a read unless
-     * [startOwned] says this call took it fresh, and every ancestor is asked for here and given
-     * straight back. The parent is read before the node it came from is handed back, so no step
-     * of the walk looks through a node that has already gone.
+     * Only the ancestors are given back: they are the one kind of node asked of the framework
+     * and dropped again in the same breath. [start] belongs to a read, and is left alone unless
+     * [startOwned] says otherwise. The parent is read before the node it came from is handed
+     * back, so no step of the walk looks through a node that has already gone.
      */
     private fun actUpwards(
         start: AccessibilityNodeInfo,
@@ -338,8 +346,8 @@ object Screen {
     /**
      * Scrolls the given element, its nearest scrollable parent, or the screen itself.
      *
-     * With no element the walk starts at the root, which this call takes fresh — the one node
-     * in the three walks that is neither a read's nor an ancestor's.
+     * With no element the walk starts at the window root. That root is left with the framework
+     * like the one a read keeps: it is the window, not a node asked of it.
      */
     fun scroll(forward: Boolean, item: Item?): Boolean {
         val action = if (forward) {
@@ -351,7 +359,7 @@ object Screen {
         val start = item?.node
             ?: runCatching { service?.rootInActiveWindow }.getOrNull()
             ?: return gestureScroll(forward)
-        return actUpwards(start, item == null, action, SCROLL_ANCESTORS) { it.isScrollable } ||
+        return actUpwards(start, false, action, SCROLL_ANCESTORS) { it.isScrollable } ||
             gestureScroll(forward)
     }
 
@@ -513,14 +521,42 @@ object Screen {
         return found.any { it.activityInfo.packageName == packageName }
     }
 
+    /**
+     * What the service says is in front, for the record, when the normal read finds nothing.
+     *
+     * Taken from the window list rather than from the active window, because the active window
+     * is the thing that just came back empty — the list can still say which app, keyboard or
+     * overlay was there. Read-only: nothing is acted on from this, and its root is not given
+     * back either.
+     */
+    fun frontWindow(): String {
+        val svc = service ?: return "no accessibility service"
+        return runCatching {
+            val windows = svc.windows
+            if (windows.isEmpty()) return@runCatching "no windows on the display"
+            val window = windows.firstOrNull { it.isFocused }
+                ?: windows.firstOrNull { it.isActive }
+                ?: return@runCatching "${windows.size} windows, none focused or active"
+            val app = runCatching { window.root?.packageName?.toString() }.getOrNull()
+                ?: "unknown app"
+            val kind = when (window.type) {
+                AccessibilityWindowInfo.TYPE_APPLICATION -> "app"
+                AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "keyboard"
+                AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
+                AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "overlay"
+                else -> "window type ${window.type}"
+            }
+            "$app ($kind)"
+        }.getOrElse { "window list threw ${it.javaClass.simpleName}" }
+    }
+
     /** The package of the window in front: the app a snapshot would read. */
     fun inFront(): String? {
         val root = runCatching { service?.rootInActiveWindow }.getOrNull() ?: return null
-        val front = runCatching { root.packageName?.toString() }.getOrNull()
-        // Asked on a poll while a login is waited on, so the node it reads goes back here
-        // rather than being left behind on every look.
-        hand(root)
-        return front
+        // Not recycled: this is a window root, which is the kind of node that is left with the
+        // framework. It is asked on a poll while a login is waited on, and asked again a moment
+        // before an app is opened — a bad place to hand back something still in use.
+        return runCatching { root.packageName?.toString() }.getOrNull()
     }
 
     // ------------------------------------------------------------------ gestures
