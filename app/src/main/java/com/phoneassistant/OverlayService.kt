@@ -245,6 +245,8 @@ class OverlayService : Service(), PropHost {
         val keyboardTopPx: Int,
         /** The gap between the window's own y and the display's, as measured. */
         val windowOffsetPx: Int,
+        /** How far the box had to be lifted above where the arithmetic put it. */
+        val boxCorrectionPx: Int,
         /** Where the chat box is, top and bottom. Top is -1 when it is not open. */
         val boxTopPx: Int,
         val boxBottomPx: Int,
@@ -536,6 +538,7 @@ class OverlayService : Service(), PropHost {
         keyboardUsedPx = keyboardPx(),
         keyboardTopPx = (screenH - keyboardPx()).coerceAtLeast(0),
         windowOffsetPx = windowOffset.toInt(),
+        boxCorrectionPx = boxCorrection,
         // In the display's own coordinates, so they can be read against the keyboard's top.
         boxTopPx = inputParams?.y?.plus(windowOffset.toInt()) ?: -1,
         boxBottomPx = inputParams?.y
@@ -1715,9 +1718,13 @@ class OverlayService : Service(), PropHost {
     }
 
     /**
-     * What the last placement was corrected by, in pixels. The placement subtracts it, so the
-     * next one starts from where the screen says the box belongs instead of from the sum
-     * alone.
+     * How far the box has to be lifted above where the arithmetic puts it, in pixels, worked
+     * out from where it was measured to be. The placement subtracts it, so the two agree
+     * instead of fighting.
+     *
+     * It is solved from a reading each time rather than added to, which is what lets it come
+     * back down: a correction that could only grow would leave the box stuck high after one
+     * unlucky reading, and the numbers here are wrong often enough to need undoing.
      */
     private var boxCorrection = 0
 
@@ -1725,35 +1732,46 @@ class OverlayService : Service(), PropHost {
     private var boxCheckQueued = false
 
     /**
-     * Looks at where the box actually is, rather than where it was asked to go.
+     * Puts the box's bottom a finger's width above the keyboard, as measured on the screen.
      *
      * The placement is arithmetic on a window offset and a keyboard height, and both have been
-     * wrong before, so this reads the box's real position on the screen and lifts it clear if
-     * its bottom is in the keyboard. The correction is kept and subtracted from the next
-     * placement, so the two do not disagree.
+     * wrong before, so the placement is checked against where the box really is and corrected
+     * by the difference — in either direction, and to the exact line rather than nudged by
+     * however much it happened to be out by.
      *
-     * Read after a short delay, not at once: a window reports the place it was last put until
-     * it has been laid out at the new one, and a reading that old would move the box by an
-     * amount it has already been moved by.
+     * Nothing is done while the box is being moved: a reading taken mid-walk describes a place
+     * it has already left, and the placement for the place it is heading to is queued right
+     * behind it. Read after a short delay, because a window reports the place it was last put
+     * until it has been laid out at the new one.
      */
-    private fun checkBoxAboveKeyboard() {
+    private fun checkBoxAboveKeyboard(pass: Int = 0) {
         if (boxCheckQueued) return
         val bar = inputBar ?: return
         val params = inputParams ?: return
+        val placedAt = params.y
         boxCheckQueued = true
         bar.postDelayed({
             boxCheckQueued = false
             if (inputBar !== bar || inputParams !== params) return@postDelayed
+            // Moved again since this was queued: that reading is of a place nobody wants.
+            if (params.y != placedAt) return@postDelayed
             if (!keyboardUp || bar.height <= 0) return@postDelayed
             val onScreen = IntArray(2)
             bar.getLocationOnScreen(onScreen)
-            // How far its bottom is past the keyboard's top, plus a gap to sit in.
-            val past = onScreen[1] + bar.height - (screenH - keyboardPx()) + dpInt(6f)
-            if (past <= 0) return@postDelayed
-            boxCorrection += past
-            params.y -= past
+            // A window that has not been placed yet reports nothing, and "nothing" is a very
+            // large correction the wrong way.
+            if (onScreen[1] <= 0) return@postDelayed
+            val bottom = onScreen[1] + bar.height
+            val target = screenH - keyboardPx() - dpInt(6f)
+            val off = bottom - target
+            if (abs(off) <= 2) return@postDelayed
+            boxCorrection += off
+            params.y -= off
             runCatching { windowManager.updateViewLayout(bar, params) }
             keepBarClear()
+            // One more look to confirm where that put it. A single reading can be of a window
+            // that had not been laid out yet, and this is what stops such a reading standing.
+            if (pass < 1) checkBoxAboveKeyboard(pass + 1)
         }, 48L)
     }
 

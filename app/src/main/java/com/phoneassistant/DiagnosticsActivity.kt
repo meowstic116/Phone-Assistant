@@ -194,6 +194,13 @@ class DiagnosticsActivity : Activity() {
             // His windows are placed from under the status bar, the keyboard is measured from
             // the top of the screen. This is that difference, measured rather than assumed.
             line("window offset", "${status.windowOffsetPx}px")
+            // What the placement had to be lifted by, from the box's own position on screen.
+            // Signed on purpose: negative means the arithmetic had put it too high.
+            line(
+                "box correction",
+                if (status.boxCorrectionPx == 0) "none — the sum put it there"
+                else "${if (status.boxCorrectionPx > 0) "+" else ""}${status.boxCorrectionPx}px"
+            )
             line("remembered height", "${status.rememberedPx}px")
             line(
                 "his ceiling",
