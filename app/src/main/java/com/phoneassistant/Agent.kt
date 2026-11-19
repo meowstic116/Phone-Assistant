@@ -22,18 +22,16 @@ import java.util.concurrent.atomic.AtomicInteger
 object Agent {
 
     /**
-     * One step is one API call. The ceiling is the quota fence as well as the patience one,
-     * but eight was a fence across the wrong field: opening an app, finding the feed and
-     * giving kudos to a run of activities is a dozen steps before anything has gone wrong, and
-     * it stopped that job half done with the last few steps spent backing out of a mis-tap.
+     * How long a job may run. There is no step count any more: a task that works down a feed
+     * needs as many presses as the feed has rows, and a ceiling on steps stopped those jobs
+     * half done — which is what "gave kudos to two and stopped" was. Time is the fence now,
+     * and it is the quota fence too: the free tier allows a few requests a minute, so six
+     * minutes is about as much as one job can usefully spend.
      */
-    private const val MAX_STEPS = 25
+    private const val JOB_MS = 6 * 60_000L
 
-    /**
-     * And how long it may run, whatever the step count. Steps are capped, but a slow screen or
-     * a slow answer can make each of them long; this is the fence behind the fence.
-     */
-    private const val JOB_MS = 4 * 60_000L
+    /** Time left at which the model is told to bring the job to a close. */
+    private const val WRAP_UP_MS = 90_000L
 
     /** Time for the screen to settle after an action before it is read again. */
     private const val SETTLE_MS = 650L
@@ -232,10 +230,11 @@ object Agent {
             }
 
             val jobStartedAt = SystemClock.uptimeMillis()
-            while (steps < MAX_STEPS && alive()) {
-                if (SystemClock.uptimeMillis() - jobStartedAt > JOB_MS) {
+            while (alive()) {
+                val leftMs = JOB_MS - (SystemClock.uptimeMillis() - jobStartedAt)
+                if (leftMs <= 0L) {
                     finish(
-                        "I've been at this for four minutes, so I'm stopping here.",
+                        "I've been at this for $JOB_MINUTES minutes, so I'm stopping here.",
                         STOP_TIME
                     )
                     return
@@ -256,8 +255,9 @@ object Agent {
                     return
                 }
                 val decision =
-                    decide(ctx, request, history.toString(), screen, steps, apps) { alive() }
-                        ?: run {
+                    decide(ctx, request, history.toString(), screen, steps, leftMs, apps) {
+                        alive()
+                    } ?: run {
                         finish("My brain stopped answering halfway through.", STOP_BRAIN)
                         return
                     }
@@ -373,15 +373,24 @@ object Agent {
                     // any budget. The rest of them are pressed here instead, down the list.
                     if (landed && decision.action == "tap") {
                         val label = target?.label.orEmpty()
-                        val more = replayTap(
+                        val swept = sweepFeed(
                             mine,
                             label,
                             target?.bounds?.flattenToString().orEmpty(),
                             onAct
                         )
-                        if (more > 0) {
-                            history.append("   then ").append(more)
-                                .append(" more like it: \"").append(label).append("\"\n")
+                        if (swept.screens > 0) {
+                            history.append("   then a sweep of \"").append(label).append("\": ")
+                                .append(swept.pressed).append(" pressed over ")
+                                .append(swept.screens).append(" screens — ")
+                                .append(swept.why).append('\n')
+                        }
+                        // The feed has been worked down and checked: that was the task, and
+                        // another answer would only be told what it already knows. "more":true
+                        // is for a task with something left in it afterwards.
+                        if (swept.complete && !decision.more) {
+                            finish(swept.line(), swept.reason(label))
+                            return
                         }
                     }
                     // A sign-in he could not do himself. The job ends here, on this thread,
@@ -399,7 +408,8 @@ object Agent {
                     onAct(false)
                 }
             }
-            finish("That's as far as I got — I stop after $MAX_STEPS steps.", STOP_STEPS)
+            // Only a cancelled job reaches here: every other ending returns from inside the
+            // loop, and a cancelled job says nothing.
         } catch (t: Throwable) {
             // A job that throws must not leave the overlay convinced it is still working.
             Diag.caught("agent", t)
@@ -444,97 +454,143 @@ object Agent {
     private class Read(val screen: Screen.Snapshot?, val looks: Int)
 
     /**
-     * Presses the rest of a repeated label down a list, without asking the model again.
+     * Presses a repeated label down a feed, screen by screen, until the feed stops giving him
+     * anything to press.
      *
      * A feed where one button repeats — "Give Kudos", "Like", "Follow" — is the same answer
-     * happening many times. Once the model has pressed one, the others are pressed here: read
-     * the screen, find the next, press it, and when this screen has none left, scroll on and
-     * keep going. [REPEAT_LIMIT] presses and [REPEAT_SCROLLS] screens is the whole budget, and
-     * the end of the list ends it sooner. A list that used to cost a request an item now costs
-     * one for a stretch of it.
+     * happening many times, and a request per row does not fit in any budget. Once the model has
+     * pressed one, the rest are pressed here: every one on this screen, then scroll and do the
+     * next screen, for as long as the feed keeps giving them.
+     *
+     * It does not stop at the first screen with nothing left to press. Rows that already have
+     * their kudos look exactly like the end of a feed, so both are answered the same way: keep
+     * scrolling and looking. [SWEEP_BARREN] screens in a row with nothing to press is what
+     * "there was nothing missed" looks like, [SWEEP_PAGES] is how far he will look for it, and a
+     * scroll that does not move the feed is the bottom of it.
      *
      * It is deliberately narrow: a plain tap only, never while the app changes underneath it,
      * and never a label that reads like money or deletion, because a repeated "Buy" is not the
-     * sort of help anyone asked for. Two presses in a row that leave the screen untouched end
-     * it — nobody is reading the screen between these presses, so a button that is not taking
-     * them is not going to start.
+     * sort of help anyone asked for.
      */
-    private fun replayTap(
+    private fun sweepFeed(
         mine: Int,
         label: String,
         alreadyPressed: String,
         onAct: (Boolean) -> Boolean
-    ): Int {
-        if (label.isBlank() || UNSAFE_REPEAT.containsMatchIn(label.lowercase())) return 0
-        var screen = Screen.snapshot() ?: return 0
-        // One of them is a button, not a list — and the one the model just pressed was it.
-        if (screen.items.count { it.label.equals(label, ignoreCase = true) } < 2) return 0
+    ): Sweep {
+        if (label.isBlank() || UNSAFE_REPEAT.containsMatchIn(label.lowercase())) return Sweep()
+        var screen = Screen.snapshot() ?: return Sweep()
+        // One of them is a button, not a feed — and the one the model just pressed was it.
+        if (screen.items.count { it.label.equals(label, ignoreCase = true) } < 2) return Sweep()
         val app = screen.app
-        // Where the presses have landed, so a button that ignores one is not pressed at all
-        // day. Bounds rather than labels: the next activity down has the same label.
+        // Where the presses have landed, so a row that ignores one is not pressed twice. Bounds
+        // rather than labels: every row down the feed carries the same label.
         val done = hashSetOf(alreadyPressed)
         var pressed = 0
-        var scrolls = 0
-        // Presses in a row that left the screen exactly as it was. Nothing is watching this
-        // loop but the record, so a thing that ignores two presses is left alone.
-        var unchanged = 0
-        while (pressed < REPEAT_LIMIT && ticket.get() == mine) {
-            val item = screen.items.firstOrNull { item ->
-                item.label.equals(label, ignoreCase = true) &&
-                    item.bounds.flattenToString() !in done
-            }
-            if (item == null) {
-                // None left on this screen: the rest of the list is further down, and one
-                // scroll away is the whole point of carrying on. A scroll that leaves the
-                // screen exactly as it was is the end of the list.
-                if (scrolls >= REPEAT_SCROLLS) return pressed
-                val before = screen.listing
-                if (!onAct(true)) return pressed
-                val moved = try {
-                    Screen.scroll(true, null)
+        var screens = 1
+        var barren = 0
+        var complete = true
+        var why = STOP_SWEEP_PAGES
+        while (screens <= SWEEP_PAGES && ticket.get() == mine) {
+            var onThisScreen = 0
+            while (ticket.get() == mine) {
+                val item = screen.items.firstOrNull { item ->
+                    item.label.equals(label, ignoreCase = true) &&
+                        item.bounds.flattenToString() !in done
+                } ?: break
+                done += item.bounds.flattenToString()
+                if (!onAct(true)) return Sweep(pressed, screens, false, STOP_SWEEP_BUSY)
+                val landed = try {
+                    Screen.tap(item)
                 } finally {
                     onAct(false)
                 }
-                if (!moved) return pressed
-                scrolls++
-                Diag.jobStep(mine, "scroll down", "scrolled down for more \"$label\"", true)
+                // Every press is in the record; none of them is a step, because none of them
+                // asked the model anything.
+                Diag.jobStep(
+                    mine,
+                    "tap \"$label\"",
+                    if (landed) "tapped it" else "$FAILED the tap did not land",
+                    landed
+                )
+                if (!landed) break
+                pressed++
+                onThisScreen++
                 SystemClock.sleep(SETTLE_MS)
-                // Not the list any more, or the list in the same place: either way there is
-                // nothing below to press.
-                val below = Screen.snapshot()
-                if (below == null || below.app != app || below.listing == before) return pressed
-                screen = below
-                continue
+                val next = Screen.snapshot() ?: break
+                // Somewhere else entirely: the feed is not what is in front any more.
+                if (next.app != app) return Sweep(pressed, screens, false, STOP_SWEEP_LEFT)
+                screen = next
             }
-            done += item.bounds.flattenToString()
-            if (!onAct(true)) return pressed
-            val landed = try {
-                Screen.tap(item)
+            // Nothing pressable here. That is what rows which already have their kudos look
+            // like, so it is not the end of the feed — it is one screen of it.
+            barren = if (onThisScreen == 0) barren + 1 else 0
+            if (barren >= SWEEP_BARREN) {
+                why = STOP_SWEEP_BARREN
+                break
+            }
+            if (screens >= SWEEP_PAGES) break
+            // Scroll on. A scroll that does not move the feed is the bottom of it.
+            if (!onAct(true)) return Sweep(pressed, screens, false, STOP_SWEEP_BUSY)
+            val moved = try {
+                Screen.scroll(true, null)
             } finally {
                 onAct(false)
             }
-            // Every press is in the record; none of them is a step, because none of them
-            // asked the model anything.
-            Diag.jobStep(
-                mine,
-                "tap \"$label\"",
-                if (landed) "tapped it" else "$FAILED the tap did not land",
-                landed
-            )
-            if (!landed) return pressed
-            pressed++
+            if (!moved) {
+                why = STOP_SWEEP_BOTTOM
+                break
+            }
+            Diag.jobStep(mine, "scroll down", "scrolled down for more \"$label\"", true)
             SystemClock.sleep(SETTLE_MS)
-            // Somewhere else entirely: the list is not what is in front any more.
-            val next = Screen.snapshot()
-            if (next == null || next.app != app) return pressed
-            // Two presses in a row that change nothing he can see: whatever it is, it is not
-            // taking them, and there is no model in this loop to notice that. Stop rather than
-            // spend the rest of the budget on a dead button.
-            unchanged = if (next.listing == screen.listing) unchanged + 1 else 0
-            if (unchanged >= 2) return pressed
-            screen = next
+            val below = Screen.snapshot()
+            if (below == null || below.app != app) {
+                complete = false
+                why = STOP_SWEEP_LEFT
+                break
+            }
+            // The same rows in the same places: the scroll moved nothing, which is the bottom
+            // of a feed. The words alone do not say that — two screens of rows that already
+            // have their kudos read identically — so where they sit is compared too.
+            if (fingerprint(below) == fingerprint(screen)) {
+                why = STOP_SWEEP_BOTTOM
+                break
+            }
+            screen = below
+            screens++
         }
-        return pressed
+        // A sweep the user stopped is not one that finished looking.
+        return Sweep(pressed, screens, complete && ticket.get() == mine, why)
+    }
+
+    /** What is on a screen and where it sits: equal on both sides of a scroll means no movement. */
+    private fun fingerprint(screen: Screen.Snapshot): String = buildString {
+        screen.items.forEach { item ->
+            append(item.bounds.flattenToString()).append(item.label).append(';')
+        }
+    }
+
+    /**
+     * What a sweep did: presses made, screens of feed looked at, whether it finished looking,
+     * and — for the record — why it stopped.
+     */
+    private class Sweep(
+        val pressed: Int = 0,
+        val screens: Int = 0,
+        val complete: Boolean = false,
+        val why: String = STOP_SWEEP_NOT_A_FEED
+    ) {
+
+        /** What he says when the sweep was the whole task. */
+        fun line(): String = if (pressed == 0) {
+            "Nothing left to press — I checked $screens screens."
+        } else {
+            "$pressed more, and $screens screens checked."
+        }
+
+        /** The record's version, which can afford the label and the detail. */
+        fun reason(label: String): String =
+            "swept \"$label\": $pressed pressed over $screens screens — $why"
     }
 
     /** Asks for the next step, with what has happened so far and the screen as it is now. */
@@ -544,6 +600,7 @@ object Agent {
         history: String,
         screen: Screen.Snapshot,
         step: Int,
+        leftMs: Long,
         apps: List<Screen.AppRef>,
         alive: () -> Boolean
     ): Decision? {
@@ -563,10 +620,9 @@ object Agent {
                 append("\nThis is the first step: say what you are doing in one short line, ")
                 append("then act.\n")
             }
-            if (step == MAX_STEPS - 1) {
-                append("\nNo steps left after this one: get as close as you can, then finish.\n")
-            } else if (step >= MAX_STEPS - 3) {
-                append("\nRunning out of steps: do what matters most now, then finish.\n")
+            if (leftMs < WRAP_UP_MS) {
+                append("\nThis job has about a minute and a half left in it: do what matters ")
+                append("most now, then finish.\n")
             }
         }
         // A call that throws is caught here, not left to the loop below: a dropped connection
@@ -918,11 +974,19 @@ object Agent {
 
     private const val FAILED = "failed:"
 
-    /** How many repeats of one answer are pressed before the model is asked again. */
-    private const val REPEAT_LIMIT = 10
+    /**
+     * How far down a feed one sweep may look. A look budget rather than a press budget: every
+     * row that needs the press gets it, and this is how many screens of rows there may be
+     * before he says he has looked far enough.
+     */
+    private const val SWEEP_PAGES = 12
 
-    /** How many screens down one pass may carry on looking for the same label. */
-    private const val REPEAT_SCROLLS = 4
+    /**
+     * Screens in a row with nothing left to press, after which the feed is called done. One is
+     * not enough — a screen whose rows already have their kudos looks exactly like the end of
+     * the feed — and a feed that has really run out shows that on every scroll.
+     */
+    private const val SWEEP_BARREN = 3
 
     /**
      * Labels whose press cannot be taken back, or costs money. Only these are refused.
@@ -937,6 +1001,9 @@ object Agent {
         "\\b(buy|pay|payment|purchase|order|checkout|check out|donate|tip|upgrade|" +
             "delete|remove|uninstall|erase|wipe|reset)\\b"
     )
+
+    /** How long a job is, in the words the bubble uses. */
+    private val JOB_MINUTES = JOB_MS / 60_000L
 
     /** A step that was never pressed, because his own windows would not move off the screen. */
     private const val OVERLAY_BUSY =
@@ -954,9 +1021,16 @@ object Agent {
     private const val STOP_NO_HANDS = "the accessibility service is not connected"
     private const val STOP_BRAIN = "the brain stopped answering"
     private const val STOP_DONE = "the job said it was finished"
-    private const val STOP_STEPS = "stopped at the $MAX_STEPS step limit"
     private const val STOP_STUCK = "the same press kept landing on the same screen"
-    private const val STOP_TIME = "stopped at the four minute limit"
+    private const val STOP_TIME = "stopped at the time limit"
+
+    // Why a sweep stopped looking, in the words the record uses.
+    private const val STOP_SWEEP_BARREN = "the rest of the feed had nothing left to press"
+    private const val STOP_SWEEP_BOTTOM = "reached the bottom of the feed"
+    private const val STOP_SWEEP_PAGES = "looked $SWEEP_PAGES screens and stopped"
+    private const val STOP_SWEEP_LEFT = "the app changed underneath it"
+    private const val STOP_SWEEP_BUSY = "his own window would not get out of the way"
+    private const val STOP_SWEEP_NOT_A_FEED = "not a feed"
 
     const val NO_HANDS =
         "Switch me on in accessibility first — Settings › Accessibility › Pip — and then " +
@@ -1016,9 +1090,11 @@ object Agent {
         - An action can land and still take you where you did not mean to go — a profile
           instead of a feed, settings instead of a list. Use back and choose a different
           element; never carry on pressing about in a screen you did not mean to be in.
-        - When the same button repeats down a list — kudos, likes, follows — tap one of them:
-          the rest of the ones on screen are pressed for you. Look at the screen after that
-          before deciding what is left.
+        - When the same button repeats down a list — kudos, likes, follows — tap one of them
+          and nothing else: every other one is pressed for you, down the whole feed, and screens
+          that already have it are checked on the way in case one was missed. That is usually the
+          entire task and the job ends there; add "more":true only when something still has to
+          happen afterwards.
         - Never type into an element marked password, and never put a password in "text": a
           password field is only ever filled from a saved login. Never pay, buy, confirm a
           purchase or delete something the user did not name — if the task needs that, stop

@@ -60,8 +60,12 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   Messages and tell Mum I'm late", "search for the parcel number", "scroll down and tap the
   third one", "turn do not disturb on". He reads the app in front as a short numbered list of
   the things that can be pressed, typed into or scrolled, picks one step, does it, and looks
-  again — at most eight steps, so a job cannot run away with your API quota, and the work is
-  visible as it happens because the app in front is changing. If the request names an app he
+  again. There is no cap on how many steps a job may take, only on its time — six minutes,
+  which is the quota fence too — and the work is visible as it happens because the app in
+  front is changing. A button that repeats down a feed — "Give Kudos" on every activity — is
+  pressed by him down the whole feed once you have tapped one: rows that already have theirs
+  are looked past rather than taken as the end, three screens in a row with nothing to press
+  is what finishing looks like, and that is normally the whole task. If the request names an app he
   opens it before his first step — unless you are already in it, in which case he leaves your
   screen alone — so the job happens in front of you rather than somewhere behind   it, and he moves into the bottom corner so he is not covering it. He is given the list of apps really
   installed on the phone, so "open WhatsApp" reaches that WhatsApp and not a guess.
@@ -193,7 +197,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.107-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.108-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
