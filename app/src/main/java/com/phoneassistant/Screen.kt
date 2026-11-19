@@ -46,55 +46,17 @@ object Screen {
         val id: String?,
         val bounds: Rect,
         val node: AccessibilityNodeInfo
-    ) {
-        /**
-         * The read this item came from. Its labels and bounds are copies that outlive the
-         * read — the record and the history still name them — but its node does not, so an
-         * action aimed through it has to know whether that read is still alive.
-         */
-        internal var source: Snapshot? = null
-    }
+    )
 
     /**
      * The screen, read once: what it is, what is on it, and the listing for the model.
      *
-     * It owns the nodes it was read from, so it has a lifetime. [release] is what ends it, and
-     * after that the items' nodes may no longer be used to act on — everything else about an
-     * item is a copy and outlives it, and an action aimed through a released one throws rather
-     * than pressing a recycled node.
+     * A value, used and then dropped. The nodes it holds are never handed back to the
+     * framework: a root is the window's own node rather than one asked of it, and returning
+     * those was followed by a job that opened an app and then could not read it at all. They
+     * are left to be collected instead.
      */
-    class Snapshot(val app: String, val items: List<Item>, val listing: String) {
-
-        init {
-            items.forEach { item -> item.source = this }
-        }
-
-        @Volatile
-        private var released = false
-
-        /**
-         * Throws when an action is aimed through an item from a read that is over. The click
-         * would otherwise go to a recycled node, or to whatever the framework has since put
-         * in its place — a wrong press rather than a missing one, and silence about it.
-         */
-        internal fun ensureLive() = check(!released) {
-            "an action was aimed through an element from a screen read that was already released"
-        }
-
-        /**
-         * Ends the read: after this its nodes may not be acted through.
-         *
-         * The nodes the read kept are deliberately not recycled. Below API 33 they come out of
-         * the framework's own pool, and a read's root is the window's own node rather than one
-         * asked of it — giving those back was followed by a job that opened an app and then
-         * could not read it at all. A job that hands the framework a node it is still using
-         * loses the next read, which is a worse fault than the churn it was saving. Only nodes
-         * asked for and dropped on the way are handed back now.
-         */
-        fun release() {
-            released = true
-        }
-    }
+    class Snapshot(val app: String, val items: List<Item>, val listing: String)
 
     @Volatile
     private var service: AccessibilityService? = null
@@ -173,11 +135,6 @@ object Screen {
         runCatching { node.recycle() }
     }
 
-    /** Refuses to act through an element whose screen read has been handed back. */
-    private fun Item.ensureRead() {
-        source?.ensureLive()
-    }
-
     /** Whether this node became an item. One that did is kept until its snapshot is released. */
     private fun consider(node: AccessibilityNodeInfo, out: MutableList<Item>): Boolean {
         val editable = node.isEditable
@@ -251,32 +208,29 @@ object Screen {
      * all three walks up the tree do. True when something took the action.
      *
      * Only the ancestors are given back: they are the one kind of node asked of the framework
-     * and dropped again in the same breath. [start] belongs to a read, and is left alone unless
-     * [startOwned] says otherwise. The parent is read before the node it came from is handed
-     * back, so no step of the walk looks through a node that has already gone.
+     * and dropped again in the same breath. [start] belongs to a read, or is the window's own
+     * root, and is left alone either way. The parent is read before the node it came from is
+     * handed back, so no step of the walk looks through a node that has already gone.
      */
     private fun actUpwards(
         start: AccessibilityNodeInfo,
-        startOwned: Boolean,
         action: Int,
         hops: Int,
         fits: (AccessibilityNodeInfo) -> Boolean
     ): Boolean {
         var node = start
-        var owned = startOwned
         var climbed = 0
         while (climbed < hops) {
             climbed++
             if (fits(node) && runCatching { node.performAction(action) }.getOrDefault(false)) {
-                if (owned) hand(node)
+                if (node !== start) hand(node)
                 return true
             }
             val parent = runCatching { node.parent }.getOrNull() ?: break
-            if (owned) hand(node)
+            if (node !== start) hand(node)
             node = parent
-            owned = true
         }
-        if (owned) hand(node)
+        if (node !== start) hand(node)
         return false
     }
 
@@ -285,23 +239,15 @@ object Screen {
      * a clickable ancestor is tried before falling back to a real tap on the element's
      * middle — which is also what gets through for windows that report nothing clickable.
      */
-    fun tap(item: Item): Boolean {
-        item.ensureRead()
-        return actUpwards(item.node, false, AccessibilityNodeInfo.ACTION_CLICK, TAP_ANCESTORS) {
+    fun tap(item: Item): Boolean =
+        actUpwards(item.node, AccessibilityNodeInfo.ACTION_CLICK, TAP_ANCESTORS) {
             it.isClickable
         } || gestureTap(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
-    }
 
-    fun longPress(item: Item): Boolean {
-        item.ensureRead()
-        return actUpwards(
-            item.node,
-            false,
-            AccessibilityNodeInfo.ACTION_LONG_CLICK,
-            TAP_ANCESTORS
-        ) { it.isLongClickable } ||
-            gestureLongPress(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
-    }
+    fun longPress(item: Item): Boolean =
+        actUpwards(item.node, AccessibilityNodeInfo.ACTION_LONG_CLICK, TAP_ANCESTORS) {
+            it.isLongClickable
+        } || gestureLongPress(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
 
     /**
      * Puts [text] into a field, replacing what is there. Refuses password fields outright.
@@ -310,7 +256,6 @@ object Screen {
      * key — and why a job can fill a field in an app that is not even in front yet.
      */
     fun type(item: Item, text: String, secret: Boolean = false): Boolean {
-        item.ensureRead()
         // Only the vault may fill a password field. [secret] is the one thing that says so,
         // and it is passed by the sign-in path alone — so no prompt, however it is worded,
         // can get a password typed by the model into a field.
@@ -349,11 +294,10 @@ object Screen {
         } else {
             AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
         }
-        item?.ensureRead()
         val start = item?.node
             ?: runCatching { service?.rootInActiveWindow }.getOrNull()
             ?: return gestureScroll(forward)
-        return actUpwards(start, false, action, SCROLL_ANCESTORS) { it.isScrollable } ||
+        return actUpwards(start, action, SCROLL_ANCESTORS) { it.isScrollable } ||
             gestureScroll(forward)
     }
 
