@@ -192,6 +192,11 @@ object Agent {
         // has the page, and asking again is the model going round rather than the job going
         // on — each repeat opening another tab while the user reads the first results.
         var searched = false
+        // What the last answer was working from, for telling a job that is going round from
+        // one that is working down a list.
+        var lastScene = ""
+        var lastAnswer = ""
+        var sameAnswer = 0
         try {
             // The apps on this phone, read once: searched so a job that names an app starts
             // in that app, and named in every step so the model can only ask for something
@@ -263,6 +268,28 @@ object Agent {
                 // a job the user has already ended. This is the last moment before the phone
                 // is touched, so this is where it has to be checked.
                 if (!alive()) return
+                // The screen has not changed and this is the same press as last time: the
+                // last step did nothing he can see. Twice is a slow app; three times is a job
+                // that will spend every step it has on it.
+                //
+                // A different element is progress even when the screen reads the same — the
+                // next kudos down a feed is not the same press as the last one — so the
+                // answer is compared with the element it names, where it sits, not only with
+                // the numbers in the listing.
+                val target = screen.items.firstOrNull { it.index == decision.target }
+                val scene = screen.app + '\u0000' + screen.listing
+                val answer = decision.action + ':' + decision.target + ':' + decision.text +
+                    ':' + (target?.label ?: "") + '@' + (target?.bounds?.flattenToString() ?: "")
+                if (scene == lastScene && answer == lastAnswer) sameAnswer++ else sameAnswer = 0
+                lastScene = scene
+                lastAnswer = answer
+                if (sameAnswer >= 2) {
+                    finish(
+                        "I'm stuck on this screen — pressing it again isn't changing anything.",
+                        STOP_STUCK
+                    )
+                    return
+                }
                 if (repeated) {
                     finish(
                         "I stopped at one search — it's open in your browser.",
@@ -316,6 +343,24 @@ object Agent {
                         }
                     }
                     if (landed) SystemClock.sleep(SETTLE_MS)
+                    // A button that repeats down a list — "Give Kudos" on every activity — is
+                    // one answer happening many times, and a request per item does not fit in
+                    // any budget. The rest of the ones on screen are pressed here instead.
+                    val label = if (landed && decision.action == "tap") target?.label else null
+                    if (label != null &&
+                        screen.items.count { it.label.equals(label, true) && !it.password } >= 2
+                    ) {
+                        val more = replayTap(
+                            mine,
+                            label,
+                            target?.bounds?.flattenToString(),
+                            onAct
+                        )
+                        if (more > 0) {
+                            history.append("   then ").append(more)
+                                .append(" more like it: \"").append(label).append("\"\n")
+                        }
+                    }
                     // A sign-in he could not do himself. The job ends here, on this thread,
                     // before the ask goes out: the form is about to be the screen in front, and
                     // a next step would read Pip's own login form and start pressing about in
@@ -344,6 +389,63 @@ object Agent {
             // way of the job that took its place.
             if (alive()) job = null
         }
+    }
+
+    /**
+     * Presses the rest of a repeated label down a list, without asking the model again.
+     *
+     * A feed where one button repeats — "Give Kudos", "Like", "Follow" — is the same answer
+     * happening many times. Once the model has pressed one, the others are pressed here: read
+     * the screen, find the next, press it, until it is gone or [REPEAT_LIMIT] have been
+     * pressed. A list that used to cost a request an item now costs one request.
+     *
+     * It is deliberately narrow. Only a plain tap is replayed; only for a label that was
+     * already on the screen more than once; only while the app stays the same; and never for a
+     * label with a word like buy or delete in it, because a repeated "Buy" is not the sort of
+     * help anyone asked for. Each element is pressed at most once, recognised by where it
+     * sits, and the one the model itself just pressed is not pressed again — so a button that
+     * ignores a press cannot be pressed at all day.
+     */
+    private fun replayTap(
+        mine: Int,
+        label: String,
+        alreadyPressed: String?,
+        onAct: (Boolean) -> Boolean
+    ): Int {
+        if (label.isBlank() || UNSAFE_REPEAT.containsMatchIn(label.lowercase())) return 0
+        val pressed = HashSet<String>()
+        alreadyPressed?.let { pressed += it }
+        var screen = Screen.snapshot() ?: return 0
+        val app = screen.app
+        var count = 0
+        while (count < REPEAT_LIMIT) {
+            val item = screen.items.firstOrNull { item ->
+                !item.password && item.label.equals(label, ignoreCase = true) &&
+                    item.bounds.flattenToString() !in pressed
+            } ?: return count
+            pressed += item.bounds.flattenToString()
+            if (!onAct(true)) return count
+            val landed = try {
+                Screen.tap(item)
+            } finally {
+                onAct(false)
+            }
+            // Recorded like any other press: the count above is model calls, not presses.
+            Diag.jobStep(
+                mine,
+                "tap \"$label\"",
+                if (landed) "tapped it" else "$FAILED the tap did not land",
+                landed
+            )
+            if (!landed) return count
+            count++
+            SystemClock.sleep(SETTLE_MS)
+            val next = Screen.snapshot() ?: return count
+            // Somewhere else entirely: the list is not what is in front any more.
+            if (next.app != app) return count
+            screen = next
+        }
+        return count
     }
 
     /** Asks for the next step, with what has happened so far and the screen as it is now. */
@@ -697,6 +799,18 @@ object Agent {
 
     private const val FAILED = "failed:"
 
+    /** How many repeats of one answer are pressed before the model is asked again. */
+    private const val REPEAT_LIMIT = 10
+
+    /**
+     * Words that mean something instead of a list item. A label with one of these in it is
+     * never replayed: pressing "Buy" ten times is a very different thing from ten kudos.
+     */
+    private val UNSAFE_REPEAT = Regex(
+        "\\b(buy|pay|purchase|order|checkout|check ?out|delete|remove|uninstall|confirm|reset|" +
+            "send|share|post|publish|report|block|call|subscribe|unfollow)\\b"
+    )
+
     /** A step that was never pressed, because his own windows would not move off the screen. */
     private const val OVERLAY_BUSY =
         "$FAILED his own window would not get out of the way in time"
@@ -714,6 +828,7 @@ object Agent {
     private const val STOP_BRAIN = "the brain stopped answering"
     private const val STOP_DONE = "the job said it was finished"
     private const val STOP_STEPS = "stopped at the $MAX_STEPS step limit"
+    private const val STOP_STUCK = "the same press kept landing on the same screen"
     private const val STOP_TIME = "stopped at the four minute limit"
 
     const val NO_HANDS =
@@ -774,6 +889,9 @@ object Agent {
         - An action can land and still take you where you did not mean to go — a profile
           instead of a feed, settings instead of a list. Use back and choose a different
           element; never carry on pressing about in a screen you did not mean to be in.
+        - When the same button repeats down a list — kudos, likes, follows — tap one of them:
+          the rest of the ones on screen are pressed for you. Look at the screen after that
+          before deciding what is left.
         - Never type into an element marked password, and never put a password in "text": a
           password field is only ever filled from a saved login. Never pay, buy, confirm a
           purchase or delete something the user did not name — if the task needs that, stop
