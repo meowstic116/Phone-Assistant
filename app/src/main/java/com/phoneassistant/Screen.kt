@@ -147,6 +147,9 @@ object Screen {
             }
             if (!kept) hand(node)
         }
+        // A walk that stopped at the item or node ceiling still has what it had queued: those
+        // were asked of the framework like any other, and go back the same way.
+        while (queue.isNotEmpty()) hand(queue.removeFirst())
     }
 
     /**
@@ -234,29 +237,29 @@ object Screen {
     // -------------------------------------------------------------------- acting
 
     /**
-     * Presses the element. The label is usually a child of the row that takes the press, so
-     * a clickable ancestor is tried before falling back to a real tap on the element's
-     * middle — which is also what gets through for windows that report nothing clickable.
+     * Tries [action] on [start], then on its ancestors, [hops] of them at most — the one thing
+     * all three walks up the tree do. True when something took the action.
      *
-     * The element's own node belongs to the read it came from. Every ancestor walked on the
-     * way up is a fresh node asked of the framework, and is given straight back once it has
-     * been tried — a press costs up to four of them, and a repeat pass dozens.
+     * Nodes are owned by whoever asked the framework for them: [start] belongs to a read unless
+     * [startOwned] says this call took it fresh, and every ancestor is asked for here and given
+     * straight back. The parent is read before the node it came from is handed back, so no step
+     * of the walk looks through a node that has already gone.
      */
-    fun tap(item: Item): Boolean {
-        item.ensureRead()
-        var node = item.node
-        var owned = false
-        var hops = 0
-        while (hops < TAP_ANCESTORS) {
-            hops++
-            if (node.isClickable) {
-                val clicked = runCatching {
-                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                }.getOrDefault(false)
-                if (clicked) {
-                    if (owned) hand(node)
-                    return true
-                }
+    private fun actUpwards(
+        start: AccessibilityNodeInfo,
+        startOwned: Boolean,
+        action: Int,
+        hops: Int,
+        fits: (AccessibilityNodeInfo) -> Boolean
+    ): Boolean {
+        var node = start
+        var owned = startOwned
+        var climbed = 0
+        while (climbed < hops) {
+            climbed++
+            if (fits(node) && runCatching { node.performAction(action) }.getOrDefault(false)) {
+                if (owned) hand(node)
+                return true
             }
             val parent = runCatching { node.parent }.getOrNull() ?: break
             if (owned) hand(node)
@@ -264,32 +267,30 @@ object Screen {
             owned = true
         }
         if (owned) hand(node)
-        return gestureTap(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
+        return false
+    }
+
+    /**
+     * Presses the element. The label is usually a child of the row that takes the press, so
+     * a clickable ancestor is tried before falling back to a real tap on the element's
+     * middle — which is also what gets through for windows that report nothing clickable.
+     */
+    fun tap(item: Item): Boolean {
+        item.ensureRead()
+        return actUpwards(item.node, false, AccessibilityNodeInfo.ACTION_CLICK, TAP_ANCESTORS) {
+            it.isClickable
+        } || gestureTap(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
     }
 
     fun longPress(item: Item): Boolean {
         item.ensureRead()
-        var node = item.node
-        var owned = false
-        var hops = 0
-        while (hops < TAP_ANCESTORS) {
-            hops++
-            if (node.isLongClickable) {
-                val held = runCatching {
-                    node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
-                }.getOrDefault(false)
-                if (held) {
-                    if (owned) hand(node)
-                    return true
-                }
-            }
-            val parent = runCatching { node.parent }.getOrNull() ?: break
-            if (owned) hand(node)
-            node = parent
-            owned = true
-        }
-        if (owned) hand(node)
-        return gestureLongPress(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
+        return actUpwards(
+            item.node,
+            false,
+            AccessibilityNodeInfo.ACTION_LONG_CLICK,
+            TAP_ANCESTORS
+        ) { it.isLongClickable } ||
+            gestureLongPress(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
     }
 
     /**
@@ -329,9 +330,8 @@ object Screen {
     /**
      * Scrolls the given element, its nearest scrollable parent, or the screen itself.
      *
-     * Nothing here is the read's except the element's own node: a walk with no element starts
-     * from the root, which is asked of the framework like any ancestor and given back the same
-     * way — it used to be neither, and a scroll cost a node apiece.
+     * With no element the walk starts at the root, which this call takes fresh — the one node
+     * in the three walks that is neither a read's nor an ancestor's.
      */
     fun scroll(forward: Boolean, item: Item?): Boolean {
         val action = if (forward) {
@@ -340,26 +340,11 @@ object Screen {
             AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
         }
         item?.ensureRead()
-        var node: AccessibilityNodeInfo = item?.node
+        val start = item?.node
             ?: runCatching { service?.rootInActiveWindow }.getOrNull()
             ?: return gestureScroll(forward)
-        var owned = item == null
-        var hops = 0
-        while (hops < SCROLL_ANCESTORS) {
-            hops++
-            if (node.isScrollable &&
-                runCatching { node.performAction(action) }.getOrDefault(false)
-            ) {
-                if (owned) hand(node)
-                return true
-            }
-            val parent = runCatching { node.parent }.getOrNull() ?: break
-            if (owned) hand(node)
-            node = parent
-            owned = true
-        }
-        if (owned) hand(node)
-        return gestureScroll(forward)
+        return actUpwards(start, item == null, action, SCROLL_ANCESTORS) { it.isScrollable } ||
+            gestureScroll(forward)
     }
 
     fun back(): Boolean = global(AccessibilityService.GLOBAL_ACTION_BACK)
@@ -521,8 +506,14 @@ object Screen {
     }
 
     /** The package of the window in front: the app a snapshot would read. */
-    fun inFront(): String? =
-        runCatching { service?.rootInActiveWindow?.packageName?.toString() }.getOrNull()
+    fun inFront(): String? {
+        val root = runCatching { service?.rootInActiveWindow }.getOrNull() ?: return null
+        val front = runCatching { root.packageName?.toString() }.getOrNull()
+        // Asked on a poll while a login is waited on, so the node it reads goes back here
+        // rather than being left behind on every look.
+        hand(root)
+        return front
+    }
 
     // ------------------------------------------------------------------ gestures
 
