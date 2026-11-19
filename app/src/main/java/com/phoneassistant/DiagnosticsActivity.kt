@@ -304,7 +304,7 @@ class DiagnosticsActivity : Activity() {
                 detail("ok = Android accepted it; the screen was read again after every action")
                 if (job.steps.any { it.skipped }) {
                     detail("SKIP = nothing was pressed: his own window would not get out of " +
-                        "the way in time")
+                        "the way in time, or a sweep looked and there was nothing to press")
                 }
             }
         }

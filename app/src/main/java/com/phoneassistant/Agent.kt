@@ -279,13 +279,26 @@ object Agent {
                     // full of, the sweep looks down the feed first and the ending says what it
                     // found rather than what he assumed. A screen with nothing left to press is
                     // done as he said, in his words.
-                    val feed = feedLeft(screen, request, repeatLabel)
-                    if (feed != null) {
-                        val swept = sweepFeed(mine, feed, "", onAct)
+                    val look = feedLeft(screen, request, repeatLabel)
+                    if (look.label != null) {
+                        val swept = sweepFeed(mine, look.label, "", onAct)
+                        recordSweep(mine, look.label, swept)
                         if (swept.complete) {
-                            finish(swept.line(), swept.reason(feed))
+                            finish(swept.line(), swept.reason(look.label))
                             return
                         }
+                    } else {
+                        // Nothing to sweep, and the record says which label was looked at and
+                        // why it was passed over. A record of nothing but ASK lines cannot be
+                        // told from one whose sweep ran and gave up at once, and that is the
+                        // difference worth knowing.
+                        Diag.jobStep(
+                            mine,
+                            "check the screen",
+                            "nothing pressed — ${look.why}",
+                            true,
+                            skipped = true
+                        )
                     }
                     finish(
                         decision.say.ifBlank { "Done." },
@@ -393,23 +406,28 @@ object Agent {
                         val label = target?.label.orEmpty()
                         // One of several carrying the same label: a feed's button rather than a
                         // page's single one. Remembered so a done answer can be sent back to it.
-                        if (label.isNotBlank() &&
-                            !STATED.containsMatchIn(label.lowercase()) &&
+                        val inFeed =
                             screen.items.count { it.label.equals(label, ignoreCase = true) } >= 2
-                        ) {
-                            repeatLabel = label
-                        }
+                        if (inFeed && !STATED.containsMatchIn(label.lowercase())) repeatLabel = label
                         val swept = sweepFeed(
                             mine,
                             label,
                             target?.bounds?.flattenToString().orEmpty(),
                             onAct
                         )
+                        // Every tap gets its sweep line, including one that never started: a
+                        // record of only ASK lines cannot be told from one whose sweep ran and
+                        // gave up at once, and that is the difference worth knowing. A tap on a
+                        // menu item pays one short line for it.
+                        recordSweep(mine, label, swept)
                         if (swept.screens > 0) {
                             history.append("   then a sweep of \"").append(label).append("\": ")
                                 .append(swept.pressed).append(" pressed over ")
                                 .append(swept.screens).append(" screens — ")
                                 .append(swept.why).append('\n')
+                        } else {
+                            history.append("   no sweep of \"").append(label)
+                                .append("\": ").append(swept.why).append('\n')
                         }
                         // The feed has been worked down and checked: that was the task, and
                         // another answer would only be told what it already knows. "more":true
@@ -504,16 +522,20 @@ object Agent {
         alreadyPressed: String,
         onAct: (Boolean) -> Boolean
     ): Sweep {
-        if (label.isBlank()) return Sweep()
+        if (label.isBlank()) return Sweep(why = STOP_SWEEP_NO_LABEL)
         val plain = label.lowercase()
         // Money, deletion, and labels that are already the state after the press: a sweep of a
         // "Buy" spends, and a sweep of a "Given" takes back what was given.
-        if (UNSAFE_REPEAT.containsMatchIn(plain) || STATED.containsMatchIn(plain)) return Sweep()
-        var screen = Screen.snapshot() ?: return Sweep()
+        if (UNSAFE_REPEAT.containsMatchIn(plain) || STATED.containsMatchIn(plain)) {
+            return Sweep(why = STOP_SWEEP_REFUSED)
+        }
+        var screen = Screen.snapshot() ?: return Sweep(why = STOP_SWEEP_NO_SCREEN)
         // Nothing carrying the label is a button that was pressed and has stopped reading like
         // one. One left is still a sweep: the model's own press has usually changed its label
         // by now, so a feed that showed three can be down to one on the screen he is looking at.
-        if (screen.items.none { it.label.equals(label, ignoreCase = true) }) return Sweep()
+        if (screen.items.none { it.label.equals(label, ignoreCase = true) }) {
+            return Sweep(why = STOP_SWEEP_ABSENT)
+        }
         val app = screen.app
         var pressed = 0
         var screens = 1
@@ -614,20 +636,56 @@ object Agent {
         screen: Screen.Snapshot,
         request: String,
         repeatLabel: String?
-    ): String? = screen.items
-        .filter { item ->
-            val label = item.label
-            label.isNotBlank() && label.length <= FEED_LABEL_MAX &&
-                !UNSAFE_REPEAT.containsMatchIn(label.lowercase())
-        }
-        .groupBy { it.label }
-        .filter { (label, where) ->
-            where.size >= 2 &&
-                !STATED.containsMatchIn(label.lowercase()) &&
+    ): Look {
+        val groups = screen.items
+            .map { it.label }
+            .filter { it.isNotBlank() && it.length <= FEED_LABEL_MAX }
+            .groupBy { it }
+            .entries
+            .filter { it.value.size >= 2 }
+            .sortedByDescending { it.value.size }
+        if (groups.isEmpty()) return Look(null, "no label repeats on the screen")
+        val left = groups.firstOrNull { (label, _) ->
+            val plain = label.lowercase()
+            !UNSAFE_REPEAT.containsMatchIn(plain) && !STATED.containsMatchIn(plain) &&
                 (label == repeatLabel || namesIt(request, label))
         }
-        .maxByOrNull { it.value.size }
-        ?.key
+        if (left != null) return Look(left.key, "work left in it")
+        // Nothing qualifies. The label that repeats most is the one worth naming, with the
+        // first reason it was passed over: it is the difference between a feed that is finished
+        // and one whose button is spelt differently.
+        val label = groups.first().key
+        val plain = label.lowercase()
+        return Look(
+            null,
+            "\"$label\" repeats but " + when {
+                UNSAFE_REPEAT.containsMatchIn(plain) -> "reads as money or deletion"
+                STATED.containsMatchIn(plain) -> "reads as already done"
+                else -> "is not named by the request"
+            }
+        )
+    }
+
+    /**
+     * Puts a sweep in the record, whether it ran or refused to start.
+     *
+     * A refusal is recorded as SKIP because nothing was pressed — the same mark a press that
+     * never happened gets — so a record can always be read for whether a sweep was reached at
+     * all, and if it was not, which label it was looking at and why it stopped there.
+     */
+    private fun recordSweep(mine: Int, label: String, swept: Sweep) {
+        val text = if (label.isBlank()) "sweep" else "sweep \"$label\""
+        if (swept.screens > 0) {
+            Diag.jobStep(
+                mine,
+                text,
+                "${swept.pressed} pressed over ${swept.screens} screens — ${swept.why}",
+                true
+            )
+        } else {
+            Diag.jobStep(mine, text, "nothing pressed — ${swept.why}", true, skipped = true)
+        }
+    }
 
     /**
      * Whether the request asks for a button everywhere, and names what the button says in words
@@ -647,6 +705,12 @@ object Agent {
             append(item.bounds.flattenToString()).append(item.label).append(';')
         }
     }
+
+    /**
+     * What the look before finishing found: the label with work left in it, or — with no label —
+     * why the one it looked at was passed over.
+     */
+    private class Look(val label: String?, val why: String)
 
     /**
      * What a sweep did: presses made, screens of feed looked at, whether it finished looking,
@@ -1130,6 +1194,10 @@ object Agent {
     private const val STOP_SWEEP_LEFT = "the app changed underneath it"
     private const val STOP_SWEEP_BUSY = "his own window would not get out of the way"
     private const val STOP_SWEEP_NOT_A_FEED = "not a feed"
+    private const val STOP_SWEEP_NO_LABEL = "the press had no label to follow"
+    private const val STOP_SWEEP_REFUSED = "the label reads as money, deletion or already done"
+    private const val STOP_SWEEP_NO_SCREEN = "could not read the screen"
+    private const val STOP_SWEEP_ABSENT = "nothing on the screen carries that label"
 
     const val NO_HANDS =
         "Switch me on in accessibility first — Settings › Accessibility › Pip — and then " +
