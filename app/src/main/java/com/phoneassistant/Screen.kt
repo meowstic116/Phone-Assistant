@@ -289,17 +289,17 @@ object Screen {
      * job is about to the alphabet.
      */
     fun appNames(apps: List<AppRef>, request: String = "", limit: Int = 60): String {
-        val relevant = apps.filter { appInRequest(listOf(it), request) != null }
+        val relevant = appsInRequest(apps, request)
         return (relevant + apps).distinctBy { it.packageName }.take(limit)
             .joinToString(", ") { it.label }
     }
 
     /**
-     * The app a request names, if any: "text Sam on WhatsApp" is WhatsApp, and the longest
-     * label wins so "Phone Assistant" could never lose to "Phone". Word boundaries keep
-     * "gallery" out of "gallerystuff" and out of a word that merely contains it.
+     * Every app a request names, as whole words: "text Sam on WhatsApp" names WhatsApp, and
+     * word boundaries keep "gallery" out of "gallerystuff" and out of a word that merely
+     * contains it.
      */
-    fun appInRequest(apps: List<AppRef>, request: String): AppRef? {
+    fun appsInRequest(apps: List<AppRef>, request: String): List<AppRef> {
         val text = request.lowercase()
         return apps
             .filter { it.label.length >= 3 }
@@ -309,8 +309,19 @@ object Screen {
                     Regex("\\b" + Regex.escape(label) + "\\b").containsMatchIn(text)
                 }.getOrDefault(false)
             }
-            .maxByOrNull { it.label.length }
+            .sortedByDescending { it.label.length }
     }
+
+    /**
+     * The one app a request names, and only when it names exactly one.
+     *
+     * A request that names two is a request that moves between them, and opening either before
+     * the first step puts a screen in front that the task did not ask for. "Check Discord
+     * messages and then open Strava" used to open Messages: the word is in the sentence, and
+     * that label is longer than Discord's, so the longest match won.
+     */
+    fun appInRequest(apps: List<AppRef>, request: String): AppRef? =
+        appsInRequest(apps, request).singleOrNull()
 
     /** Launches an app, straight to the activity that owns its icon. */
     fun open(ctx: Context, app: AppRef): Boolean {

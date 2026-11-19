@@ -21,8 +21,19 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 object Agent {
 
-    /** One step is one API call: enough to open an app, find a chat, type and send. */
-    private const val MAX_STEPS = 8
+    /**
+     * One step is one API call. The ceiling is the quota fence as well as the patience one,
+     * but eight was a fence across the wrong field: opening an app, finding the feed and
+     * giving kudos to a run of activities is a dozen steps before anything has gone wrong, and
+     * it stopped that job half done with the last few steps spent backing out of a mis-tap.
+     */
+    private const val MAX_STEPS = 25
+
+    /**
+     * And how long it may run, whatever the step count. Steps are capped, but a slow screen or
+     * a slow answer can make each of them long; this is the fence behind the fence.
+     */
+    private const val JOB_MS = 4 * 60_000L
 
     /** Time for the screen to settle after an action before it is read again. */
     private const val SETTLE_MS = 650L
@@ -207,7 +218,15 @@ object Agent {
                 if (opened) SystemClock.sleep(OPEN_MS)
             }
 
+            val jobStartedAt = SystemClock.uptimeMillis()
             while (steps < MAX_STEPS && alive()) {
+                if (SystemClock.uptimeMillis() - jobStartedAt > JOB_MS) {
+                    finish(
+                        "I've been at this for four minutes, so I'm stopping here.",
+                        STOP_TIME
+                    )
+                    return
+                }
                 val screen = Screen.snapshot()
                 if (screen == null) {
                     val hands = Screen.available()
@@ -354,6 +373,8 @@ object Agent {
             }
             if (step == MAX_STEPS - 1) {
                 append("\nNo steps left after this one: get as close as you can, then finish.\n")
+            } else if (step >= MAX_STEPS - 3) {
+                append("\nRunning out of steps: do what matters most now, then finish.\n")
             }
         }
         // One retry. A call that never comes back is usually a dropped connection or a hiccup
@@ -693,6 +714,7 @@ object Agent {
     private const val STOP_BRAIN = "the brain stopped answering"
     private const val STOP_DONE = "the job said it was finished"
     private const val STOP_STEPS = "stopped at the $MAX_STEPS step limit"
+    private const val STOP_TIME = "stopped at the four minute limit"
 
     const val NO_HANDS =
         "Switch me on in accessibility first — Settings › Accessibility › Pip — and then " +
@@ -749,6 +771,9 @@ object Agent {
           the whole job and ends it; "more":true is only for a task that goes on afterwards.
         - If an action failed according to WHAT HAS HAPPENED SO FAR, do something different.
           Never repeat a failing action.
+        - An action can land and still take you where you did not mean to go — a profile
+          instead of a feed, settings instead of a list. Use back and choose a different
+          element; never carry on pressing about in a screen you did not mean to be in.
         - Never type into an element marked password, and never put a password in "text": a
           password field is only ever filled from a saved login. Never pay, buy, confirm a
           purchase or delete something the user did not name — if the task needs that, stop
