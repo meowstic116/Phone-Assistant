@@ -73,15 +73,21 @@ object Agent {
     }
 
     /**
-     * Starts a job on its own thread. [onSay] and [onDone] fire on that thread, so a caller
-     * with views to touch must hop to the main looper. Returns false when he has no hands or
-     * is already busy.
+     * Starts a job on its own thread. [onSay], [onAct] and [onDone] fire on that thread, so a
+     * caller with views to touch must hop to the main looper. Returns false when he has no
+     * hands or is already busy.
+     *
+     * [onAct] brackets every moment the phone is being touched: true just before the action,
+     * false once the gesture has finished and the screen has settled. Anything of the
+     * overlay's own that sits over the screen — the cancel chip — uses it to get out of the
+     * way, so it cannot be the thing a press lands on.
      */
     fun start(
         ctx: Context,
         request: String,
         onSay: (String) -> Unit,
-        onDone: (String) -> Unit
+        onDone: (String) -> Unit,
+        onAct: (Boolean) -> Unit
     ): Boolean {
         if (job != null) return false
         if (!Screen.available()) return false
@@ -89,7 +95,7 @@ object Agent {
         job = request
         Diag.jobStarted(mine, request)
         val appContext = ctx.applicationContext
-        worker.execute { loop(appContext, request, mine, onSay, onDone) }
+        worker.execute { loop(appContext, request, mine, onSay, onDone, onAct) }
         return true
     }
 
@@ -100,7 +106,8 @@ object Agent {
         request: String,
         mine: Int,
         onSay: (String) -> Unit,
-        onDone: (String) -> Unit
+        onDone: (String) -> Unit,
+        onAct: (Boolean) -> Unit
     ) {
         // Still the job the user is waiting on? A cancelled or replaced job is silent.
         fun alive(): Boolean = ticket == mine
@@ -170,13 +177,26 @@ object Agent {
                 // a job the user has already ended. This is the last moment before the phone
                 // is touched, so this is where it has to be checked.
                 if (!alive()) return
-                val outcome = perform(ctx, decision, screen)
-                val landed = !outcome.startsWith(FAILED)
-                history.append(steps + 1).append(". ").append(decision.summary(screen))
-                    .append(" → ").append(outcome).append('\n')
-                Diag.jobStep(mine, decision.summary(screen), outcome, landed)
-                steps++
-                if (landed) SystemClock.sleep(SETTLE_MS)
+                // The chip gets out of the way of the press. This is the one window in which
+                // the phone is being touched, so it is the one window in which the overlay's
+                // own windows must not be touchable: a press aimed at a row that happens to
+                // sit exactly where the user left the chip would otherwise stop the job
+                // instead of pressing the row. An injected gesture keeps running after
+                // perform returns — a long press is 550ms — so it stays away through the
+                // settle too, and comes back while the model is thinking, which is most of
+                // the time a job runs.
+                onAct(true)
+                try {
+                    val outcome = perform(ctx, decision, screen)
+                    val landed = !outcome.startsWith(FAILED)
+                    history.append(steps + 1).append(". ").append(decision.summary(screen))
+                        .append(" → ").append(outcome).append('\n')
+                    Diag.jobStep(mine, decision.summary(screen), outcome, landed)
+                    steps++
+                    if (landed) SystemClock.sleep(SETTLE_MS)
+                } finally {
+                    onAct(false)
+                }
             }
             finish("That's as far as I got — I stop after $MAX_STEPS steps.", STOP_STEPS)
         } catch (t: Throwable) {

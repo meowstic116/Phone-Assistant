@@ -62,6 +62,9 @@ class OverlayService : Service(), PropHost {
         /** Where the cancel chip's last dragged position is kept. */
         private const val PREFS = "chip"
 
+        /** How faint the chip goes while a step is acting, so that it is plainly out of play. */
+        private const val DUCK_ALPHA = 0.35f
+
         /** How long a model reply keeps the floor after it lands, over any toy line. */
         private const val REPLY_HOLD_MS = 4_000L
 
@@ -216,6 +219,12 @@ class OverlayService : Service(), PropHost {
      * pixels so the same spot means the same corner after a rotation.
      */
     private var chipSpot: Pair<Float, Float>? = null
+
+    /**
+     * True while a step is touching the phone. The chip is not touchable then, so a press
+     * meant for the app underneath can never land on the way out of the job instead.
+     */
+    private var chipDucked = false
 
     /** True while a finger is on the chip, so the ticker does not drag it back mid-drag. */
     private var chipDragging = false
@@ -1519,7 +1528,10 @@ class OverlayService : Service(), PropHost {
                     sayAloud(line)
                     feel(PetView.Mood.HAPPY, 2500L)
                 }
-            }
+            },
+            // For as long as the phone is being touched, the chip is inert and dimmed: it
+            // steps out of the way of the press instead of catching it.
+            onAct = { touching -> handler.post { setChipDucked(touching) } }
         )
         if (!started) {
             hideJobBar()
@@ -1547,6 +1559,7 @@ class OverlayService : Service(), PropHost {
      */
     private fun showJobBar() {
         if (jobBar != null) return
+        chipDucked = false
         // The listener is for TalkBack, which activates the chip without a finger: a real
         // touch goes through the service's own listener so it can become a drag.
         val view = JobBar(this) { stopJob() }
@@ -1586,8 +1599,35 @@ class OverlayService : Service(), PropHost {
         jobBar?.let { view -> runCatching { windowManager.removeView(view) } }
         jobBar = null
         jobBarParams = null
+        chipDucked = false
         chipDragging = false
         chipMoved = false
+    }
+
+    /**
+     * Gets the chip out of the way of a press, or puts it back afterwards.
+     *
+     * FLAG_NOT_TOUCHABLE is the part that matters: while a step is acting, a touch at the
+     * chip's own place goes to the app underneath — where the job aimed it — instead of
+     * ending the job. The dimming is only so the moment it cannot be tapped is visible; Stop
+     * is back the instant the step has finished.
+     */
+    private fun setChipDucked(ducked: Boolean) {
+        if (jobBar == null) return
+        if (chipDucked == ducked) return
+        val view = jobBar ?: return
+        val params = jobBarParams ?: return
+        chipDucked = ducked
+        params.flags = if (ducked) {
+            params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        } else {
+            params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        }
+        // The fade-in from showJobBar would otherwise bring it back to full while it is
+        // still stepping aside, so the animation is stopped before the alpha is set.
+        view.animate().cancel()
+        view.alpha = if (ducked) DUCK_ALPHA else 1f
+        runCatching { windowManager.updateViewLayout(view, params) }
     }
 
     /**
