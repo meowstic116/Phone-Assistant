@@ -328,6 +328,16 @@ class OverlayService : Service(), PropHost {
     private var keyboardUp = false
     private var keyboardWatch = 0L
 
+    /**
+     * When a hold on standing still ends, kept here rather than read from [Still] every frame:
+     * this is checked by the walk several times a second, and a SharedPreferences read at that
+     * rate is a pointless cost. 0 means he is free to wander.
+     */
+    private var stillUntil = 0L
+
+    /** Bumped by every mood, so only the newest one's timer puts his face back to neutral. */
+    private var moodSeq = 0
+
     private val handler = Handler(Looper.getMainLooper())
     private val rnd = Random(System.currentTimeMillis())
 
@@ -433,6 +443,7 @@ class OverlayService : Service(), PropHost {
         petH = (86 * dp).toInt()
         speed = 55 * dp
         keyboardHeightPx = Keyboard.rememberedPx(this)
+        stillUntil = Still.until(this)
         chipSpot = loadChipSpot()
 
         posX = (screenW - petW) * 0.55f
@@ -471,6 +482,7 @@ class OverlayService : Service(), PropHost {
         idleUntil = SystemClock.uptimeMillis() + 2500L
         registerScreenReceiver()
         ImeWatch.onChange = { ime -> handler.post { onImeChanged(ime) } }
+        Still.onChanged = { handler.post { refreshStill() } }
         handler.post(tick)
     }
 
@@ -655,6 +667,7 @@ class OverlayService : Service(), PropHost {
         pet = null
         runCatching { unregisterReceiver(screenReceiver) }
         Quiet.onChanged = null
+        Still.onChanged = null
         instance = null
         running = false
         super.onDestroy()
@@ -716,7 +729,12 @@ class OverlayService : Service(), PropHost {
     override fun feel(mood: PetView.Mood, ms: Long) {
         val view = pet ?: return
         view.mood = mood
-        if (ms > 0L) handler.postDelayed({ view.mood = PetView.Mood.NEUTRAL }, ms)
+        if (ms > 0L) {
+            // Only the newest mood may clear itself: a smug 2.5 s stretch followed by an
+            // annoyed 4 s one used to be cut short by the first one's timer.
+            val mine = ++moodSeq
+            handler.postDelayed({ if (mine == moodSeq) view.mood = PetView.Mood.NEUTRAL }, ms)
+        }
     }
 
     override fun petHoldAt(owner: Prop, x: Float, y: Float, done: () -> Unit) {
@@ -934,6 +952,12 @@ class OverlayService : Service(), PropHost {
         val view = pet ?: return
         val now = SystemClock.uptimeMillis()
 
+        // A hold that has run out ends here rather than on a timer of its own: the deadline on
+        // disk is the truth, so a phone that slept through the end of one is just another
+        // reading of it, and nothing has to be re-armed after a restart.
+        if (stillDue()) endStill()
+        val still = standingStill()
+
         if (bubble != null && now >= bubbleHideAt) fadeBubble()
 
         keyboardWatch -= frameMs
@@ -964,7 +988,7 @@ class OverlayService : Service(), PropHost {
         }
 
         // Nothing on screen for a few minutes: he gets bored and makes his own fun.
-        if (!attentive && !walking && props.isEmpty()) {
+        if (!attentive && !walking && props.isEmpty() && !still) {
             initiativeIn -= frameMs
             if (initiativeIn <= 0L) {
                 initiativeIn = 180_000L + rnd.nextLong(140_000L)
@@ -980,7 +1004,7 @@ class OverlayService : Service(), PropHost {
         // which is all postReturn means — there may be nothing left to do there.
         val station = post
         if (station != null && (postArrival != null || postReturn) && !attentive && !walking &&
-            !inKeyboard(station.second)
+            !still && !inKeyboard(station.second)
         ) {
             approachPost(station.first, station.second)
         }
@@ -1027,7 +1051,7 @@ class OverlayService : Service(), PropHost {
                 if (abs(dx) > 1f) view.facingRight = dx > 0
                 view.walking = true
             }
-        } else if (!attentive && post == null && now > idleUntil) {
+        } else if (!still && !attentive && post == null && now > idleUntil) {
             // A post outranks being bored: he keeps station until the toy lets him go.
             pickTarget(now)
         }
@@ -1035,6 +1059,49 @@ class OverlayService : Service(), PropHost {
 
     /** Long pauses between short strolls — he should feel relaxed, not busy. */
     private fun idleDelay(): Long = 12_000L + rnd.nextLong(16_000L)
+
+    // ----------------------------------------------------------- standing still
+
+    /** Whether a hold on standing still is on him at this moment. */
+    private fun standingStill(): Boolean =
+        stillUntil == Still.FOREVER || stillUntil > System.currentTimeMillis()
+
+    /** Whether a timed hold has just run out, and is waiting to be ended and paid off. */
+    private fun stillDue(): Boolean =
+        stillUntil != 0L && stillUntil != Still.FOREVER && System.currentTimeMillis() > stillUntil
+
+    /**
+     * Re-reads the stored hold after the user sets one or takes it away. Coming out of a hold
+     * restarts his idle timer, so he wanders off on his own schedule rather than the instant
+     * the hold is lifted.
+     */
+    private fun refreshStill() {
+        val was = standingStill()
+        stillUntil = Still.until(this)
+        if (was && !standingStill()) idleUntil = SystemClock.uptimeMillis() + idleDelay()
+    }
+
+    /**
+     * A timed hold has run out. It is only cleared once he can actually be seen to move again:
+     * a line said to a locked phone is a line nobody hears, and a hold dropped behind a lock
+     * screen would be the one bit of this that happened silently.
+     */
+    private fun endStill() {
+        if (!screenUsable()) return
+        Still.clear(this)
+        sayAloud(Lines.pick(Still.DONE_LINES))
+    }
+
+    /**
+     * Stands him where he is. A stroll of his own stops dead; a walk a toy sent him on, or one
+     * getting him out from under a keyboard, is left to finish — something is owed at the end of
+     * the first, and the second is moving him out of the user's way.
+     */
+    fun standStillNow() {
+        if (toyWalk || relocating) return
+        walking = false
+        pet?.walking = false
+    }
 
     private fun pickTarget(now: Long) {
         val maxX = (screenW - petW).coerceAtLeast(0).toFloat()

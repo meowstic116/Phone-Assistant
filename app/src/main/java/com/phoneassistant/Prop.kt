@@ -314,8 +314,12 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
         }
 
     protected fun stroke(color: Int, widthDp: Float): Paint {
-        // A tenth of a dp is finer than any width used, and keeps the key an integer.
-        val key = (color.toLong() shl 16) or (widthDp * 10f).toLong().coerceIn(0L, 0xFFFFL)
+        // A tenth of a dp is finer than any width used, and keeps the key an integer. The
+        // colour is masked to its 32 bits first: a negative Int widens to a long with the sign
+        // bits on top, and a shift would drop them — two colours differing only in alpha would
+        // then share one paint, and painting with the wrong alpha is invisible until it is not.
+        val key = ((color.toLong() and 0xFFFFFFFFL) shl 16) or
+            (widthDp * 10f).toLong().coerceIn(0L, 0xFFFFL)
         return strokes.getOrPut(key) {
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 this.color = color
@@ -328,7 +332,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     }
 
     protected fun text(color: Int = Ink.TEXT, sizeDp: Float = 10f, bold: Boolean = false): Paint {
-        val key = (color.toLong() shl 24) or
+        val key = ((color.toLong() and 0xFFFFFFFFL) shl 24) or
             ((sizeDp * 16f).toLong().coerceIn(0L, 0xFFFFL) shl 1) or
             (if (bold) 1L else 0L)
         return texts.getOrPut(key) {

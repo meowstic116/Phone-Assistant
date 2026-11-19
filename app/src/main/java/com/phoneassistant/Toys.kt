@@ -88,7 +88,7 @@ object Toys {
     private val quietSoft = listOf(
         "take a break", "not now", "not right now", "leave me alone", "peace and quiet",
         "quiet please", "don't play", "dont play", "give me a minute", "chill out",
-        "settle down", "sit still"
+        "settle down"
     )
 
     /** Ways a sentence starts when the person is talking about themselves, not at Pip. */
@@ -200,8 +200,12 @@ object Toys {
         return dislikePhrases.any { text.contains(it) } && dislikeNouns.any { text.contains(it) }
     }
 
-    /** How long a break they asked for. Half an hour when they did not say. */
-    fun quietLength(raw: String): Long {
+    /**
+     * A length of time a message names, or null when it names none. Shared by the toy break and
+     * by standing still, which are asked for in the same words but mean different things when
+     * no length is given: half an hour of no toys, or no wandering until they say otherwise.
+     */
+    fun durationIn(raw: String): Long? {
         val text = raw.lowercase()
         Regex("(\\d+)\\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)").find(text)?.let { found ->
             val amount = found.groupValues[1].toLongOrNull() ?: 1L
@@ -222,6 +226,17 @@ object Toys {
             text.contains("a couple of minutes") -> 2 * 60_000L
             text.contains("a few minutes") -> 5 * 60_000L
             Regex("\\b(an?|one) minute").containsMatchIn(text) -> 60_000L
+            else -> null
+        }
+    }
+
+    /** How long a break they asked for. Half an hour when they did not say. */
+    fun quietLength(raw: String): Long = durationIn(raw) ?: run {
+        // "for now" is a break's own way of saying "a while": it is not a length, so it is
+        // read here rather than in [durationIn], where standing still would inherit it and
+        // stop meaning "until I say otherwise".
+        val text = raw.lowercase()
+        when {
             text.contains("not now") || text.contains("not right now") -> 15 * 60_000L
             text.contains("a bit") || text.contains("for now") -> 15 * 60_000L
             else -> 30 * 60_000L
@@ -229,7 +244,10 @@ object Toys {
     }
 
     fun describeDuration(ms: Long): String {
-        val minutes = (ms / 60_000L).coerceAtLeast(1L)
+        // A minute is the smallest thing the toy break deals in, but a hold can be given in
+        // seconds, and calling twenty seconds "a minute" is a promise about the wrong thing.
+        if (ms < 60_000L) return "${(ms / 1_000L).coerceAtLeast(1L)} seconds"
+        val minutes = ms / 60_000L
         return when {
             minutes >= 120 -> "${minutes / 60} hours"
             minutes >= 55 -> "an hour"
@@ -417,6 +435,10 @@ object Toys {
         val ctx = host.stageContext()
         val notes = mutableListOf<String>()
 
+        // Not a toy, but the same kind of thing: a message that changes what his body is
+        // doing, with a note so the line he says matches what he is already not doing.
+        Still.reactTo(host, raw)?.let { notes += it }
+
         if (asksToResume(text) && Quiet.active(ctx)) {
             Quiet.clear(ctx)
             host.feel(PetView.Mood.HAPPY, 1800L)
@@ -478,6 +500,16 @@ object Toys {
         val blocks = mutableListOf<String>()
 
         val left = Quiet.remaining(host.stageContext())
+        if (Still.active(host.stageContext())) {
+            val forHowLong = Still.describe(host.stageContext())
+            blocks += "YOU ARE STANDING STILL\n" +
+                "- They asked you to stay put" +
+                (if (forHowLong == null) " until they say you can move"
+                else ", and there is about $forHowLong of that left") +
+                ", so you are not wandering about the screen and have not wandered" +
+                " anywhere since. You can still talk, and you can still do something they ask" +
+                " for. If they ask why you are not moving, that is why."
+        }
         if (left > 0L) {
             blocks += "YOU ARE ON A TOY BREAK\n" +
                 "- They asked you to lay off the toys, and there is about " +

@@ -36,6 +36,10 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   leave it — not in a prompt, not in the chat, not in any request. Ask him to sign in
   somewhere he has a login for and he fills the form himself; ask him somewhere he does not
   and he says so and opens the form with the site already in it.
+- Ask him to **stand still** and he stops where he is: "stand still for two minutes" for
+  that long, or just "stand still" for as long as you like — until you tell him he can move
+  again. He is still there to talk to, and the hold is kept on the phone like a toy break, so
+  a restart does not lose it.
 - A **Diagnostics** screen shows, live, exactly what Android tells the app rather than what
   it should: the keyboard height the accessibility service reports, whether that service is
   switched on, whether a keyboard is up, where he is sitting against it, what is on the
@@ -184,7 +188,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.76-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.77-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
