@@ -401,7 +401,9 @@ object Agent {
      *
      * It is deliberately narrow: a plain tap only, never while the app changes underneath it,
      * and never a label that reads like money or deletion, because a repeated "Buy" is not the
-     * sort of help anyone asked for.
+     * sort of help anyone asked for. Two presses in a row that leave the screen untouched end
+     * it — nobody is reading the screen between these presses, so a button that is not taking
+     * them is not going to start.
      */
     private fun replayTap(
         mine: Int,
@@ -419,6 +421,9 @@ object Agent {
         val done = hashSetOf(alreadyPressed)
         var pressed = 0
         var scrolls = 0
+        // Presses in a row that left the screen exactly as it was. Nothing is watching this
+        // loop but the record, so a thing that ignores two presses is left alone.
+        var unchanged = 0
         while (pressed < REPEAT_LIMIT && ticket.get() == mine) {
             val item = screen.items.firstOrNull { item ->
                 item.label.equals(label, ignoreCase = true) &&
@@ -466,6 +471,11 @@ object Agent {
             val next = Screen.snapshot() ?: return pressed
             // Somewhere else entirely: the list is not what is in front any more.
             if (next.app != app) return pressed
+            // Two presses in a row that change nothing he can see: whatever it is, it is not
+            // taking them, and there is no model in this loop to notice that. Stop rather than
+            // spend the rest of the budget on a dead button.
+            unchanged = if (next.listing == screen.listing) unchanged + 1 else 0
+            if (unchanged >= 2) return pressed
             screen = next
         }
         return pressed
