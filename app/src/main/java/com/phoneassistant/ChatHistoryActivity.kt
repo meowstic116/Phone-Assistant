@@ -88,6 +88,20 @@ class ChatHistoryActivity : Activity() {
         ) { ok, reply ->
             runOnUiThread {
                 messageList.removeView(placeholder)
+                // A delegated job is a JSON object, not a line: it belongs to his hands, and
+                // the overlay is where it is watched happening. Printed here it would show
+                // the user the protocol instead of an answer.
+                val job = if (ok) Agent.delegated(reply) else null
+                if (job != null) {
+                    val started = OverlayService.runPhoneJob(job)
+                    addBubble(
+                        if (started) "On it — watch the bubble."
+                        else "Start me first and I'll do that one.",
+                        false
+                    )
+                    sendButton.isEnabled = true
+                    return@runOnUiThread
+                }
                 addBubble(reply, false)
                 if (ok) Memory.append(this, "assistant", reply)
                 sendButton.isEnabled = true

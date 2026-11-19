@@ -295,24 +295,50 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     protected fun drift(startX: Float, startY: Float): Float =
         hypot(abs(posX - startX), abs(posY - startY)) / density
 
+    /**
+     * Paints, made once and kept.
+     *
+     * Every prop used to build a fresh Paint for every shape it drew, and a canvas like the
+     * painting has forty of them — redrawn thirty times a second, that is well over a
+     * thousand Paint objects a second for colours that never change. The same colour at the
+     * same width is the same paint, so each prop keeps its own; nothing here mutates a paint
+     * it was handed, which is what makes sharing safe.
+     */
+    private val fills = HashMap<Long, Paint>()
+    private val strokes = HashMap<Long, Paint>()
+    private val texts = HashMap<Long, Paint>()
+
     protected fun fill(color: Int): Paint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
-
-    protected fun stroke(color: Int, widthDp: Float): Paint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = color
-            style = Paint.Style.STROKE
-            strokeWidth = dp(widthDp)
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
+        fills.getOrPut(color.toLong()) {
+            Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
         }
 
-    protected fun text(color: Int = Ink.TEXT, sizeDp: Float = 10f, bold: Boolean = false): Paint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = color
-            textSize = dp(sizeDp)
-            isFakeBoldText = bold
+    protected fun stroke(color: Int, widthDp: Float): Paint {
+        // A tenth of a dp is finer than any width used, and keeps the key an integer.
+        val key = (color.toLong() shl 16) or (widthDp * 10f).toLong().coerceIn(0L, 0xFFFFL)
+        return strokes.getOrPut(key) {
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = color
+                style = Paint.Style.STROKE
+                strokeWidth = dp(widthDp)
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+            }
         }
+    }
+
+    protected fun text(color: Int = Ink.TEXT, sizeDp: Float = 10f, bold: Boolean = false): Paint {
+        val key = (color.toLong() shl 24) or
+            ((sizeDp * 16f).toLong().coerceIn(0L, 0xFFFFL) shl 1) or
+            (if (bold) 1L else 0L)
+        return texts.getOrPut(key) {
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = color
+                textSize = dp(sizeDp)
+                isFakeBoldText = bold
+            }
+        }
+    }
 
     protected fun panel(canvas: Canvas, rect: RectF, radiusDp: Float, edge: Paint, body: Paint) {
         canvas.drawRoundRect(rect, dp(radiusDp), dp(radiusDp), body)

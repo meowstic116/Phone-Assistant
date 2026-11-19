@@ -128,6 +128,14 @@ class OverlayService : Service(), PropHost {
         /** What is out on the screen right now, for the prompt. Empty when nothing is. */
         fun toysOnStage(): String = instance?.let { Toys.summary(it) } ?: ""
 
+        /**
+         * Runs a phone job handed over from a screen that is not the overlay's own chat —
+         * the history screen — where the reply is a JSON object that would otherwise be
+         * shown to the user as if it were something he said. False when nothing started:
+         * not running, already busy, or no hands to work with.
+         */
+        fun runPhoneJob(task: String): Boolean = instance?.startJob(task) ?: false
+
         /** How often the floating readout repaints. Fast enough to watch a keyboard arrive. */
         private const val HUD_REFRESH_MS = 250L
 
@@ -1563,7 +1571,7 @@ class OverlayService : Service(), PropHost {
      * The job speaks and finishes on its own thread, so both callbacks come back to the main
      * looper before they touch a window.
      */
-    private fun startJob(job: String) {
+    private fun startJob(job: String): Boolean {
         // The chat model has answered, so nothing is waiting on it any more: the toys may
         // talk again while the job runs.
         awaitingReply = false
@@ -1594,12 +1602,13 @@ class OverlayService : Service(), PropHost {
                     Agent.NO_HANDS
                 }
             )
-            return
+            return false
         }
         // His hands are busy: he stands out of the way of the app he is working in, and the
         // way out of the job appears at the bottom of the screen.
         beginJobWatch()
         showJobBar()
+        return true
     }
 
     // --------------------------------------------------------------------- job bar

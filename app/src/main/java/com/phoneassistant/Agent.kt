@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Pip's hands, working: a short loop that reads the screen, asks the brain for one action,
@@ -40,9 +41,13 @@ object Agent {
      * while its own number is still the current one, so a job the user has moved on from
      * cannot talk over the one that replaced it — a shared flag would be cleared by the
      * new job and let the old one finish loudly.
+     *
+     * Atomic because the two writers sit on different threads: a message starts a job from
+     * the main looper, while the accessibility service cancels one when it unbinds. A plain
+     * Int could lose one of those two increments — the same value read twice — and leave a
+     * loop the user abandoned convinced it was still the current job.
      */
-    @Volatile
-    private var ticket = 0
+    private val ticket = AtomicInteger(0)
 
     fun running(): Boolean = job != null
 
@@ -56,8 +61,8 @@ object Agent {
      */
     fun cancel() {
         if (job == null) return
-        val mine = ticket
-        ticket++
+        // The number the job is working under, taken before the bump that retires it.
+        val mine = ticket.getAndIncrement()
         job = null
         Diag.jobEnded(mine, STOP_CANCELLED)
     }
@@ -93,7 +98,7 @@ object Agent {
     ): Boolean {
         if (job != null) return false
         if (!Screen.available()) return false
-        val mine = ++ticket
+        val mine = ticket.incrementAndGet()
         job = request
         Diag.jobStarted(mine, request)
         val appContext = ctx.applicationContext
@@ -112,7 +117,7 @@ object Agent {
         onAct: (Boolean) -> Boolean
     ) {
         // Still the job the user is waiting on? A cancelled or replaced job is silent.
-        fun alive(): Boolean = ticket == mine
+        fun alive(): Boolean = ticket.get() == mine
 
         // The bubble gets one sentence; the record keeps the reason, which is a different
         // thing — "I can't see the screen" does not tell the user what to switch on, and

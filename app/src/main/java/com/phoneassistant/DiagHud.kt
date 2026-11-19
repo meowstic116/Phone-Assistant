@@ -25,6 +25,9 @@ class DiagHud(ctx: Context) : LinearLayout(ctx) {
 
     private val body: TextView
 
+    /** What is on it now, so a repaint that changes nothing does not relayout the window. */
+    private var shown: String? = null
+
     init {
         orientation = VERTICAL
         setPadding(dp(12f), dp(9f), dp(12f), dp(11f))
@@ -88,7 +91,7 @@ class DiagHud(ctx: Context) : LinearLayout(ctx) {
 
         if (status == null) {
             out.append("Pip is not running")
-            body.text = out.toString()
+            show(out.toString())
             return
         }
 
@@ -112,7 +115,17 @@ class DiagHud(ctx: Context) : LinearLayout(ctx) {
             }
         )
 
-        body.text = out.toString().trimEnd()
+        show(out.toString().trimEnd())
+    }
+
+    /**
+     * The panel is repainted four times a second, and the numbers usually have not moved:
+     * setting the same text again re-measures and re-lays out the window for nothing.
+     */
+    private fun show(text: String) {
+        if (text == shown) return
+        shown = text
+        body.text = text
     }
 
     private fun asDp(px: Int): Int {

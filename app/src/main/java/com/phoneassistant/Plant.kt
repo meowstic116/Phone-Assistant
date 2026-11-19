@@ -16,7 +16,16 @@ class Plant(host: PropHost) : Prop(host) {
 
     private val maxStage = 4
     private var stage = 0
+
+    /** Waterings toward the next stage: never more than [WATER_PER_STAGE]. */
     private var water = 0
+
+    /**
+     * Taps in quick succession. Counted separately from [water], because a hurried tap is not
+     * a watering — it used to add to the same counter, which could push it past three and put
+     * "water 4/3" on the pot.
+     */
+    private var hurried = 0
     private var lastWaterAt = 0L
     private var growAt = 0L
     private var warnedFlood = false
@@ -43,16 +52,17 @@ class Plant(host: PropHost) : Prop(host) {
         dropUntil = now + 500L
 
         if (tooQuick) {
-            water++
-            if (water >= 5 && !warnedFlood) {
+            hurried++
+            if (hurried >= 5 && !warnedFlood) {
                 warnedFlood = true
-                water = 0
+                hurried = 0
                 host.feel(PetView.Mood.ANNOYED, 2400L)
                 host.say(Lines.pick(OVERWATER_LINES))
             }
             invalidate()
             return
         }
+        hurried = 0
 
         if (stage >= maxStage) {
             host.feel(PetView.Mood.SMUG, 2000L)
@@ -60,8 +70,8 @@ class Plant(host: PropHost) : Prop(host) {
             return
         }
 
-        water++
-        if (water >= 3) {
+        water = (water + 1).coerceAtMost(WATER_PER_STAGE)
+        if (water >= WATER_PER_STAGE) {
             water = 0
             growAt = now + 1400L
             host.feel(PetView.Mood.HAPPY, 1400L)
@@ -92,7 +102,10 @@ class Plant(host: PropHost) : Prop(host) {
             dropUntil = 0L
             invalidate()
         }
-        if (warnedFlood && now - lastWaterAt > 4000L) warnedFlood = false
+        if (warnedFlood && now - lastWaterAt > 4000L) {
+            warnedFlood = false
+            hurried = 0
+        }
 
         if (growAt > 0L && now >= growAt) {
             growAt = 0L
@@ -174,7 +187,7 @@ class Plant(host: PropHost) : Prop(host) {
         canvas.drawPath(path, potEdge)
         canvas.drawRect(cx - dp(24f), potTop, cx + dp(24f), potTop + dp(7f), soil)
 
-        centred(canvas, "water $water/3", cx, h - dp(20f), hint)
+        centred(canvas, "water $water/$WATER_PER_STAGE", cx, h - dp(20f), hint)
     }
 
     override fun describe(): String =
@@ -182,6 +195,9 @@ class Plant(host: PropHost) : Prop(host) {
         else "a pot plant at stage $stage of $maxStage that you were watering"
 
     companion object {
+        /** Waterings that grow him a stage. */
+        private const val WATER_PER_STAGE = 3
+
         val OVERWATER_LINES = listOf(
             "ease off. you're drowning it.",
             "that's plenty. it's not a fish.",

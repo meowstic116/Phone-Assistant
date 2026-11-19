@@ -268,6 +268,14 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         canvas.drawPath(shape, facePaint)
     }
 
-    /** Filled version of a stroke paint, for the little legs and antenna light. */
-    private fun Paint.fillOnly(): Paint = Paint(this).apply { style = Paint.Style.FILL }
+    /**
+     * Filled version of a stroke paint, for the little legs and antenna light. One scratch
+     * paint is reused for all of them: this runs inside onDraw, every frame.
+     */
+    private val fillScratch = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    private fun Paint.fillOnly(): Paint = fillScratch.apply {
+        set(this@fillOnly)
+        style = Paint.Style.FILL
+    }
 }

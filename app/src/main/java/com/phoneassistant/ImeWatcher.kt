@@ -31,8 +31,20 @@ class ImeWatcher : AccessibilityService() {
         refresh()
     }
 
+    /**
+     * Only a window change can change which keyboard is up, or how tall it is. This service
+     * is handed every event from every app on the phone, and it used to re-read the window
+     * list for all of them — hundreds of times a second while a list was scrolling, each one
+     * allocating a fresh window list. Anything missed here is picked up by the overlay's own
+     * 400 ms re-read, which is the safety net under this.
+     */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        refresh()
+        val type = event?.eventType ?: return
+        if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
+            type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        ) {
+            refresh()
+        }
     }
 
     override fun onInterrupt() = Unit
