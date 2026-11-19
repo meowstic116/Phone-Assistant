@@ -178,13 +178,37 @@ class DiagnosticsActivity : Activity() {
             line("keyboardUp", "— Pip is not running")
         } else {
             line("keyboardUp", if (status.keyboardUp) "YES" else "no")
+            // What the placement is worked out from, beside what the service is saying right
+            // now. They are two readings of one thing, and a line that shows only one of them
+            // is how a stale height went unnoticed in the first place.
+            line(
+                "height used",
+                if (status.keyboardUsedPx <= 0) "none measured"
+                else "${status.keyboardUsedPx}px · service reports ${status.imeReportedPx}px"
+            )
+            line(
+                "keyboard top",
+                if (status.keyboardUsedPx <= 0) "unknown — ${status.ceilingPx}px is a guess"
+                else "${status.keyboardTopPx}px"
+            )
             line("remembered height", "${status.rememberedPx}px")
             line(
                 "his ceiling",
-                if (status.rememberedPx > 0) "${status.ceilingPx}px"
+                if (status.keyboardUsedPx > 0) "${status.ceilingPx}px"
                 // Before a keyboard has ever been measured this is an invented number, and
                 // saying so is the difference between a reading and a guess.
                 else "${status.ceilingPx}px — guess, never measured"
+            )
+            // The box's own edges against that top: the height can be right and the placement
+            // wrong, and this is the line that tells the two apart.
+            line(
+                "his box",
+                when {
+                    status.boxTopPx < 0 -> "not open"
+                    status.keyboardUsedPx > 0 && status.boxBottomPx > status.keyboardTopPx ->
+                        "${status.boxTopPx}–${status.boxBottomPx}px — UNDER the keyboard"
+                    else -> "${status.boxTopPx}–${status.boxBottomPx}px"
+                }
             )
             line("Pip y / height", "${status.petY} / ${status.petHeightPx}px")
             val centre = status.petY + status.petHeightPx / 2

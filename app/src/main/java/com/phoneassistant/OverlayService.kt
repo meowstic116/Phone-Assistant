@@ -240,6 +240,12 @@ class OverlayService : Service(), PropHost {
         val keyboardUp: Boolean,
         val rememberedPx: Int,
         val ceilingPx: Int,
+        /** The height the placement is worked out from, and the keyboard top it implies. */
+        val keyboardUsedPx: Int,
+        val keyboardTopPx: Int,
+        /** Where the chat box is, top and bottom. Top is -1 when it is not open. */
+        val boxTopPx: Int,
+        val boxBottomPx: Int,
         val petY: Int,
         val petHeightPx: Int,
         val props: List<String>,
@@ -513,8 +519,9 @@ class OverlayService : Service(), PropHost {
      * The accessibility service is the one trusted source. A floating overlay is only ever
      * sent an IME inset for a keyboard it raised itself, so nothing inside this service can
      * see another app's typing, and a probe window that pretends otherwise is just a guess.
-     * His own box does not need this: it steps clear as soon as it opens, using the height
-     * remembered from the last time it was measured.
+     * His own box uses it too, rather than the height remembered from last time: the box is
+     * the one thing that cannot be behind the keyboard, and a remembered figure is a figure
+     * from a different keyboard.
      */
     private fun imeHeight(): Int = ImeWatch.heightPx
 
@@ -524,6 +531,10 @@ class OverlayService : Service(), PropHost {
         keyboardUp = keyboardUp,
         rememberedPx = keyboardHeightPx,
         ceilingPx = keyboardCeiling().toInt(),
+        keyboardUsedPx = keyboardPx(),
+        keyboardTopPx = (screenH - keyboardPx()).coerceAtLeast(0),
+        boxTopPx = inputParams?.y ?: -1,
+        boxBottomPx = (inputParams?.y ?: -1) + (inputBar?.height ?: 0),
         petY = posY.toInt(),
         petHeightPx = petH,
         props = props.toList().map { prop -> prop.javaClass.simpleName },
@@ -1614,13 +1625,30 @@ class OverlayService : Service(), PropHost {
     private fun inKeyboard(y: Float): Boolean =
         keyboardUp && y + petH / 2f > keyboardCeiling()
 
-    /** Top of the keyboard, or a sensible guess before it has ever been measured. */
-    private fun keyboardCeiling(): Float =
-        if (keyboardHeightPx > 0) {
-            (screenH - keyboardHeightPx).toFloat() - dp(10f)
-        } else {
-            screenH * 0.52f
-        }
+    /**
+     * The keyboard's height, from the accessibility service wherever it will say.
+     *
+     * That service is the only thing on the phone that can see a keyboard at all, so its
+     * figure is the one to place from. The remembered height is only what it left behind last
+     * time, and a number remembered from another keyboard, or from a smaller font, is exactly
+     * the sort of thing that leaves his box tucked behind the keyboard in front of him.
+     */
+    private fun keyboardPx(): Int = imeHeight().takeIf { it > 0 } ?: keyboardHeightPx
+
+    /**
+     * Top of the keyboard, less the room he keeps above it, or a guess before one has ever
+     * been measured.
+     *
+     * An eighth of the keyboard's own height is held back on top of its edge. A keyboard that
+     * reports itself a little short is what puts his box behind it, and standing a touch too
+     * high for the few seconds of a chat costs nothing — so the arithmetic errs that way on
+     * purpose rather than landing exactly on the line.
+     */
+    private fun keyboardCeiling(): Float {
+        val px = keyboardPx()
+        if (px <= 0) return screenH * 0.52f
+        return (screenH - px).toFloat() - px * 0.08f
+    }
 
     private fun positionInputBar() {
         val params = inputParams ?: return
