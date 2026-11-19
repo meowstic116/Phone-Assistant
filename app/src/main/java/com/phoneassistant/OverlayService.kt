@@ -205,7 +205,10 @@ class OverlayService : Service(), PropHost {
             service.resetToIdle()
             Quiet.start(service, ms)
             service.feel(PetView.Mood.ANNOYED, 4000L)
-            service.sayAloud("break time. *puts the tools down* I'll be here, being patient.")
+            service.sayAloud(
+                "break time. *puts the tools down very deliberately* I'll be here, " +
+                    "being patient at you."
+            )
             return true
         }
 

@@ -458,8 +458,9 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
 
         val WET_LINES = listOf(
             "give it a minute. still wet.",
-            "still drying. patience.",
-            "not yet. the paint's still deciding."
+            "still drying. patience is part of the medium.",
+            "not yet — the paint's still deciding.",
+            "touch it now and it becomes modern art. differently."
         )
 
         val TAP_LINES = listOf(
@@ -467,7 +468,8 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
             "the dog in that one owes me twenty.",
             "no flash photography. it's shy.",
             "*holds it up* best work. also my only work.",
-            "look all you like. I'm not explaining the middle."
+            "look all you like. I'm not explaining the middle.",
+            "that's not a smudge. that's a statement."
         )
     }
 }

@@ -29,18 +29,21 @@ class SoccerGame(private val host: PropHost) {
         val PIP_GOAL_LINES = listOf(
             "goal. *small, restrained celebration*",
             "in. mostly legs, some talent.",
-            "did you see it go past? I did. smugly."
+            "did you see it go past? I did. smugly.",
+            "goal. and I barely even planned that, which is the worrying part."
         )
         val YOUR_GOAL_LINES = listOf(
             "lucky bounce. good goal, though.",
             "*stares at the ball* that happened. I'm fine.",
-            "one for you. *slow clap* I'm being gracious."
+            "one for you. *slow clap* I'm being gracious, loudly.",
+            "that was genuinely good. don't enjoy it too much."
         )
         val PIP_KICK_LINES = listOf(
             "my turn. *scuffs it*",
-            "*boots it* for the phones shaped like me.",
+            "*boots it* for all the small phones with big dreams.",
             "watch the technique. there isn't any.",
-            "all legs, no plan."
+            "all legs, no plan.",
+            "*winds up* this one's going over your goal. possibly my own."
         )
     }
 

@@ -199,15 +199,15 @@ class Plant(host: PropHost) : Prop(host) {
         private const val WATER_PER_STAGE = 3
 
         val OVERWATER_LINES = listOf(
-            "ease off. you're drowning it.",
+            "ease off. it's a plant, not a swimming pool.",
             "that's plenty. it's not a fish.",
-            "easy. the pot has limits."
+            "gentle. the pot has limits and I respect them."
         )
 
         val FULL_LINES = listOf(
             "that's full size. I'm a plant dad now.",
-            "grown. that's as far as it goes.",
-            "nothing left to water. it's finished."
+            "grown. that's the whole plant. anything more is a tree.",
+            "nothing left to water. it's finished. *wipes a tiny tear*"
         )
 
         val GROW_LINES = listOf(

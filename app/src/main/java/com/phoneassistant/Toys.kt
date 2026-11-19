@@ -559,7 +559,7 @@ object Toys {
                 Toy.SOCCER ->
                     "first to three. the goals stay where I put them."
                 Toy.BUBBLES ->
-                    "found bubble wrap. it's your job, not mine. *pops one*"
+                    "bubble wrap turned up. I've started without you. *pops one*"
                 Toy.PLANT ->
                     "we have a plant now. tap it to water it."
             }

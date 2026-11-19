@@ -182,7 +182,7 @@ class BubbleWrap(host: PropHost) : Prop(host) {
 
         if (count == total) {
             host.feel(PetView.Mood.HAPPY, 3500L)
-            host.say("every single one. that was thorough.")
+            host.say(Lines.pick(ALL_POPPED_LINES))
             removeAt = now + CLEAR_DELAY_MS
             return
         }
@@ -190,10 +190,10 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         when (count) {
             1 -> {
                 host.feel(PetView.Mood.HAPPY, 1200L)
-                host.say("right. we're doing this.")
+                host.say(Lines.pick(FIRST_POP_LINES))
             }
-            10 -> host.say("ten. you're taking this seriously.")
-            total / 2 -> host.say("halfway. no comment.")
+            10 -> host.say(Lines.pick(TEN_POP_LINES))
+            total / 2 -> host.say(Lines.pick(HALFWAY_LINES))
         }
     }
 
@@ -243,7 +243,7 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         pop(index, now, byPip = true)
         pipPops++
         host.feel(PetView.Mood.HAPPY, 900L)
-        if (pipPops == 1) host.say("*presses one* still satisfying.")
+        if (pipPops == 1) host.say(Lines.pick(PIP_POP_LINES))
         nextPipPop = now + 1300L + Random.nextLong(900L)
     }
 
@@ -251,6 +251,39 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         "a sheet of bubble wrap with $count of $total bubbles popped, some by you"
 
     companion object {
+        /**
+         * Milestone lines, in sets rather than one each: a sheet is a little ritual, and the
+         * same four sentences every time made it feel like a script being read out.
+         */
+        val FIRST_POP_LINES = listOf(
+            "and so it begins. best sound on this entire phone.",
+            "one down. I felt that in my antenna.",
+            "that's the ice broken. the sheet is now a project."
+        )
+
+        val TEN_POP_LINES = listOf(
+            "ten. you're a natural. I'm a little jealous.",
+            "ten already. my lemonade business has never moved this fast.",
+            "ten. I've started taking notes on your technique."
+        )
+
+        val HALFWAY_LINES = listOf(
+            "halfway. this is the best part of any parcel, and it isn't close.",
+            "half the sheet gone. I've never been prouder of packaging.",
+            "halfway. pace yourself. it's a marathon of tiny pops."
+        )
+
+        val ALL_POPPED_LINES = listOf(
+            "every single one. honestly? a masterclass.",
+            "all of them. *quiet applause* most productive thing this phone has done today.",
+            "finished. I'd offer a trophy, but you'd only pop that too."
+        )
+
+        val PIP_POP_LINES = listOf(
+            "*pops one* still undefeated as a sound.",
+            "*presses one* I'm helping. professionally."
+        )
+
         /** How long the little burst stays on screen after a pop. */
         private const val BURST_MS = 260L
 

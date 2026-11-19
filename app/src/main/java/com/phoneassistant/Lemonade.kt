@@ -260,12 +260,12 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         val NO_ROOM_LINES = listOf(
             "two glasses. I'm not made of lemons.",
             "that's the glass limit. the jug is doing its best.",
-            "no more glasses. drink the ones you have."
+            "drink the ones you've got. the glassware budget is real."
         )
 
         val POST_LINES = listOf(
-            "*dusts the counter* right. back to it.",
-            "back behind the counter. the queue is just you, as ever.",
+            "*dusts the counter* back to it. biggest business on this phone.",
+            "back behind the counter. the queue is still just you. loyal, though.",
             "*straightens the sign* still fifty cents. still mostly lemon."
         )
 
@@ -274,7 +274,8 @@ class LemonadeStand(host: PropHost) : Prop(host) {
             "*pours* the good jug. don't tell the other jug.",
             "mostly lemon. the rest is technique.",
             "freshly squeezed. give or take.",
-            "*slides it over* one business, fully operational."
+            "*slides it over* one business, fully operational.",
+            "the recipe is lemon and confidence. mostly confidence."
         )
     }
 }
