@@ -12,6 +12,15 @@ fun main() {
     check(JobProgress.feedRequest("Like all unliked reels on Instagram Reels") ==
         kudosPlan.copy(app = "instagram", surface = "reels", reaction = JobProgress.Reaction.LIKE))
 
+    // Exact wording from the diagnostics must bypass the general agent and its early DONE.
+    val shorthand = "Please open strava and give kudos to any activity I haven't yet"
+    check(JobProgress.feedRequest(shorthand) == kudosPlan)
+    check(JobProgress.feedRequest("Open Another App and give kudos to every activity that I have not yet") ==
+        kudosPlan.copy(app = "another app"))
+    check(JobProgress.feedRequest("$shorthand and follow the athletes") == null)
+    check(JobProgress.feedRequest("Open Strava and give kudos to one activity I haven't yet") == null)
+    check(JobProgress.feedRequest("Open Strava and give kudos to any activity I haven't finished yet") == null)
+
     val selective = JobProgress.FeedRequest("instagram", "reels", JobProgress.FeedMode.CURATE, JobProgress.Reaction.LIKE, JobProgress.BrowseLimit())
     check(JobProgress.feedRequest("Doomscroll Instagram Reels and like any you want") == selective)
     check(JobProgress.feedRequest("Browse Instagram Reels for me and like the reels you enjoy") == selective)
@@ -73,25 +82,18 @@ fun main() {
     check(like("Like", checked = true) == JobProgress.ReactionState.APPLIED)
     check(like("Give kudos", "277 likes") == JobProgress.ReactionState.UNKNOWN)
 
-    val feed = JobProgress.FeedCoverage()
-    val checkNext = JobProgress.FeedCheck.CHECK_NEXT
-    val complete = JobProgress.FeedCheck.COMPLETE
-    val blank = JobProgress.FeedCheck.NO_RECOGNIZED_CONTROLS
-    check(feed.observe("top", 0, 2) == checkNext)
-    check(feed.observe("second", 0, 2) == checkNext)
-    check(feed.observe("second", 0, 2) == checkNext)
-    check(feed.clean == 2)
-    // Regression: advancing through three screens with no kudos controls must not stop
-    // the scan or carry over its completion streak. A later control remains eligible.
-    repeat(4) { check(feed.observe("no controls $it", 0, 0) == blank) }
-    check(feed.clean == 0)
-    check(feed.observe("missed activity", 1, 2) == JobProgress.FeedCheck.READY)
-    check(feed.observe("missed activity", 0, 3) == checkNext)
-    check(feed.clean == 0)
-    check(feed.observe("clean 1", 0, 1) == checkNext)
-    check(feed.observe("clean 2", 0, 2) == checkNext)
-    check(feed.observe("clean 3", 0, 2) == complete)
-    check(feed.observe("clean 1", 0, 1) == checkNext)
+    // A run with blank or already-reacted screens can still reach a later eligible card.
+    val feed = JobProgress.FeedTraversal()
+    val viewports = listOf("first ready", "no controls 1", "no controls 2", "no controls 3",
+        "already applied 1", "already applied 2", "already applied 3", "another ready")
+    check(feed.enter(viewports.first()))
+    for ((before, after) in viewports.zipWithNext()) {
+        check(feed.movement(before, after) == JobProgress.FeedMovement.NEW_VIEWPORT)
+        check(feed.enter(after))
+    }
+    check(feed.movement(viewports.last(), viewports.last()) == JobProgress.FeedMovement.UNCHANGED)
+    check(feed.movement(viewports.last(), viewports.first()) == JobProgress.FeedMovement.REVISIT)
+    check(!feed.enter(viewports.first()))
 
     check(JobProgress.needsWebDestination("Look up all the mods 9 in the browser and open the download page"))
     check(JobProgress.needsWebDestination("Google NASA and open the first result"))
@@ -135,21 +137,16 @@ fun main() {
     jobs.cancel()
     check(!jobs.current(nextJob)) // suppress an already-posted completion after Stop
 
-    val movingFeed = JobProgress.FeedCoverage()
     val visits = JobProgress.RecentVisits()
     val retries = JobProgress.FailureStreak()
     repeat(500) { index ->
         check(visits.add("screen $index"))
-        check(movingFeed.observe("screen $index", available = 1, given = 2) == JobProgress.FeedCheck.READY)
         // A transient miss in every viewport must not accumulate into a global cap.
         check(!retries.record(false))
         check(!retries.record(true))
     }
     check(!visits.add("screen 499")) // recent loop is detected
     check(!visits.contains("screen 0")) // long runs have bounded tracking memory
-    check(movingFeed.observe("clean A", 0, 2) == checkNext)
-    check(movingFeed.observe("clean B", 0, 2) == checkNext)
-    check(movingFeed.observe("clean C", 0, 2) == complete)
     check(!retries.record(false))
     check(!retries.record(false))
     check(retries.record(false))
