@@ -47,9 +47,12 @@ object Agent {
     fun running(): Boolean = job != null
 
     /**
-     * Stops the job at the next step. A cancelled job says nothing at the end, but the
-     * diagnostics record still has to say why it went quiet — otherwise a job that was
-     * talked over reads as one that simply gave up after two steps.
+     * Stops the job before its next action. A step already in flight cannot be undone, but the
+     * answer the model is part-way through choosing is thrown away rather than acted on.
+     *
+     * A cancelled job says nothing at the end, but the diagnostics record still has to say why
+     * it went quiet — otherwise a job that was talked over reads as one that simply gave up
+     * after two steps.
      */
     fun cancel() {
         if (job == null) return
@@ -160,6 +163,13 @@ object Agent {
                     return
                 }
 
+                // Cancelled while the model was thinking: its answer must not be acted on. The
+                // check at the top of the loop is not enough, because deciding is the slow
+                // part — Stop, a new message or the service going away all land in the middle
+                // of that call, and the answer that follows would otherwise press a button on
+                // a job the user has already ended. This is the last moment before the phone
+                // is touched, so this is where it has to be checked.
+                if (!alive()) return
                 val outcome = perform(ctx, decision, screen)
                 val landed = !outcome.startsWith(FAILED)
                 history.append(steps + 1).append(". ").append(decision.summary(screen))
