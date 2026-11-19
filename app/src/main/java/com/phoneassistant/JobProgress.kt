@@ -5,7 +5,6 @@ import kotlin.random.Random
 
 /** Local routing and stopping rules; no model or Android runtime required. */
 internal object JobProgress {
-    const val CLEAN_SCREENS = 3
     const val FAILURES_BEFORE_STOP = 3
 
     enum class FeedMode { ALL_MISSING, CURATE }
@@ -53,7 +52,12 @@ internal object JobProgress {
     private const val ITEMS = "(?:activity|activities|posts?|reels?|videos?|items?|shorts?)"
     private const val SCOPE = "(?:any|all|every|each)"
     private const val MISSING = "(?:that )?(?:i )?(?:have not|haven't|never|have never) (?:already )?"
-    private val kudosCommand = Regex("give kudos to $SCOPE $ITEMS ${MISSING}given kudos to(?: yet)?")
+    // Whole-command match: "I haven't yet" can refer back to "give kudos" without
+    // repeating the verb. Don't expand one-off requests or commands with other actions.
+    private val kudosCommand = Regex(
+        "give kudos to $SCOPE $ITEMS (?:${MISSING}given kudos to(?: yet)?|" +
+            "(?:that )?(?:i )?(?:haven't|have not) yet)"
+    )
     private val likeCommand = Regex("like $SCOPE (?:unliked $ITEMS|$ITEMS ${MISSING}liked(?: yet)?)")
     private val openApp = Regex("open(?: up)? (.+?),? and (.+)")
     private val appFirst = Regex("(?:in|on) (.+?), (.+)")
@@ -211,27 +215,18 @@ internal object JobProgress {
         }
     }
 
-    enum class FeedCheck { READY, NO_RECOGNIZED_CONTROLS, CHECK_NEXT, COMPLETE }
+    enum class FeedMovement { NEW_VIEWPORT, REVISIT, UNCHANGED }
 
-    class FeedCoverage {
-        var clean = 0
-            private set
-        private var last: String? = null
+    /** Tracks movement, not reaction availability: an already-reacted card isn't the end. */
+    class FeedTraversal {
         private val visited = RecentVisits()
 
-        // Observe before pressing, so our own changes don't count as a clean viewport.
-        // No controls isn't evidence of completion or a stalled scroll: long posts, ads,
-        // and sections without reactions may take up several otherwise distinct screens.
-        fun observe(viewport: String, available: Int, given: Int): FeedCheck {
-            if (viewport == last) return FeedCheck.CHECK_NEXT
-            last = viewport
-            clean = if (visited.add(viewport) && available == 0 && given > 0) clean + 1 else 0
-            return when {
-                available > 0 -> FeedCheck.READY
-                given == 0 -> FeedCheck.NO_RECOGNIZED_CONTROLS
-                clean >= CLEAN_SCREENS -> FeedCheck.COMPLETE
-                else -> FeedCheck.CHECK_NEXT
-            }
+        fun enter(viewport: String): Boolean = visited.add(viewport)
+
+        fun movement(previous: String, next: String): FeedMovement = when {
+            next == previous -> FeedMovement.UNCHANGED
+            visited.contains(next) -> FeedMovement.REVISIT
+            else -> FeedMovement.NEW_VIEWPORT
         }
     }
 

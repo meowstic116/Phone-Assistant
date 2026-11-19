@@ -3,8 +3,8 @@ package com.phoneassistant
 import android.content.Context
 import android.os.Build
 import android.os.SystemClock
-import com.phoneassistant.JobProgress.FeedCheck
 import com.phoneassistant.JobProgress.FeedMode
+import com.phoneassistant.JobProgress.FeedMovement
 import com.phoneassistant.JobProgress.FeedRequest
 import com.phoneassistant.JobProgress.ReactionState
 import org.json.JSONArray
@@ -41,8 +41,7 @@ internal object FeedRunner {
         fun remaining() = session?.remainingMs(SystemClock.elapsedRealtime())
         fun active() = jobActive() && remaining() != 0L
         fun pause(ms: Long) = SystemClock.sleep(minOf(ms, remaining() ?: ms))
-        val coverage = JobProgress.FeedCoverage()
-        val visited = JobProgress.RecentVisits()
+        val traversal = JobProgress.FeedTraversal()
         val reactionFailures = JobProgress.FailureStreak()
         var screens = 0
         var applied = 0
@@ -131,7 +130,7 @@ internal object FeedRunner {
         }
         while (active()) {
             val viewport = fingerprint(screen)
-            if (!visited.add(viewport)) return report("The feed showed a screen I'd already checked.", "revisited a viewport")
+            if (!traversal.enter(viewport)) return report("The feed showed a screen I'd already checked.", "revisited a viewport")
             // Some feeds populate their buttons after the card text. Recheck once without
             // touching anything, and use the new read only if it is still the same viewport.
             if (bulk && screen.items.none { state(it) != ReactionState.UNKNOWN }) {
@@ -144,20 +143,13 @@ internal object FeedRunner {
             val alreadyApplied = screen.items.filter { state(it) == ReactionState.APPLIED }.distinctBy { it.bounds }.size
             screens++
             sawControls = sawControls || eligible.isNotEmpty() || alreadyApplied > 0
-            val check = if (bulk) coverage.observe(viewport, eligible.size, alreadyApplied) else null
-            Diag.jobStep(
-                mine, "check feed screen $screens",
-                "${eligible.size} ready, $alreadyApplied already applied" + when (check) {
-                    FeedCheck.NO_RECOGNIZED_CONTROLS -> "; skipping this viewport, looking farther down the feed"
-                    null -> ""
-                    else -> "; ${coverage.clean} clean screens in a row"
-                },
-                true
-            )
-            if (check == FeedCheck.COMPLETE) return report(
-                "The last ${JobProgress.CLEAN_SCREENS} distinct screens showed only already-applied reaction controls.",
-                "consecutive clean feed screens"
-            )
+            val scanNote = when {
+                !bulk || eligible.isNotEmpty() -> ""
+                alreadyApplied == 0 -> "; no recognizable controls, looking farther down the feed"
+                else -> "; already applied here, looking farther down the feed"
+            }
+            Diag.jobStep(mine, "check feed screen $screens",
+                "${eligible.size} ready, $alreadyApplied already applied$scanNote", true)
 
             var selected = if (!bulk && reaction != null && eligible.isNotEmpty() && choicesAvailable) {
                 val choice = pickLike(ctx, screen, eligible, ::active)
@@ -239,15 +231,14 @@ internal object FeedRunner {
                 val moved = act { Screen.scrollFeed(screen, byTouch = attempt == 1, active = ::active) }
                 if (!active()) return stopped()
                 val below = look() ?: return report("I lost the feed before finishing.", "app changed or became unreadable")
-                val nextFingerprint = fingerprint(below)
-                val changed = nextFingerprint != before && !visited.contains(nextFingerprint)
-                Diag.jobStep(mine, "scroll feed", when {
-                    changed -> "new viewport"
-                    nextFingerprint != before -> "feed returned to an already-checked viewport"
-                    moved -> "scroll accepted but viewport unchanged"
-                    else -> "scroll not accepted"
-                }, changed)
-                if (changed) next = below else screen = below
+                val movement = traversal.movement(before, fingerprint(below))
+                val advanced = movement == FeedMovement.NEW_VIEWPORT
+                Diag.jobStep(mine, "scroll feed", when (movement) {
+                    FeedMovement.NEW_VIEWPORT -> "new viewport"
+                    FeedMovement.REVISIT -> "feed returned to an already-checked viewport"
+                    FeedMovement.UNCHANGED -> if (moved) "scroll accepted but viewport unchanged" else "scroll not accepted"
+                }, advanced)
+                if (advanced) next = below else screen = below
             }
             if (!active()) return stopped()
             screen = next ?: return report(
