@@ -30,6 +30,12 @@ object Agent {
     /** Time for an app to come up before its screen is read. Slower than a tap, by design. */
     private const val OPEN_MS = 1_500L
 
+    /** Time for a page to show its login form after a log-in link is tapped or a scroll. */
+    private const val FORM_WAIT_MS = 1_000L
+
+    /** How many screens down a login form is looked for before he gives up on finding it. */
+    private const val HUNT_TRIES = 2
+
     private val worker = Executors.newSingleThreadExecutor()
 
     /** The job being worked, or null when there is none. */
@@ -84,8 +90,12 @@ object Agent {
         val site = need.site.takeIf { it.isNotBlank() }?.let { " for $it" }.orEmpty()
         Diag.jobEnded(
             mine,
-            if (need.saved) "stopped to ask for a login — no password field to fill$site"
-            else "stopped to ask for a login — none saved$site"
+            when {
+                !need.saved -> "stopped to ask for a login — none saved$site"
+                need.looked ->
+                    "stopped to ask for a login — looked for the form, no password field$site"
+                else -> "stopped to ask for a login — no password field to fill$site"
+            }
         )
     }
 
@@ -388,28 +398,83 @@ object Agent {
      * and never in the history the next step is given — the record names the site, not the
      * account. Nothing on this path can reach the network: [Vault] has no network code, and
      * neither does anything it hands back into.
+     *
+     * With no password box in front he does not give up: the form may be behind the page's own
+     * log-in link, or a screen further down, so he taps and scrolls for it first — on the
+     * device, inside this one step, at no cost to the model. Only when that finds nothing is
+     * the user asked, and then he says he looked.
      */
     private fun signIn(ctx: Context, decision: Decision, screen: Screen.Snapshot): Act {
         val site = decision.site.ifBlank { decision.app }
         val login = Vault.find(ctx, site)
         val missing = "$FAILED no saved login for ${site.ifBlank { "this site" }}"
-        val password = screen.items.firstOrNull { it.password }
-        // A login page in a browser is a web page, not a form of native fields: the fields
-        // inside a web view are not editable views the accessibility service can type into,
-        // so there is nothing here for him to fill. But no password field on screen is also
-        // what a form that has not loaded yet looks like, and a form further up the page, and
-        // a page that is not the login page at all — he cannot tell those apart, so the
-        // outcome says only what he saw. The user is told, and the caller opens the form: a
-        // bare "there is no password field" gave them nothing they could act on, and read as
-        // a fault in the app instead.
-        if (password == null) {
-            return Act(
-                if (login == null) missing
-                else "$FAILED no password field on the screen to fill the saved login into",
-                NeedLogin(site, saved = login != null)
-            )
-        }
+        // Nothing saved: there is no form to look for, because there would be nothing to put
+        // in it. The ask opens the Logins form with the site already in it, and the job can be
+        // picked up from there.
         if (login == null) return Act(missing, NeedLogin(site, saved = false))
+        val password = screen.items.firstOrNull { it.password }
+        if (password != null) return fill(login, screen, password, hunted = false)
+        // No password field in front. A form that has not loaded yet, a login link further up
+        // the page, a page that is not the login page at all and a web page whose fields the
+        // service cannot type into all look the same from here — so he looks before he says
+        // the login could not go in, and then says only what he found.
+        lookForForm(login, screen)?.let { return it }
+        return Act(
+            "$FAILED no password field here, or behind a log-in link or a scroll",
+            NeedLogin(site, saved = true, looked = true)
+        )
+    }
+
+    /**
+     * Looks for the form when there is no password box in front: the page's own log-in link
+     * first, then a couple of screens of scrolling, reading the screen again after each. The
+     * finished step comes back when a form turns up, or null when the screen has nothing more
+     * to show.
+     *
+     * This runs inside a step, so his own windows are already ducked for it — every press here
+     * is protected the same way the step's own press is. A link is only ever tapped once, so a
+     * page whose "Log in" does nothing cannot be tapped round in circles.
+     */
+    private fun lookForForm(login: Vault.Login, first: Screen.Snapshot): Act? {
+        var screen = first
+        var tapped = false
+        repeat(HUNT_TRIES) {
+            val link = loginLink(screen)
+            if (link != null && !tapped && Screen.tap(link)) {
+                tapped = true
+                SystemClock.sleep(FORM_WAIT_MS)
+                screen = Screen.snapshot() ?: return null
+                screen.items.firstOrNull { it.password }
+                    ?.let { return fill(login, screen, it, hunted = true) }
+            }
+            // Further down, and further down once more. Something that will not scroll has
+            // nothing below it to look at.
+            if (!Screen.scroll(true, null)) return null
+            SystemClock.sleep(FORM_WAIT_MS)
+            screen = Screen.snapshot() ?: return null
+            screen.items.firstOrNull { it.password }
+                ?.let { return fill(login, screen, it, hunted = true) }
+        }
+        return null
+    }
+
+    /** Something on the screen that reads like the way into a login form. */
+    private fun loginLink(screen: Screen.Snapshot): Screen.Item? =
+        screen.items.firstOrNull { item ->
+            !item.password && !item.editable &&
+                LOGIN_WORDS.containsMatchIn(item.label.lowercase())
+        }
+
+    /**
+     * Fills the form in front with the saved login. [hunted] is for the step's record alone:
+     * a form he went looking for is worth saying he found.
+     */
+    private fun fill(
+        login: Vault.Login,
+        screen: Screen.Snapshot,
+        password: Screen.Item,
+        hunted: Boolean
+    ): Act {
         // The nearest field above the password box is the account name on every login form
         // worth the name; a page that only wants a password gets no username typed at all.
         val username = screen.items
@@ -422,16 +487,19 @@ object Agent {
         if (!Screen.type(password, login.password, secret = true)) {
             return Act("$FAILED the sign-in form would not take the password")
         }
-        return Act("filled in the saved login for ${login.site}")
+        return Act(
+            if (hunted) "found the login form and filled in the saved login for ${login.site}"
+            else "filled in the saved login for ${login.site}"
+        )
     }
 
     /**
-     * A login the user has to sort out for him: the [site], and whether he already holds one
-     * for it. A saved login with no field on screen to put it in is a different thing to say
-     * than never having been given one at all — and neither is the same as knowing why the
-     * field was missing, which he does not.
+     * A login the user has to sort out for him: the [site], whether he already holds one for
+     * it, and whether he looked for the form before saying so. A saved login with no field on
+     * screen is a different thing to say than never having been given one at all — and one he
+     * looked for and could not find is a different thing again.
      */
-    class NeedLogin(val site: String, val saved: Boolean)
+    class NeedLogin(val site: String, val saved: Boolean, val looked: Boolean = false)
 
     /** One step's outcome, and the login to ask the user for when a sign-in could not be done. */
     private class Act(val outcome: String, val askLogin: NeedLogin? = null)
@@ -524,6 +592,9 @@ object Agent {
         "$FAILED his own window would not get out of the way in time"
     private const val DONE = "done"
 
+    /** The words a page or an app puts on the way into its login form. */
+    private val LOGIN_WORDS = Regex("\\b(log ?in|login|log ?on|sign ?in|signin)\\b")
+
     // Why a job stopped, in the words the diagnostics record uses. Separate from what he
     // says, because the two answer different questions: the bubble is for the user, the
     // reason is for working out what to change.
@@ -583,10 +654,12 @@ object Agent {
           password field is only ever filled from a saved login. Never pay, buy, confirm a
           purchase or delete something the user did not name — if the task needs that, stop
           with done and say why, briefly.
-        - A sign-in screen is what sign_in is for. If it answers that there is no saved login,
-          or that there was no password field to fill, stop with done and say so in one line:
-          the user will be asked instead. Do not ask for a password in the chat, do not guess
-          at one, and do not try to type it yourself.
+        - A sign-in screen is what sign_in is for. It looks behind the page's own log-in link
+          and a scroll or two by itself, so do not hunt for a form before using it. If it
+          answers that there is no saved login, or that there is no password field anywhere it
+          could look, stop with done and say so in one line: the user will be asked instead.
+          Do not ask for a password in the chat, do not guess at one, and do not try to type it
+          yourself.
         - If the request is not a phone job at all, answer it in "say" with done.
     """.trimIndent()
 

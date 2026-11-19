@@ -177,7 +177,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.71-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.72-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
@@ -252,14 +252,17 @@ that means:
   rather than watch you do it.
 - A login page in a browser is a web page, not a form of native fields, and the fields
   inside a web view are not editable views the accessibility service can type into. So a
-  saved login cannot be filled into one. He cannot tell a web page from a form that has not
-  loaded yet or from a login link further up the page — all three look like a screen with no
-  password box on it — so he says only what he actually saw: that there is no password field
-  here, and that the login is still saved. The **Logins** form then opens with the site filled
-  in, instead of the step ending on a bare error with nothing to act on. Diagnostics records
-  that stop as its own reason, "stopped to ask for a login", rather than as a cancellation.
-  Sign-in works in apps, and in a browser only where the site puts real editable fields on
-  screen.
+  saved login cannot be filled into one. Before he says that, he looks for the form himself:
+  he taps a visible **log in** / **sign in** link and scrolls down a couple of screens,
+  reading the screen again after each, and fills the login if it turns up — on the phone,
+  inside the same step, at no extra API cost. Only when that finds nothing does he say what
+  he actually saw: that he looked and there is no password box here, and that the login is
+  still saved. The **Logins** form then opens with the site filled in, instead of the step
+  ending on a bare error with nothing to act on — and saving a login there picks the job back
+  up as soon as you are out of that screen (within a minute of leaving it), starting the
+  request again from the top. Diagnostics records that stop as its own reason, "stopped to ask
+  for a login", rather than as a cancellation. Sign-in works in apps, and in a browser only
+  where the site puts real editable fields on screen.
 - Deleting an entry deletes it; uninstalling the app takes the whole vault with it. A vault
   that cannot be decrypted — a restore onto a new phone, since the key stays behind — reads as
   empty and says so in Diagnostics rather than failing silently.

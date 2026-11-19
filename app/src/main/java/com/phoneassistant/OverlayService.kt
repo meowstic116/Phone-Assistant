@@ -130,14 +130,18 @@ class OverlayService : Service(), PropHost {
 
         /**
          * A login was just saved from the form he opened for it, so he has an answer in the
-         * bubble instead of the form closing into silence.
+         * bubble instead of the form closing into silence — and, when that form was opened by
+         * a job that stopped for it, the job is picked back up once the user leaves the screen.
          */
         fun loginSaved(site: String) {
-            instance?.sayAloud(
-                if (site.isBlank()) {
-                    "saved. I'll use it next time."
-                } else {
-                    "saved the login for ${Vault.host(site)}. name the job and I'll sign in."
+            val service = instance ?: return
+            service.sayAloud(
+                when {
+                    service.armResume() ->
+                        "saved. I'll pick that job back up once you're out of this screen."
+                    site.isBlank() -> "saved. I'll use it next time."
+                    else ->
+                        "saved the login for ${Vault.host(site)}. name the job and I'll sign in."
                 }
             )
         }
@@ -155,6 +159,12 @@ class OverlayService : Service(), PropHost {
 
         /** How often the cancel chip checks that there is still a job to cancel. */
         private const val JOB_REFRESH_MS = 300L
+
+        /** How long a saved login keeps the stopped job waiting to be picked back up. */
+        private const val RESUME_WINDOW_MS = 60_000L
+
+        /** How often the way out of the Logins screen is checked. */
+        private const val RESUME_POLL_MS = 400L
 
         fun status(): Status? = instance?.status()
 
@@ -243,6 +253,19 @@ class OverlayService : Service(), PropHost {
     /** The cancel chip, while a phone job is running. */
     private var jobBar: JobBar? = null
     private var jobBarParams: WindowManager.LayoutParams? = null
+
+    /**
+     * The job that stopped to ask for a login, kept so the login the user is about to save can
+     * pick it back up. Cleared by a new job, a new message, or by the ask being answered.
+     */
+    private var loginJob: String? = null
+
+    /**
+     * A stopped job waiting for the user to leave the Logins screen, and the moment it stops
+     * waiting. Starting it while that screen is in front would read Pip's own form.
+     */
+    private var resumeJob: String? = null
+    private var resumeBy = 0L
 
     /**
      * Where the chip was left after a drag, as a fraction of the room it has to move in. Null
@@ -609,6 +632,9 @@ class OverlayService : Service(), PropHost {
         // A job outlives no service: its next step would be acting on a screen nothing is
         // watching any more.
         Agent.cancel()
+        // Nor does a login it was waiting for, nor a job waiting on that login.
+        loginJob = null
+        resumeJob = null
         ImeWatch.onChange = null
         keyboardUp = false
         pet?.let { view -> runCatching { windowManager.removeView(view) } }
@@ -1543,6 +1569,9 @@ class OverlayService : Service(), PropHost {
         // A new message outranks whatever he was doing with his hands: half-finished work in
         // another app would be acting on an instruction the user has already replaced.
         Agent.cancel()
+        // And the login a stopped job asked for is no longer what the user is being asked
+        // about, so saving one now must not start that job again.
+        loginJob = null
         // His answer takes priority from this moment on, so the toys' own lines stay quiet.
         beginReply()
         // Thinking comes before the toys act. The other way round, thinking cancelled the
@@ -1589,6 +1618,8 @@ class OverlayService : Service(), PropHost {
         // The chat model has answered, so nothing is waiting on it any more: the toys may
         // talk again while the job runs.
         awaitingReply = false
+        // A job of its own replaces any login a stopped one was waiting for.
+        loginJob = null
         val started = Agent.start(
             this,
             job,
@@ -1608,8 +1639,9 @@ class OverlayService : Service(), PropHost {
             onAct = { touching -> duckOverlay(touching) },
             // A step wanted a login he could not supply. The ask comes from the main looper,
             // like everything else that touches a window, and the password itself is never
-            // anything he has seen: it will be typed into the form by the user.
-            onNeedLogin = { need -> handler.post { if (running) askForLogin(need) } }
+            // anything he has seen: it will be typed into the form by the user. The job is
+            // kept with the ask, so the login they save can pick it back up.
+            onNeedLogin = { need -> handler.post { if (running) askForLogin(need, job) } }
         )
         if (!started) {
             hideJobBar()
@@ -1637,23 +1669,29 @@ class OverlayService : Service(), PropHost {
      * The job has already stopped itself by the time this runs — the agent ends it the moment
      * the step comes back with an ask — because the form is about to be the screen in front,
      * and a next step would read Pip's own login form and start pressing about in it. All this
-     * has to do is say the line, in the words the ask actually earned.
+     * has to do is say the line, in the words the ask actually earned, remember what the job
+     * was, and open the form.
      */
-    private fun askForLogin(need: Agent.NeedLogin) {
+    private fun askForLogin(need: Agent.NeedLogin, task: String) {
+        // A job the user started since this ask was posted owns the screen; a login form
+        // opening over it would be worse than the ask going unsaid.
+        if (Agent.running()) return
+        // Kept, so the login they are about to save is one he can act on at once.
+        loginJob = task
         val host = Vault.host(need.site)
+        // A saved login he could not put in. He has already looked behind the page's own log-in
+        // link and a scroll or two, so the line says that much and no more: a web page, a form
+        // that never appeared and a link he could not see all look the same from here, and
+        // naming one of them would be a guess. Nothing has been lost, and he says that too —
+        // it is the part the user needs to know.
+        val seen =
+            if (need.looked) "I looked, and there's no password box here"
+            else "I couldn't find a password box here"
         sayAloud(
             when {
-                // A saved login he could not put in because there was no password field on
-                // screen. A web page is the likeliest reason, but a form that has not loaded
-                // yet and a login link further up the page look exactly the same from here,
-                // so the line names what he saw and not what he guessed. Nothing has been
-                // lost, and he says that too — it is the part the user needs to know.
-                need.saved && host.isNotEmpty() ->
-                    "I couldn't find a password box here, so your $host login didn't go in. " +
-                        "it's still saved."
-                need.saved ->
-                    "I couldn't find a password box here, so your login didn't go in. " +
-                        "it's still saved."
+                need.saved -> "$seen, so " +
+                    (if (host.isEmpty()) "your login" else "your $host login") +
+                    " didn't go in. it's still saved."
                 host.isEmpty() -> "I don't have a login for that. give me one and I'll use it."
                 else -> "I don't have a login for $host. give me one and I'll use it."
             }
@@ -1665,6 +1703,54 @@ class OverlayService : Service(), PropHost {
         // His own app asking for a login is exactly the kind of start the overlay permission
         // allows; if the system refuses anyway, the bubble has already said where to go.
         runCatching { startActivity(form) }
+    }
+
+    /**
+     * Stands the stopped job back up, now that the login it was waiting for is saved. It is not
+     * started here: the Logins form is the screen in front, and a job started on it would read
+     * Pip's own form and press about in it. So this watches for the moment the user leaves that
+     * screen — the only signal there is that they are back on the page they asked about — and
+     * gives up if the minute after it passes with no job.
+     *
+     * False when no job was waiting for a login, which is the ordinary case.
+     */
+    private fun armResume(): Boolean {
+        val task = loginJob ?: return false
+        loginJob = null
+        resumeJob = task
+        resumeBy = SystemClock.uptimeMillis() + RESUME_WINDOW_MS
+        handler.removeCallbacks(resumeWatch)
+        handler.post(resumeWatch)
+        return true
+    }
+
+    /** Watches for the way out of the Logins screen, then hands the job back to his hands. */
+    private val resumeWatch = object : Runnable {
+        override fun run() {
+            val task = resumeJob ?: return
+            // No hands, no job: there is nothing left to pick up with.
+            if (!Screen.available()) {
+                resumeJob = null
+                return
+            }
+            val front = Screen.inFront()
+            // Still in his own screens: the way out has not happened yet, and a step taken now
+            // would read the Logins form. The minute is only spent once the user is actually
+            // elsewhere, so filling the form in slowly costs nothing.
+            if (front == null || front == packageName) {
+                resumeBy = SystemClock.uptimeMillis() + RESUME_WINDOW_MS
+                handler.postDelayed(this, RESUME_POLL_MS)
+                return
+            }
+            if (SystemClock.uptimeMillis() > resumeBy) {
+                resumeJob = null
+                return
+            }
+            resumeJob = null
+            // A job the user started meanwhile is the one they want, not this one.
+            if (Agent.running()) return
+            startJob(task)
+        }
     }
 
     // --------------------------------------------------------------------- job bar
