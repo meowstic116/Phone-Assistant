@@ -1606,10 +1606,10 @@ class OverlayService : Service(), PropHost {
             // return until they really are out of the way — a gesture dispatched before the
             // window was updated is exactly the press the duck is there to protect.
             onAct = { touching -> duckOverlay(touching) },
-            // A step wanted a login he does not have. The ask comes from the main looper,
+            // A step wanted a login he could not supply. The ask comes from the main looper,
             // like everything else that touches a window, and the password itself is never
             // anything he has seen: it will be typed into the form by the user.
-            onNeedLogin = { site -> handler.post { if (running) askForLogin(site) } }
+            onNeedLogin = { need -> handler.post { if (running) askForLogin(need) } }
         )
         if (!started) {
             hideJobBar()
@@ -1630,18 +1630,29 @@ class OverlayService : Service(), PropHost {
     }
 
     /**
-     * A step needed a login for [site] and there is none saved. He says so in one line and
-     * opens the form with the site already in it, because Android will not let him read a
-     * password the user types into a site — asking here is the only way to remember one.
+     * A step needed a login and could not do without one. He says so in one line and opens the
+     * form with the site already in it, because Android will not let him read a password the
+     * user types into a site — asking here is the only way to remember one.
+     *
+     * The job stops here rather than carrying on: the form is now the screen in front, and a
+     * next step would read Pip's own login form and start pressing about in it, which is the
+     * one screen he should never be working blind.
      */
-    private fun askForLogin(site: String) {
+    private fun askForLogin(need: Agent.NeedLogin) {
+        val host = Vault.host(need.site)
         sayAloud(
-            if (site.isBlank()) {
-                "I don't have a login for that. give me one and I'll use it."
-            } else {
-                "I don't have a login for ${Vault.host(site)}. give me one and I'll use it."
+            when {
+                // A saved login that would not go in: the page is a web page, which is the one
+                // kind of form he cannot type into. Nothing has been lost, so the line says so.
+                need.saved && host.isNotEmpty() ->
+                    "that's a web page, so I can't type your $host login in. it's still saved."
+                need.saved -> "that's a web page, so I can't type your login in. it's still saved."
+                host.isEmpty() -> "I don't have a login for that. give me one and I'll use it."
+                else -> "I don't have a login for $host. give me one and I'll use it."
             }
         )
+        Agent.cancel()
+        val site = need.site
         val form = Intent(this, VaultActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (site.isNotBlank()) form.putExtra(VaultActivity.EXTRA_SITE, site)

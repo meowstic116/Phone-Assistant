@@ -79,10 +79,6 @@ object Vault {
         write(ctx, all(ctx).filterNot { host(it.site) == host(site) })
     }
 
-    fun clear(ctx: Context) {
-        write(ctx, emptyList())
-    }
-
     /**
      * The site as a host: lower case, no scheme, no "www.", no port, no path. It is only used
      * to match one entry with another, so a login saved from a link the user pasted still

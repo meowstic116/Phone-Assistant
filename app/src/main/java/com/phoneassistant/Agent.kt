@@ -89,8 +89,9 @@ object Agent {
      * that has actually happened; false means the overlay could not get out of the way, and
      * no press is made.
      *
-     * [onNeedLogin] fires when a step wanted a saved login and there is none for that site:
-     * it gets the site, and asking the user for one is the caller's business.
+     * [onNeedLogin] fires when a step wanted a login it could not supply for itself — there is
+     * none saved for that site, or the page will not take one — and asking the user is the
+     * caller's business.
      */
     fun start(
         ctx: Context,
@@ -98,7 +99,7 @@ object Agent {
         onSay: (String) -> Unit,
         onDone: (String) -> Unit,
         onAct: (Boolean) -> Boolean,
-        onNeedLogin: (String) -> Unit
+        onNeedLogin: (NeedLogin) -> Unit
     ): Boolean {
         if (job != null) return false
         if (!Screen.available()) return false
@@ -119,7 +120,7 @@ object Agent {
         onSay: (String) -> Unit,
         onDone: (String) -> Unit,
         onAct: (Boolean) -> Boolean,
-        onNeedLogin: (String) -> Unit
+        onNeedLogin: (NeedLogin) -> Unit
     ) {
         // Still the job the user is waiting on? A cancelled or replaced job is silent.
         fun alive(): Boolean = ticket.get() == mine
@@ -218,8 +219,8 @@ object Agent {
                     Diag.jobStep(mine, decision.summary(screen), outcome, landed, skipped)
                     steps++
                     if (landed) SystemClock.sleep(SETTLE_MS)
-                    // A sign-in he has no login for: the record is written first, then the
-                    // user is asked, so the bubble and the record tell the same story.
+                    // A sign-in he could not do himself: the record is written first, then
+                    // the user is asked, so the bubble and the record tell the same story.
                     val ask = act.askLogin
                     if (ask != null) onNeedLogin(ask)
                 } finally {
@@ -362,12 +363,21 @@ object Agent {
     private fun signIn(ctx: Context, decision: Decision, screen: Screen.Snapshot): Act {
         val site = decision.site.ifBlank { decision.app }
         val login = Vault.find(ctx, site)
-            ?: return Act(
-                "$FAILED no saved login for ${site.ifBlank { "this site" }}",
-                askLogin = site
-            )
+        val missing = "$FAILED no saved login for ${site.ifBlank { "this site" }}"
         val password = screen.items.firstOrNull { it.password }
-            ?: return Act("$FAILED there is no password field on this screen")
+        // A login page in a browser is a web page, not a form of native fields: the fields
+        // inside a web view are not editable views the accessibility service can type into,
+        // so there is nothing here for him to fill and no saved login that would go in. The
+        // user is told, and the caller opens the form — a bare "there is no password field"
+        // gave them nothing they could act on, and read as a fault in the app instead.
+        if (password == null) {
+            return Act(
+                if (login == null) missing
+                else "$FAILED this is a web page, so the login cannot be typed into it",
+                NeedLogin(site, saved = login != null)
+            )
+        }
+        if (login == null) return Act(missing, NeedLogin(site, saved = false))
         // The nearest field above the password box is the account name on every login form
         // worth the name; a page that only wants a password gets no username typed at all.
         val username = screen.items
@@ -383,8 +393,15 @@ object Agent {
         return Act("filled in the saved login for ${login.site}")
     }
 
-    /** One step's outcome, and the site to ask for a login to when none is saved. */
-    private class Act(val outcome: String, val askLogin: String? = null)
+    /**
+     * A login the user has to sort out for him: the [site], and whether he already holds one
+     * for it. A saved login that would not go in is a page he cannot type into, which is a
+     * different thing to say than never having been given one at all.
+     */
+    class NeedLogin(val site: String, val saved: Boolean)
+
+    /** One step's outcome, and the login to ask the user for when a sign-in could not be done. */
+    private class Act(val outcome: String, val askLogin: NeedLogin? = null)
 
     // --------------------------------------------------------------- the decision
 
@@ -534,8 +551,9 @@ object Agent {
           purchase or delete something the user did not name — if the task needs that, stop
           with done and say why, briefly.
         - A sign-in screen is what sign_in is for. If it answers that there is no saved login,
-          stop and say so in one line: the user will be asked for one. Do not ask them for a
-          password in the chat, and do not guess at one.
+          or that the page is a web page it cannot type into, stop with done and say so in one
+          line: the user will be asked instead. Do not ask for a password in the chat, do not
+          guess at one, and do not try to type it yourself.
         - If the request is not a phone job at all, answer it in "say" with done.
     """.trimIndent()
 
