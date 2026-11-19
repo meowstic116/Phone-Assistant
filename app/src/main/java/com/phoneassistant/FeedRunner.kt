@@ -7,6 +7,8 @@ import com.phoneassistant.JobProgress.FeedMode
 import com.phoneassistant.JobProgress.FeedMovement
 import com.phoneassistant.JobProgress.FeedRequest
 import com.phoneassistant.JobProgress.ReactionState
+import com.phoneassistant.Screen.ReactionPress
+import kotlin.math.abs
 import org.json.JSONArray
 import java.util.concurrent.Future
 import java.util.concurrent.RejectedExecutionException
@@ -20,6 +22,9 @@ internal object FeedRunner {
     private const val SETTLE_MS = 700L
     private const val READ_WAIT_MS = 500L
     private const val CONTROL_READ_WAIT_MS = 350L
+    private const val SAMPLE_MS = 225L
+    private const val SETTLE_SAMPLES = 8
+    private const val UNCHANGED_SAMPLES = 6
     // A slow or abandoned request can't hold up Stop or the browse deadline. Don't queue
     // more work behind an HTTP call that hasn't responded to interruption yet.
     private val likePicker = ThreadPoolExecutor(0, 1, 15, TimeUnit.SECONDS, SynchronousQueue<Runnable>())
@@ -62,15 +67,49 @@ internal object FeedRunner {
         } else report("I stopped before finishing.", "feed scan interrupted")
         fun look() = Screen.snapshot(feed = true)?.takeIf { it.app == app.packageName }
         fun state(item: Screen.Item) = reaction?.let { Screen.reactionState(item, it) } ?: ReactionState.UNKNOWN
-        fun fingerprint(screen: Screen.Snapshot) = screen.items.asSequence()
-            .filter { item ->
-                !item.editable && item.label.isNotBlank() && state(item) == ReactionState.UNKNOWN &&
-                    (bulk || Screen.reactionState(item, JobProgress.Reaction.LIKE) == ReactionState.UNKNOWN)
-            }
-            .map { item ->
-                if (singleItemSurface) item.label
-                else "${item.bounds.flattenToString()}:${item.label}"
+        fun contentItems(screen: Screen.Snapshot) = screen.items.asSequence().filter { item ->
+            !item.editable && item.label.isNotBlank() && state(item) == ReactionState.UNKNOWN &&
+                !JobProgress.reactionSummary(reaction, item.label) &&
+                (bulk || Screen.reactionState(item, JobProgress.Reaction.LIKE) == ReactionState.UNKNOWN)
+        }
+        fun content(screen: Screen.Snapshot) = contentItems(screen).map { it.label }.sorted().toList()
+        fun fingerprint(screen: Screen.Snapshot, includePositions: Boolean = !singleItemSurface) =
+            contentItems(screen).map { item ->
+                if (includePositions) "${item.bounds.flattenToString()}:${item.label}" else item.label
             }.distinct().sorted().joinToString("\n")
+
+        // Check geometry even in reels, where traversal deliberately ignores geometry.
+        // Reaction labels are included in this settle test, but not in the travel fingerprint.
+        fun frame(screen: Screen.Snapshot) = fingerprint(screen, includePositions = true) + "\u0000" +
+            screen.items.asSequence().mapNotNull { item ->
+                val status = state(item)
+                if (status == ReactionState.UNKNOWN) null else "${item.bounds.flattenToString()}:$status"
+            }.sorted().joinToString("\n")
+
+        fun settled(window: Int, previousViewport: String? = null): Screen.Snapshot? {
+            val stable = JobProgress.StableFeedRead()
+            repeat(SETTLE_SAMPLES) { attempt ->
+                if (!active()) return null
+                val sample = look()?.takeIf { it.items.isNotEmpty() && it.windowId == window }
+                val unchanged = previousViewport != null && sample?.let { fingerprint(it) == previousViewport } == true
+                // An accepted scroll may start late: allow extra observation time before retrying it.
+                val needed = if (unchanged) UNCHANGED_SAMPLES else 2
+                if (stable.observe(sample?.let(::frame), needed)) return sample
+                if (attempt < SETTLE_SAMPLES - 1) pause(SAMPLE_MS)
+            }
+            return null
+        }
+
+        val driftPx = 32f * ctx.resources.displayMetrics.density
+        fun sameControl(original: Screen.Item, probe: Screen.Item): Boolean =
+            original.role == probe.role && original.id == probe.id && when {
+                // Node identity survives ordinary re-layout. Limit drift to avoid confusing a
+                // recycled feed item with the original control after an actual scroll.
+                original.node == probe.node -> abs(original.bounds.centerY() - probe.bounds.centerY()) <= driftPx &&
+                    abs(original.bounds.centerX() - probe.bounds.centerX()) <= driftPx
+                else -> original.id != null && original.bounds == probe.bounds
+            }
+
         fun act(block: () -> Boolean): Boolean =
             active() && block().also { if (it) pause(SETTLE_MS) }
 
@@ -128,6 +167,9 @@ internal object FeedRunner {
             onSay("I'll browse ${app.label} for $goal.")
             Diag.jobStep(mine, "browse goal", goal, true)
         }
+        screen = settled(screen.windowId) ?: return if (!active()) stopped() else report(
+            "The feed hadn't settled, so I left it alone.", "feed not stable before scan"
+        )
         while (active()) {
             val viewport = fingerprint(screen)
             if (!traversal.enter(viewport)) return report("The feed showed a screen I'd already checked.", "revisited a viewport")
@@ -176,47 +218,64 @@ internal object FeedRunner {
                 }
                 if (fresh != null) screen = fresh
             }
-            val skipped = mutableSetOf<String>()
-            fun key(item: Screen.Item) = "${item.id}:${item.bounds.flattenToString()}"
+            val attempted = mutableListOf<Screen.Item>()
             while (reaction != null && active()) {
-                val target = (if (bulk) screen.items.firstOrNull { state(it) == ReactionState.READY && key(it) !in skipped }
-                    else selected) ?: break
-                val accepted = act { Screen.pressReaction(target, screen, reaction) }
-                fun changed(after: Screen.Snapshot?): Boolean {
-                    val controls = after?.takeIf { it.windowId == screen.windowId }?.items
-                        ?.filter { it.bounds == target.bounds && it.id == target.id } ?: return false
-                    return controls.any { state(it) == ReactionState.APPLIED } &&
-                        controls.none { state(it) == ReactionState.READY }
-                }
-                // A reaction already dispatched may be verified after the timer expires;
-                // the timer only forbids starting another action.
-                var after = if (accepted && jobActive()) look() else null
-                if (after != null && !changed(after) && active()) {
-                    pause(READ_WAIT_MS)
-                    after = if (jobActive()) look() else null
-                }
-                val confirmed = changed(after)
-                Diag.jobStep(mine, reaction.verb, if (confirmed) "changed to applied" else "not verified", confirmed)
-                if (confirmed) applied++
-                if (!active()) return stopped()
-                if (!confirmed || after == null) {
-                    // A toggle might already have landed even if Android didn't expose the
-                    // changed state. Skip this control instead of risking toggling it back.
-                    skipped += key(target)
-                    if (reactionFailures.record(false)) return report(
-                        "I stopped after several reactions couldn't be verified.", "repeated unverified reactions"
-                    )
-                    // Work off a fresh read before trying a different control. Don't follow
-                    // a modal or changed viewport opened unexpectedly by the first press.
-                    val fresh = after ?: look()
-                    if (fresh == null || fresh.windowId != screen.windowId || fingerprint(fresh) != fingerprint(screen)) {
-                        return report("The feed changed before I could verify the reaction.", "unexpected screen change during reaction")
+                var target = (if (bulk) screen.items.firstOrNull { item ->
+                    state(item) == ReactionState.READY && attempted.none { sameControl(it, item) }
+                } else selected) ?: break
+                val expected = content(screen)
+                val originalScroller = Screen.feedScroller(screen)
+                val window = screen.windowId
+                var press = Screen.pressReaction(target, screen, reaction, ::active)
+                if (press == ReactionPress.STALE && active()) {
+                    // No tap was sent. After settling, allow one fresh attempt at the same
+                    // still-ready control. Never retry a dispatched (even declined) click.
+                    val stable = settled(window)
+                    val fresh = stable?.takeIf { expected.isNotEmpty() && content(it) == expected }
+                        ?.items?.singleOrNull { state(it) == ReactionState.READY && sameControl(target, it) }
+                    if (stable != null && fresh != null) {
+                        screen = stable
+                        target = fresh
+                        press = Screen.pressReaction(target, screen, reaction, ::active)
                     }
-                    screen = fresh
-                } else {
-                    reactionFailures.record(true)
-                    screen = after
                 }
+                if (!active()) return stopped()
+                attempted += target
+                if (press == ReactionPress.ACCEPTED) pause(SETTLE_MS)
+                val after = settled(window)
+                if (!active()) return stopped()
+                val sameContent = after != null && expected.isNotEmpty() && content(after) == expected
+                val controls = after?.items.orEmpty().filter { sameControl(target, it) }
+                    .map(::state).filter { it != ReactionState.UNKNOWN }
+                val confirmed = press == ReactionPress.ACCEPTED && JobProgress.verifiedReaction(sameContent, controls)
+                Diag.jobStep(mine, reaction.verb, when {
+                    confirmed -> "same control changed to applied"
+                    press == ReactionPress.STALE -> "control moved or became unavailable before tap; no tap sent"
+                    press == ReactionPress.DECLINED -> "Android declined the accessibility click"
+                    !sameContent -> "click accepted; original activity could not be matched"
+                    controls.isEmpty() -> "click accepted; same control not exposed after the tap"
+                    else -> "click accepted; applied state not observed"
+                }, confirmed)
+                if (confirmed) applied++
+                if (reactionFailures.record(confirmed)) return report(
+                    "I stopped after several reactions couldn't be verified.", "repeated unverified reactions"
+                )
+                if (!sameContent) {
+                    // An in-place redraw can change a few labels. Continue only if the
+                    // same scrolling surface and most visible content are still present.
+                    // Don't count the tap or try any other controls on this changed view.
+                    if (bulk && after != null && originalScroller != null &&
+                        originalScroller.node == Screen.feedScroller(after)?.node &&
+                        JobProgress.similarFeedContent(expected.toSet(), content(after).toSet())
+                    ) {
+                        Diag.jobStep(mine, "recheck feed", "same scrolling surface; skipping this changed view", true)
+                        screen = after
+                        break
+                    }
+                    return report("I couldn't safely match the same feed content after the reaction attempt.",
+                        "original viewport not confirmed after reaction attempt")
+                }
+                screen = checkNotNull(after)
                 if (!bulk) break
             }
             if (!active()) return stopped()
@@ -230,7 +289,9 @@ internal object FeedRunner {
                 if (next != null || !active()) return@repeat
                 val moved = act { Screen.scrollFeed(screen, byTouch = attempt == 1, active = ::active) }
                 if (!active()) return stopped()
-                val below = look() ?: return report("I lost the feed before finishing.", "app changed or became unreadable")
+                val below = settled(screen.windowId, previousViewport = before) ?: return if (!active()) stopped() else report(
+                    "The feed was still moving or no longer readable, so I didn't scroll again.", "feed not stable after scroll"
+                )
                 val movement = traversal.movement(before, fingerprint(below))
                 val advanced = movement == FeedMovement.NEW_VIEWPORT
                 Diag.jobStep(mine, "scroll feed", when (movement) {

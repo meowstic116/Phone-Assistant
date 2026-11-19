@@ -311,12 +311,19 @@ object Screen {
         } else result
     }
 
+    internal enum class ReactionPress { STALE, DECLINED, ACCEPTED }
+
     /** Re-read the same control before acting, with no coordinate or parent fallback. */
-    internal fun pressReaction(item: Item, screen: Snapshot, reaction: JobProgress.Reaction): Boolean = runCatching {
-        targetStillVisible(screen, item) &&
-            reactionState(item, reaction) == JobProgress.ReactionState.READY &&
-            item.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-    }.getOrDefault(false)
+    internal fun pressReaction(
+        item: Item, screen: Snapshot, reaction: JobProgress.Reaction, active: () -> Boolean
+    ): ReactionPress {
+        if (!targetStillVisible(screen, item) || reactionState(item, reaction) != JobProgress.ReactionState.READY || !active()) {
+            return ReactionPress.STALE
+        }
+        return if (runCatching { item.node.performAction(AccessibilityNodeInfo.ACTION_CLICK) }.getOrDefault(false)) {
+            ReactionPress.ACCEPTED
+        } else ReactionPress.DECLINED
+    }
 
     internal fun pressFeedTab(item: Item, screen: Snapshot, surface: String): Boolean = runCatching {
         val node = item.node
@@ -326,11 +333,13 @@ object Screen {
             } && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }.getOrDefault(false)
 
+    internal fun feedScroller(screen: Snapshot): Item? = screen.items.filter { it.scrollable }
+        .maxByOrNull { it.bounds.width().toLong() * it.bounds.height() }
+
     internal fun scrollFeed(screen: Snapshot, byTouch: Boolean, active: () -> Boolean): Boolean {
         if (!sameWindow(screen) || !active()) return false
-        if (byTouch) return gestureScroll(true, active)
-        val scroller = screen.items.filter { it.scrollable }
-            .maxByOrNull { it.bounds.width().toLong() * it.bounds.height() }
+        val scroller = feedScroller(screen)
+        if (byTouch) return gestureScroll(true, active, feed = true, container = scroller?.bounds)
         val start = scroller?.node ?: runCatching { service?.rootInActiveWindow }.getOrNull() ?: return false
         return active() && actUpwards(start, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, SCROLL_ANCESTORS) { it.isScrollable }
     }
@@ -603,19 +612,24 @@ object Screen {
         return dispatch(path, 550L, x, y, y)
     }
 
-    private fun gestureScroll(forward: Boolean, active: () -> Boolean = { true }): Boolean {
+    private fun gestureScroll(
+        forward: Boolean, active: () -> Boolean = { true }, feed: Boolean = false, container: Rect? = null
+    ): Boolean {
         val metrics = service?.resources?.displayMetrics ?: return false
-        val x = metrics.widthPixels * 0.5f
-        val middle = metrics.heightPixels * 0.5f
-        val travel = metrics.heightPixels * 0.26f
-        // A finger moving up pushes the content up, which is scrolling down.
+        val area = Rect(0, 0, metrics.widthPixels, metrics.heightPixels)
+        if (container != null && !area.intersect(container)) return false
+        // Feed fallback leaves more of the current card in view and releases at a lower
+        // speed. Generic scrolling retains the original stroke.
+        val x = area.exactCenterX()
+        val middle = area.exactCenterY()
+        val travel = area.height() * if (feed) 0.18f else 0.26f
         val from = if (forward) middle + travel else middle - travel
         val to = if (forward) middle - travel else middle + travel
         val path = Path().apply {
             moveTo(x, from)
             lineTo(x, to)
         }
-        return dispatch(path, 300L, x, from, to, active)
+        return dispatch(path, if (feed) 650L else 300L, x, from, to, active)
     }
 
     private fun dispatch(
