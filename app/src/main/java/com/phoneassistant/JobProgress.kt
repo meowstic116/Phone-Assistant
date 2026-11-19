@@ -1,17 +1,30 @@
 package com.phoneassistant
 
 import java.net.URI
+import kotlin.random.Random
 
 /** Local routing and stopping rules; no model or Android runtime required. */
 internal object JobProgress {
     const val CLEAN_SCREENS = 3
-    const val MAX_FEED_SCREENS = 12
+    const val FAILURES_BEFORE_STOP = 3
 
     enum class FeedMode { ALL_MISSING, CURATE }
 
     data class FeedRequest(
-        val app: String, val surface: String?, val mode: FeedMode, val reaction: Reaction?
+        val app: String, val surface: String?, val mode: FeedMode, val reaction: Reaction?,
+        val browseLimit: BrowseLimit? = null
     )
+
+    data class BrowseLimit(val durationMs: Long? = null, val screens: Int? = null) {
+        fun session(startMs: Long, random: Random = Random.Default) = BrowseSession(
+            startMs, durationMs ?: if (screens == null) random.nextLong(30, 301) * 1000 else null, screens
+        )
+    }
+
+    class BrowseSession(private val startMs: Long, val durationMs: Long?, val screens: Int?) {
+        fun remainingMs(nowMs: Long): Long? = durationMs?.let { (it - (nowMs - startMs)).coerceAtLeast(0) }
+        fun reachedCount(viewed: Int): Boolean = screens != null && viewed >= screens
+    }
 
     enum class Reaction(
         val verb: String, val available: Set<String>, val applied: Set<String>, val toggle: String
@@ -45,7 +58,100 @@ internal object JobProgress {
     private val openApp = Regex("open(?: up)? (.+?),? and (.+)")
     private val appFirst = Regex("(?:in|on) (.+?), (.+)")
     private val appLast = Regex("(.+) (?:in|on) (.+)")
-    private val browse = Regex("(?:doomscroll|browse|scroll through) (.+?)(?: for me)?(?: and (.+))?")
+    private val browse = Regex("(?:doomscroll(?: through)?|doom scroll(?: through)?|browse|scroll through) (.+)")
+    private val stopSuffix = Regex(",? (?:and (?:then )?|then )stop$")
+    private val smallNumbers = (listOf("zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+        "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+        "eighteen", "nineteen")).withIndex().associate { it.value to it.index }
+    private val tens = listOf("twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+        .withIndex().associate { it.value to (it.index + 2) * 10 }
+    private val number = "(?:-?[0-9]+(?:\\.[0-9]+)?|an?|${smallNumbers.keys.joinToString("|")}|" +
+        "(?:${tens.keys.joinToString("|")})(?:[- ](?:${smallNumbers.keys.drop(1).take(9).joinToString("|")}))?)"
+    private const val TIME_UNIT = "(?:hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)"
+    private const val COUNT_UNIT = "(?:reels?|shorts?|videos?|posts?|items?|screens?)"
+    private val timePart = Regex("($number) ?($TIME_UNIT)\\b")
+    private val timeSuffix = Regex("(?:,? (?:for|(?:and )?stop after) (?:about )?)" +
+        "(half an? $TIME_UNIT|$number ?$TIME_UNIT(?:(?: and)? $number ?$TIME_UNIT)?)$")
+    private val countSuffix = Regex("(?:,? (?:for|after|(?:and )?stop after|until (?:you(?:'ve| have)? (?:viewed|seen|watched)|you (?:see|view|watch))) )" +
+        "($number) ($COUNT_UNIT)$")
+    private val countPrefix = Regex("($number) ($COUNT_UNIT) (?:on|in) (.+)")
+
+    private fun numeric(raw: String): Double? {
+        raw.toDoubleOrNull()?.let { return it }
+        if (raw == "a" || raw == "an") return 1.0
+        smallNumbers[raw]?.let { return it.toDouble() }
+        val words = raw.split(' ', '-')
+        val base = tens[words.first()] ?: return null
+        return (base + (words.getOrNull(1)?.let { smallNumbers[it] } ?: 0)).toDouble()
+    }
+
+    private fun millis(raw: String): Long? {
+        fun unitMs(unit: String) = when (unit.first()) {
+            'h' -> 3_600_000L
+            'm' -> 60_000L
+            else -> 1_000L
+        }
+        if (raw.startsWith("half ")) return unitMs(raw.substringAfterLast(' ')) / 2
+        val total = timePart.findAll(raw).sumOf { part ->
+            (numeric(part.groupValues[1]) ?: 0.0) * unitMs(part.groupValues[2])
+        }
+        return total.takeIf { it >= 1 && it < Long.MAX_VALUE.toDouble() }?.toLong()
+    }
+
+    private fun count(raw: String): Int? = numeric(raw)?.takeIf {
+        it in 1.0..Int.MAX_VALUE.toDouble() && it % 1 == 0.0
+    }?.toInt()
+
+    private fun browseRequest(raw: String): FeedRequest? {
+        var duration: Long? = null
+        var screens: Int? = null
+        var countUnit: String? = null
+        var invalid = false
+        fun limitSuffix(input: String): String {
+            var text = input.removeSuffix(" for me")
+            while (true) {
+                val time = timeSuffix.find(text)
+                val counted = countSuffix.find(text)
+                if (time != null) {
+                    val parsed = millis(time.groupValues[1])
+                    if (parsed == null || duration != null) invalid = true
+                    duration = parsed
+                } else if (counted != null) {
+                    val parsed = count(counted.groupValues[1])
+                    if (parsed == null || screens != null) invalid = true
+                    screens = parsed
+                    countUnit = counted.groupValues[2]
+                } else return text
+                text = text.substring(0, (time ?: checkNotNull(counted)).range.first).removeSuffix(" for me")
+            }
+        }
+        val parts = limitSuffix(raw.replace(stopSuffix, "")).split(Regex(",? and (?=like )"), limit = 2)
+        val target = limitSuffix(parts[0])
+        val choice = parts.getOrNull(1).orEmpty()
+        if (parts.size == 2 && !chooseLikes.matches(choice)) return null
+        val prefix = countPrefix.matchEntire(target)
+        val rawApp = if (prefix == null) target.removePrefix("on ").removePrefix("in ") else {
+            val (amount, items, app) = prefix.destructured
+            if (screens != null) invalid = true
+            screens = count(amount)
+            if (screens == null) invalid = true
+            countUnit = items
+            app
+        }
+        val countedSurface = when (countUnit) {
+            "reel", "reels" -> "reels"
+            "short", "shorts" -> "shorts"
+            "video", "videos" -> "videos"
+            "post", "posts" -> "posts"
+            else -> null
+        }
+        val appAndSurface = if (countedSurface != null && feedSurface.matchEntire(rawApp) == null) {
+            "$rawApp $countedSurface"
+        } else rawApp
+        val (app, surface) = feedTarget(appAndSurface) ?: return null
+        return FeedRequest(app, surface, FeedMode.CURATE, Reaction.LIKE.takeIf { choice.isNotEmpty() },
+            if (invalid) null else BrowseLimit(duration, screens))
+    }
     private val chooseLikes = Regex(
         "(?:like (?:any|the)(?: (?:ones?|posts?|reels?|videos?|shorts?|items?))? " +
             "(?:that )?you (?:like|enjoy|want|find interesting)|" +
@@ -64,13 +170,10 @@ internal object JobProgress {
     /** Only an explicit whole command enables bulk or discretionary reactions. */
     fun feedRequest(message: String): FeedRequest? {
         val text = normalize(message).trim('"', '“', '”').trim().trimEnd('.', '!', '?')
+            .removePrefix("pip, ").removePrefix("please ")
+            .removePrefix("can you ").removePrefix("could you ").removePrefix("would you ")
             .removePrefix("please ").removeSuffix(", please").removeSuffix(" please")
-        browse.matchEntire(text)?.let { match ->
-            val (app, surface) = feedTarget(match.groupValues[1]) ?: return null
-            val choice = match.groupValues[2]
-            if (choice.isNotEmpty() && !chooseLikes.matches(choice)) return null
-            return FeedRequest(app, surface, FeedMode.CURATE, Reaction.LIKE.takeIf { choice.isNotEmpty() })
-        }
+        browse.matchEntire(text)?.let { return browseRequest(it.groupValues[1]) }
         val namedFirst = openApp.matchEntire(text) ?: appFirst.matchEntire(text)
         val namedLast = if (namedFirst == null) appLast.matchEntire(text) else null
         val target = namedFirst?.groupValues?.get(1) ?: namedLast?.groupValues?.get(2) ?: return null
@@ -84,11 +187,35 @@ internal object JobProgress {
         return FeedRequest(app, surface, FeedMode.ALL_MISSING, reaction)
     }
 
+    /** Success resets the retry budget; there is no total step budget. */
+    class FailureStreak(private val limit: Int = FAILURES_BEFORE_STOP) {
+        var failures = 0
+            private set
+
+        fun record(progress: Boolean): Boolean {
+            failures = if (progress) 0 else failures + 1
+            return failures >= limit
+        }
+    }
+
+    /** Detect short cycles without retaining an ever-growing history on infinite feeds. */
+    class RecentVisits(private val capacity: Int = 64) {
+        private val recent = LinkedHashSet<String>()
+
+        fun contains(key: String): Boolean = key in recent
+
+        fun add(key: String): Boolean {
+            val fresh = recent.add(key)
+            if (fresh && recent.size > capacity) recent.remove(recent.first())
+            return fresh
+        }
+    }
+
     class FeedCoverage {
         var clean = 0
             private set
         private var last: String? = null
-        private val visited = mutableSetOf<String>()
+        private val visited = RecentVisits()
 
         // Observe before pressing, so our own changes don't count as a clean viewport.
         fun complete(viewport: String, available: Int, given: Int): Boolean {

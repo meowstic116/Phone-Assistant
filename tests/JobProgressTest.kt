@@ -12,7 +12,7 @@ fun main() {
     check(JobProgress.feedRequest("Like all unliked reels on Instagram Reels") ==
         kudosPlan.copy(app = "instagram", surface = "reels", reaction = JobProgress.Reaction.LIKE))
 
-    val selective = JobProgress.FeedRequest("instagram", "reels", JobProgress.FeedMode.CURATE, JobProgress.Reaction.LIKE)
+    val selective = JobProgress.FeedRequest("instagram", "reels", JobProgress.FeedMode.CURATE, JobProgress.Reaction.LIKE, JobProgress.BrowseLimit())
     check(JobProgress.feedRequest("Doomscroll Instagram Reels and like any you want") == selective)
     check(JobProgress.feedRequest("Browse Instagram Reels for me and like the reels you enjoy") == selective)
     check(JobProgress.feedRequest("Scroll through YouTube Shorts and like the ones you find interesting") ==
@@ -24,6 +24,39 @@ fun main() {
     check(JobProgress.feedRequest("Doomscroll Instagram Reels and like any you want and follow the authors") == null)
     check(JobProgress.feedRequest("Open Instagram and like every cat reel I haven't liked yet") == null)
     check(JobProgress.feedRequest("Doomscroll Instagram Reels and like every reel") == null)
+
+    val browse = selective.copy(reaction = null)
+    fun plan(command: String) = checkNotNull(JobProgress.feedRequest(command))
+    check(plan("Please doomscroll Instagram Reels for 2 minutes.") ==
+        browse.copy(browseLimit = JobProgress.BrowseLimit(durationMs = 120_000)))
+    check(plan("Doomscroll Instagram Reels for a minute and 30 seconds and like any you want") ==
+        selective.copy(browseLimit = JobProgress.BrowseLimit(durationMs = 90_000)))
+    check(plan("Doomscroll Instagram Reels and like any you want for 1.5 minutes then stop") ==
+        selective.copy(browseLimit = JobProgress.BrowseLimit(durationMs = 90_000)))
+    check(plan("Can you please doomscroll on Instagram Reels for half a minute?") ==
+        browse.copy(browseLimit = JobProgress.BrowseLimit(durationMs = 30_000)))
+    check(plan("Doomscroll Instagram Reels for about 45s").browseLimit?.durationMs == 45_000L)
+    check(plan("Doomscroll ten reels on Instagram") == browse.copy(browseLimit = JobProgress.BrowseLimit(screens = 10)))
+    check(plan("Doomscroll Instagram Reels until you've seen twenty-one reels").browseLimit?.screens == 21)
+    check(plan("Doomscroll Instagram and stop after 10 reels") == browse.copy(browseLimit = JobProgress.BrowseLimit(screens = 10)))
+    check(plan("Doomscroll Instagram Reels for 2 minutes and stop after 10 reels").browseLimit ==
+        JobProgress.BrowseLimit(durationMs = 120_000, screens = 10))
+    check(plan("Doomscroll Instagram Reels for 3 reels and like any you want") ==
+        selective.copy(browseLimit = JobProgress.BrowseLimit(screens = 3)))
+    check(plan("Doomscroll Instagram Reels for 0 seconds").browseLimit == null)
+    check(plan("Doomscroll Instagram Reels for -5 minutes").browseLimit == null)
+    check(plan("Doomscroll Instagram Reels for 1.5 reels").browseLimit == null)
+    check(JobProgress.feedRequest("Doomscroll Instagram Reels for a minute and like every reel") == null)
+
+    val seeded = kotlin.random.Random(178)
+    val durations = List(200) { JobProgress.BrowseLimit().session(1000, seeded).durationMs }
+    check(durations.all { it != null && it in 30_000..300_000 })
+    check(durations.distinct().size > 1)
+    val timed = JobProgress.BrowseLimit(durationMs = 5_000).session(1000)
+    check(timed.remainingMs(5999) == 1L && timed.remainingMs(6000) == 0L && timed.remainingMs(7000) == 0L)
+    check(!timed.reachedCount(1000))
+    val counted = JobProgress.BrowseLimit(screens = 10).session(1000)
+    check(counted.remainingMs(999_999) == null && !counted.reachedCount(9) && counted.reachedCount(10))
 
     fun kudos(vararg labels: String, checked: Boolean? = null) =
         JobProgress.reactionState(JobProgress.Reaction.KUDOS, *labels, checked = checked)
@@ -95,6 +128,25 @@ fun main() {
     check(jobs.complete(nextJob) && !jobs.running() && jobs.current(nextJob))
     jobs.cancel()
     check(!jobs.current(nextJob)) // suppress an already-posted completion after Stop
+
+    val movingFeed = JobProgress.FeedCoverage()
+    val visits = JobProgress.RecentVisits()
+    val retries = JobProgress.FailureStreak()
+    repeat(500) { index ->
+        check(visits.add("screen $index"))
+        check(!movingFeed.complete("screen $index", available = 1, given = 2))
+        // A transient miss in every viewport must not accumulate into a global cap.
+        check(!retries.record(false))
+        check(!retries.record(true))
+    }
+    check(!visits.add("screen 499")) // recent loop is detected
+    check(!visits.contains("screen 0")) // long runs have bounded tracking memory
+    check(!movingFeed.complete("clean A", 0, 2))
+    check(!movingFeed.complete("clean B", 0, 2))
+    check(movingFeed.complete("clean C", 0, 2))
+    check(!retries.record(false))
+    check(!retries.record(false))
+    check(retries.record(false))
 
     println("Job progress tests passed.")
 }
