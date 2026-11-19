@@ -197,6 +197,9 @@ object Agent {
         var lastScene = ""
         var lastAnswer = ""
         var sameAnswer = 0
+        // The screen read for the current step. Only one is ever held: it goes back to the
+        // framework when the next one is read, and on the way out of the job.
+        var held: Screen.Snapshot? = null
         try {
             // The apps on this phone, read once: searched so a job that names an app starts
             // in that app, and named in every step so the model can only ask for something
@@ -232,6 +235,9 @@ object Agent {
                     )
                     return
                 }
+                // The step before this one is done with its screen, so that read goes back
+                // before this one is taken.
+                held?.release()
                 val screen = Screen.snapshot()
                 if (screen == null) {
                     val hands = Screen.available()
@@ -241,6 +247,7 @@ object Agent {
                     )
                     return
                 }
+                held = screen
                 val decision =
                     decide(ctx, request, history.toString(), screen, steps, apps) { alive() }
                         ?: run {
@@ -394,6 +401,8 @@ object Agent {
                 "threw ${t.javaClass.simpleName}" + (t.message?.let { ": $it" } ?: "")
             )
         } finally {
+            // The last screen read goes back the way every other one did.
+            held?.release()
             // Only the current job may clear the mark: a replaced one must not stand in the
             // way of the job that took its place.
             if (alive()) job = null
@@ -424,72 +433,91 @@ object Agent {
     ): Int {
         if (label.isBlank() || UNSAFE_REPEAT.containsMatchIn(label.lowercase())) return 0
         var screen = Screen.snapshot() ?: return 0
-        // One of them is a button, not a list — and the one the model just pressed was it.
-        if (screen.items.count { it.label.equals(label, ignoreCase = true) } < 2) return 0
-        val app = screen.app
-        // Where the presses have landed, so a button that ignores one is not pressed at all
-        // day. Bounds rather than labels: the next activity down has the same label.
-        val done = hashSetOf(alreadyPressed)
-        var pressed = 0
-        var scrolls = 0
-        // Presses in a row that left the screen exactly as it was. Nothing is watching this
-        // loop but the record, so a thing that ignores two presses is left alone.
-        var unchanged = 0
-        while (pressed < REPEAT_LIMIT && ticket.get() == mine) {
-            val item = screen.items.firstOrNull { item ->
-                item.label.equals(label, ignoreCase = true) &&
-                    item.bounds.flattenToString() !in done
-            }
-            if (item == null) {
-                // None left on this screen: the rest of the list is further down, and one
-                // scroll away is the whole point of carrying on. A scroll that leaves the
-                // screen exactly as it was is the end of the list.
-                if (scrolls >= REPEAT_SCROLLS) return pressed
-                val before = screen.listing
+        // Every screen read in this pass goes back to the framework on the way out, on every
+        // path. It reads a dozen times in a row, and none of those reads outlives it.
+        try {
+            // One of them is a button, not a list — and the one the model just pressed was it.
+            if (screen.items.count { it.label.equals(label, ignoreCase = true) } < 2) return 0
+            val app = screen.app
+            // Where the presses have landed, so a button that ignores one is not pressed at all
+            // day. Bounds rather than labels: the next activity down has the same label.
+            val done = hashSetOf(alreadyPressed)
+            var pressed = 0
+            var scrolls = 0
+            // Presses in a row that left the screen exactly as it was. Nothing is watching this
+            // loop but the record, so a thing that ignores two presses is left alone.
+            var unchanged = 0
+            while (pressed < REPEAT_LIMIT && ticket.get() == mine) {
+                val item = screen.items.firstOrNull { item ->
+                    item.label.equals(label, ignoreCase = true) &&
+                        item.bounds.flattenToString() !in done
+                }
+                if (item == null) {
+                    // None left on this screen: the rest of the list is further down, and one
+                    // scroll away is the whole point of carrying on. A scroll that leaves the
+                    // screen exactly as it was is the end of the list.
+                    if (scrolls >= REPEAT_SCROLLS) return pressed
+                    val before = screen.listing
+                    if (!onAct(true)) return pressed
+                    val moved = try {
+                        Screen.scroll(true, null)
+                    } finally {
+                        onAct(false)
+                    }
+                    if (!moved) return pressed
+                    scrolls++
+                    Diag.jobStep(mine, "scroll down", "scrolled down for more \"$label\"", true)
+                    SystemClock.sleep(SETTLE_MS)
+                    val below = Screen.snapshot() ?: return pressed
+                    // Not the list any more, or the list in the same place: either way there is
+                    // nothing below to press, and this read is done with.
+                    if (below.app != app || below.listing == before) {
+                        below.release()
+                        return pressed
+                    }
+                    screen.release()
+                    screen = below
+                    continue
+                }
+                done += item.bounds.flattenToString()
                 if (!onAct(true)) return pressed
-                val moved = try {
-                    Screen.scroll(true, null)
+                val landed = try {
+                    Screen.tap(item)
                 } finally {
                     onAct(false)
                 }
-                if (!moved) return pressed
-                scrolls++
-                Diag.jobStep(mine, "scroll down", "scrolled down for more \"$label\"", true)
+                // Every press is in the record; none of them is a step, because none of them
+                // asked the model anything.
+                Diag.jobStep(
+                    mine,
+                    "tap \"$label\"",
+                    if (landed) "tapped it" else "$FAILED the tap did not land",
+                    landed
+                )
+                if (!landed) return pressed
+                pressed++
                 SystemClock.sleep(SETTLE_MS)
-                val below = Screen.snapshot() ?: return pressed
-                if (below.app != app || below.listing == before) return pressed
-                screen = below
-                continue
+                val next = Screen.snapshot() ?: return pressed
+                // Somewhere else entirely: the list is not what is in front any more.
+                if (next.app != app) {
+                    next.release()
+                    return pressed
+                }
+                // Two presses in a row that change nothing he can see: whatever it is, it is
+                // not taking them, and there is no model in this loop to notice that. Stop
+                // rather than spend the rest of the budget on a dead button.
+                unchanged = if (next.listing == screen.listing) unchanged + 1 else 0
+                if (unchanged >= 2) {
+                    next.release()
+                    return pressed
+                }
+                screen.release()
+                screen = next
             }
-            done += item.bounds.flattenToString()
-            if (!onAct(true)) return pressed
-            val landed = try {
-                Screen.tap(item)
-            } finally {
-                onAct(false)
-            }
-            // Every press is in the record; none of them is a step, because none of them
-            // asked the model anything.
-            Diag.jobStep(
-                mine,
-                "tap \"$label\"",
-                if (landed) "tapped it" else "$FAILED the tap did not land",
-                landed
-            )
-            if (!landed) return pressed
-            pressed++
-            SystemClock.sleep(SETTLE_MS)
-            val next = Screen.snapshot() ?: return pressed
-            // Somewhere else entirely: the list is not what is in front any more.
-            if (next.app != app) return pressed
-            // Two presses in a row that change nothing he can see: whatever it is, it is not
-            // taking them, and there is no model in this loop to notice that. Stop rather than
-            // spend the rest of the budget on a dead button.
-            unchanged = if (next.listing == screen.listing) unchanged + 1 else 0
-            if (unchanged >= 2) return pressed
-            screen = next
+            return pressed
+        } finally {
+            screen.release()
         }
-        return pressed
     }
 
     /** Asks for the next step, with what has happened so far and the screen as it is now. */
@@ -707,26 +735,41 @@ object Agent {
      * page whose "Log in" does nothing cannot be tapped round in circles.
      */
     private fun lookForForm(login: Vault.Login, first: Screen.Snapshot): Act? {
+        // [first] belongs to the step that asked for this hunt. The screens read here are the
+        // hunt's own, and go back before it leaves, whichever way it leaves.
         var screen = first
-        var tapped = false
-        repeat(HUNT_TRIES) {
-            val link = loginLink(screen)
-            if (link != null && !tapped && Screen.tap(link)) {
-                tapped = true
+        var read: Screen.Snapshot? = null
+        fun reread(): Screen.Snapshot? {
+            read?.release()
+            read = null
+            val next = Screen.snapshot() ?: return null
+            read = next
+            screen = next
+            return next
+        }
+        try {
+            var tapped = false
+            repeat(HUNT_TRIES) {
+                val link = loginLink(screen)
+                if (link != null && !tapped && Screen.tap(link)) {
+                    tapped = true
+                    SystemClock.sleep(FORM_WAIT_MS)
+                    if (reread() == null) return null
+                    screen.items.firstOrNull { it.password }
+                        ?.let { return fill(login, screen, it, hunted = true) }
+                }
+                // Further down, and further down once more. Something that will not scroll has
+                // nothing below it to look at.
+                if (!Screen.scroll(true, null)) return null
                 SystemClock.sleep(FORM_WAIT_MS)
-                screen = Screen.snapshot() ?: return null
+                if (reread() == null) return null
                 screen.items.firstOrNull { it.password }
                     ?.let { return fill(login, screen, it, hunted = true) }
             }
-            // Further down, and further down once more. Something that will not scroll has
-            // nothing below it to look at.
-            if (!Screen.scroll(true, null)) return null
-            SystemClock.sleep(FORM_WAIT_MS)
-            screen = Screen.snapshot() ?: return null
-            screen.items.firstOrNull { it.password }
-                ?.let { return fill(login, screen, it, hunted = true) }
+            return null
+        } finally {
+            read?.release()
         }
-        return null
     }
 
     /** Something on the screen that reads like the way into a login form. */

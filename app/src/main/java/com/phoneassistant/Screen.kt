@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.graphics.Path
 import android.graphics.Rect
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import java.util.ArrayDeque
@@ -46,8 +47,33 @@ object Screen {
         val node: AccessibilityNodeInfo
     )
 
-    /** The screen, read once: what it is, what is on it, and the listing for the model. */
-    class Snapshot(val app: String, val items: List<Item>, val listing: String)
+    /**
+     * The screen, read once: what it is, what is on it, and the listing for the model.
+     *
+     * It owns the nodes it was read from, so it has a lifetime. [release] is what ends it, and
+     * after that the items' nodes may no longer be used to act on — everything else about an
+     * item is a copy and outlives it.
+     */
+    class Snapshot(val app: String, val items: List<Item>, val listing: String) {
+
+        private var released = false
+
+        /**
+         * Hands the nodes back to the framework, once. From API 33 a node is an ordinary
+         * object and there is nothing to give back; below that they come out of a pool, and a
+         * job that reads the screen every second without returning them is how that pool runs
+         * out — the reads then start coming back short.
+         */
+        // Recycling is how a node goes back into the framework's pool, which is what every
+        // version below API 33 needs; on 33 and up the call does nothing and is not reached.
+        @Suppress("DEPRECATION")
+        fun release() {
+            if (released) return
+            released = true
+            if (Build.VERSION.SDK_INT >= 33) return
+            items.forEach { item -> runCatching { item.node.recycle() } }
+        }
+    }
 
     @Volatile
     private var service: AccessibilityService? = null
@@ -68,9 +94,11 @@ object Screen {
     fun snapshot(): Snapshot? {
         val svc = service ?: return null
         val root = runCatching { svc.rootInActiveWindow }.getOrNull() ?: return null
+        // Read before the walk: the walk gives its nodes back as it goes, the root included.
+        val app = root.packageName?.toString().orEmpty()
         val items = ArrayList<Item>()
         collect(svc.packageName?.toString(), root, items)
-        return Snapshot(root.packageName?.toString().orEmpty(), items, listing(items))
+        return Snapshot(app, items, listing(items))
     }
 
     /**
@@ -84,15 +112,34 @@ object Screen {
         while (queue.isNotEmpty() && out.size < MAX_ITEMS && seen < MAX_NODES) {
             val node = queue.removeFirst()
             seen++
-            if (ownPackage != null && node.packageName?.toString() == ownPackage) continue
-            if (node.isVisibleToUser) consider(node, out)
+            // His own windows are skipped whole: a child of one cannot be pressed either.
+            if (ownPackage != null && node.packageName?.toString() == ownPackage) {
+                hand(node)
+                continue
+            }
+            val kept = node.isVisibleToUser && consider(node, out)
+            // The children are read before the node goes back: a child is its own instance, so
+            // giving the parent back now cannot take one of them with it.
             for (child in 0 until node.childCount) {
                 node.getChild(child)?.let { queue.add(it) }
             }
+            if (!kept) hand(node)
         }
     }
 
-    private fun consider(node: AccessibilityNodeInfo, out: MutableList<Item>) {
+    /**
+     * Gives a node back that is not being kept. Most nodes in a tree are not: a container with
+     * no label, no press and nothing in it is walked for its children and then dropped, and
+     * those are the bulk of a snapshot's churn.
+     */
+    @Suppress("DEPRECATION") // Below API 33 nodes come from a pool and have to go back into it.
+    private fun hand(node: AccessibilityNodeInfo) {
+        if (Build.VERSION.SDK_INT >= 33) return
+        runCatching { node.recycle() }
+    }
+
+    /** Whether this node became an item. One that did is kept until its snapshot is released. */
+    private fun consider(node: AccessibilityNodeInfo, out: MutableList<Item>): Boolean {
         val editable = node.isEditable
         // What a field contains is never put in the listing, and the listing is the one thing
         // that leaves the phone: a username, a search for something private, or a password in
@@ -105,11 +152,11 @@ object Screen {
         // Everything that can be pressed, typed into or scrolled, plus plain text: the text
         // is how the model knows it is looking at the right conversation or message.
         if (!editable && !node.isClickable && !node.isCheckable && !scrollable && label.isEmpty()) {
-            return
+            return false
         }
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
-        if (bounds.width() <= 0 || bounds.height() <= 0) return
+        if (bounds.width() <= 0 || bounds.height() <= 0) return false
         val role = node.className?.toString()?.substringAfterLast('.')?.take(24) ?: "View"
         out += Item(
             index = out.size + 1,
@@ -125,6 +172,7 @@ object Screen {
             bounds = bounds,
             node = node
         )
+        return true
     }
 
     private fun listing(items: List<Item>): String {
