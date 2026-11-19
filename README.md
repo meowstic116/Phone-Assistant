@@ -45,8 +45,10 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   a restart does not lose it.
 - A **Diagnostics** screen shows, live, exactly what Android tells the app rather than what
   it should: the keyboard height the accessibility service reports, whether that service is
-  switched on, whether a keyboard is up, where he is sitting against it, what is on the
-  stage, the last phone job step by step — what was asked for, every action it tried,
+  switched on,   whether a keyboard is up, where he is sitting against it, how many frames a second the
+  character is really drawing (and whether he is drawing at all — the screen-off pause and
+  the idle rate are both visible there, measured in `PetView.onDraw` rather than assumed),
+  what is on the stage, the last phone job step by step — what was asked for, every action it tried,
   whether Android took that action, and why the job stopped — and the last two failures: the
   most recent refused request and the most recent exception that was swallowed to keep the
   overlay alive. Nothing is written to disk or sent
@@ -191,7 +193,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.80-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.81-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

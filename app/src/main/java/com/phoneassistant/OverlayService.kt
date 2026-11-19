@@ -245,7 +245,10 @@ class OverlayService : Service(), PropHost {
         val props: List<String>,
         val screenWidthPx: Int,
         val screenHeightPx: Int,
-        val bottomInsetPx: Int
+        val bottomInsetPx: Int,
+        /** Whether the character is drawing at all, and how many frames a second he really is. */
+        val drawing: Boolean,
+        val drawsPerSecond: Int
     )
 
     private lateinit var windowManager: WindowManager
@@ -526,7 +529,11 @@ class OverlayService : Service(), PropHost {
         props = props.toList().map { prop -> prop.javaClass.simpleName },
         screenWidthPx = screenW,
         screenHeightPx = screenH,
-        bottomInsetPx = bottomInset
+        bottomInsetPx = bottomInset,
+        // Measured inside the view's own onDraw, not inferred from the mood or the screen
+        // state: the point of showing it is to check what actually happens.
+        drawing = pet?.animating == true,
+        drawsPerSecond = pet?.drawsPerSecond ?: 0
     )
 
     // ------------------------------------------------------- floating diagnostics

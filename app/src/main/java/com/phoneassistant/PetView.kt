@@ -82,6 +82,18 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
     private var drewBlinking = false
 
     /**
+     * Frames actually drawn in the last measured second. Counted in [onDraw] rather than where
+     * he decides to redraw, because that is the number the Diagnostics screen is claiming and
+     * the one worth checking: a count of decisions proves nothing was painted.
+     */
+    @Volatile
+    var drawsPerSecond: Int = 0
+        private set
+
+    private var drawsThisSecond = 0
+    private var windowStartedAt = SystemClock.uptimeMillis()
+
+    /**
      * False while the screen is off. Nothing can see him then, and this window would otherwise
      * keep drawing the idle sway sixty times a second into a display that is not on.
      */
@@ -92,7 +104,15 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
             // Waking draws at once rather than waiting out the idle gap. The frame callback
             // itself stays alive either way, so there is only ever one of them and nothing
             // has to be re-posted — and re-posting on wake could have left two running.
-            if (value) lastDrawAt = 0L
+            if (value) {
+                lastDrawAt = 0L
+                drawsThisSecond = 0
+                windowStartedAt = SystemClock.uptimeMillis()
+            } else {
+                // Nothing is being drawn, so the readout must not keep showing the rate from
+                // before the screen went off.
+                drawsPerSecond = 0
+            }
         }
 
     override fun onAttachedToWindow() {
@@ -156,8 +176,19 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
 
     private fun soonToBlink(now: Long) = now >= nextBlinkAt
 
+    /** Folds this draw into the once-a-second count the readout shows. */
+    private fun countDraw(now: Long) {
+        drawsThisSecond++
+        val elapsed = now - windowStartedAt
+        if (elapsed < 1_000L) return
+        drawsPerSecond = (drawsThisSecond * 1_000L / elapsed).toInt()
+        drawsThisSecond = 0
+        windowStartedAt = now
+    }
+
     override fun onDraw(canvas: Canvas) {
         val now = SystemClock.uptimeMillis()
+        countDraw(now)
         val t = (now - bornAt) / 1000f
 
         val bodyW = dp(46f)

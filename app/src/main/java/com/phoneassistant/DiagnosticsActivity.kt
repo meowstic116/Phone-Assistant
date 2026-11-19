@@ -203,6 +203,20 @@ class DiagnosticsActivity : Activity() {
             )
         }
 
+        section("DRAWING — the character's own window")
+        if (status == null) {
+            line("style", "— Pip is not running")
+        } else {
+            line(
+                "drawing",
+                if (status.drawing) "yes — about ${status.drawsPerSecond} frames a second"
+                else "paused — the screen is off, so nothing is drawn"
+            )
+            // The rate he aims for, so the measured number has something to be checked
+            // against rather than being taken on trust.
+            line("target", "60 walking · 40 changing mood · 33 talking · 20 idle · 0 off")
+        }
+
         section("ON STAGE")
         if (status == null) {
             line("props", "— Pip is not running")
