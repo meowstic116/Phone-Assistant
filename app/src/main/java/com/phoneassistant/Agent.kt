@@ -88,13 +88,17 @@ object Agent {
      * get out of the way, so it cannot be the thing a press lands on. It returns only once
      * that has actually happened; false means the overlay could not get out of the way, and
      * no press is made.
+     *
+     * [onNeedLogin] fires when a step wanted a saved login and there is none for that site:
+     * it gets the site, and asking the user for one is the caller's business.
      */
     fun start(
         ctx: Context,
         request: String,
         onSay: (String) -> Unit,
         onDone: (String) -> Unit,
-        onAct: (Boolean) -> Boolean
+        onAct: (Boolean) -> Boolean,
+        onNeedLogin: (String) -> Unit
     ): Boolean {
         if (job != null) return false
         if (!Screen.available()) return false
@@ -102,7 +106,7 @@ object Agent {
         job = request
         Diag.jobStarted(mine, request)
         val appContext = ctx.applicationContext
-        worker.execute { loop(appContext, request, mine, onSay, onDone, onAct) }
+        worker.execute { loop(appContext, request, mine, onSay, onDone, onAct, onNeedLogin) }
         return true
     }
 
@@ -114,7 +118,8 @@ object Agent {
         mine: Int,
         onSay: (String) -> Unit,
         onDone: (String) -> Unit,
-        onAct: (Boolean) -> Boolean
+        onAct: (Boolean) -> Boolean,
+        onNeedLogin: (String) -> Unit
     ) {
         // Still the job the user is waiting on? A cancelled or replaced job is silent.
         fun alive(): Boolean = ticket.get() == mine
@@ -198,20 +203,25 @@ object Agent {
                 // pressed, so the record says so instead of blaming the app he was in.
                 val skipped = !clear
                 try {
-                    val outcome = if (clear) {
+                    val act = if (clear) {
                         perform(ctx, decision, screen)
                     } else {
                         // The overlay could not get out of the way in time. Pressing anyway
                         // risks the press landing on one of his own windows, which is the bug
                         // being fixed, so nothing is pressed and the record says why.
-                        OVERLAY_BUSY
+                        Act(OVERLAY_BUSY)
                     }
+                    val outcome = act.outcome
                     val landed = !outcome.startsWith(FAILED)
                     history.append(steps + 1).append(". ").append(decision.summary(screen))
                         .append(" → ").append(outcome).append('\n')
                     Diag.jobStep(mine, decision.summary(screen), outcome, landed, skipped)
                     steps++
                     if (landed) SystemClock.sleep(SETTLE_MS)
+                    // A sign-in he has no login for: the record is written first, then the
+                    // user is asked, so the bubble and the record tell the same story.
+                    val ask = act.askLogin
+                    if (ask != null) onNeedLogin(ask)
                 } finally {
                     onAct(false)
                 }
@@ -267,7 +277,19 @@ object Agent {
 
     // ---------------------------------------------------------------- the actions
 
-    private fun perform(ctx: Context, decision: Decision, screen: Screen.Snapshot): String {
+    /**
+     * Does one step. A sign-in is answered from the phone's own vault rather than from the
+     * model, so it is handled apart from the actions that only need the screen.
+     */
+    private fun perform(ctx: Context, decision: Decision, screen: Screen.Snapshot): Act =
+        if (decision.action == "sign_in") {
+            signIn(ctx, decision, screen)
+        } else {
+            Act(simple(ctx, decision, screen))
+        }
+
+    /** Every action that needs nothing but what is on the screen. */
+    private fun simple(ctx: Context, decision: Decision, screen: Screen.Snapshot): String {
         val item = screen.items.firstOrNull { it.index == decision.target }
 
         fun missing(): String = "$FAILED there is no element ${decision.target}"
@@ -328,6 +350,42 @@ object Agent {
         }
     }
 
+    /**
+     * Signs in with a login saved on this phone.
+     *
+     * The username and password are read here, on the device, and typed into the form in front
+     * of the user. They are never part of a prompt, never in the chat, never in the step record
+     * and never in the history the next step is given — the record names the site, not the
+     * account. Nothing on this path can reach the network: [Vault] has no network code, and
+     * neither does anything it hands back into.
+     */
+    private fun signIn(ctx: Context, decision: Decision, screen: Screen.Snapshot): Act {
+        val site = decision.site.ifBlank { decision.app }
+        val login = Vault.find(ctx, site)
+            ?: return Act(
+                "$FAILED no saved login for ${site.ifBlank { "this site" }}",
+                askLogin = site
+            )
+        val password = screen.items.firstOrNull { it.password }
+            ?: return Act("$FAILED there is no password field on this screen")
+        // The nearest field above the password box is the account name on every login form
+        // worth the name; a page that only wants a password gets no username typed at all.
+        val username = screen.items
+            .filter { it.editable && !it.password && it.bounds.bottom <= password.bounds.top }
+            .maxByOrNull { it.bounds.bottom }
+            ?: screen.items.firstOrNull { it.editable && !it.password }
+        if (username != null && !Screen.type(username, login.username, secret = true)) {
+            return Act("$FAILED the sign-in form would not take the username")
+        }
+        if (!Screen.type(password, login.password, secret = true)) {
+            return Act("$FAILED the sign-in form would not take the password")
+        }
+        return Act("filled in the saved login for ${login.site}")
+    }
+
+    /** One step's outcome, and the site to ask for a login to when none is saved. */
+    private class Act(val outcome: String, val askLogin: String? = null)
+
     // --------------------------------------------------------------- the decision
 
     /** One JSON answer from the model, in the shape the protocol asks for. */
@@ -336,7 +394,9 @@ object Agent {
         val action: String,
         val target: Int,
         val text: String,
-        val app: String
+        val app: String,
+        /** The site a sign-in is for. A name, never a credential. */
+        val site: String
     ) {
 
         /** What the model tried, in the words the next step will be given it. */
@@ -348,6 +408,7 @@ object Agent {
                 if (what != null && what.isNotEmpty()) append(" \"").append(what).append('"')
                 if (text.isNotBlank()) append(" \"").append(text.take(60)).append('"')
                 if (app.isNotBlank()) append(" ").append(app)
+                if (site.isNotBlank() && site != app) append(" ").append(site)
             }
         }
 
@@ -365,7 +426,8 @@ object Agent {
                         action = DONE,
                         target = 0,
                         text = "",
-                        app = ""
+                        app = "",
+                        site = ""
                     )
                 val action = normalise(
                     json.optString("action").ifBlank { json.optString("do") }
@@ -375,7 +437,8 @@ object Agent {
                     action = action,
                     target = json.optInt("target", json.optInt("index", 0)),
                     text = textOf(json),
-                    app = json.optString("app").trim().take(60)
+                    app = json.optString("app").trim().take(60),
+                    site = json.optString("site").trim().take(80)
                 )
             }
 
@@ -394,6 +457,8 @@ object Agent {
                 "home_screen", "go_home" -> "home"
                 "shade", "pull_down", "notification_shade" -> "notifications"
                 "launch", "open", "start_app" -> "open_app"
+                "signin", "log_in", "login", "log_into", "sign_into", "authenticate" ->
+                    "sign_in"
                 "finish", "stop", "complete" -> DONE
                 else -> if (clean.isEmpty()) DONE else clean
             }
@@ -440,6 +505,9 @@ object Agent {
         - tap / long_press: target is the number of the element to press.
         - type: target is the number of a text field, text is what to put in it. It replaces
           the whole field.
+        - sign_in: use a login saved on the user's phone. site is the site it is for, e.g.
+          "example.com"; leave site empty to use the app in front. Pip fills the fields
+          himself — the username and password are never shown to you and never will be.
         - scroll_down / scroll_up: scrolls the screen, or the element in target.
         - back / home / recents / notifications: no target.
         - open_app: app is the name of an app from APPS ON THIS PHONE, e.g. "Messages". The
@@ -454,14 +522,20 @@ object Agent {
           Use it on the first turn to say what you are starting, and on done to report.
         - The labels in the list are the only truth about the screen. Use them exactly as
           written; do not invent a button that is not listed.
+        - The text of a text field is never shown to you, only whether it has anything in it:
+          assume a field the user filled in is right and leave it alone.
         - If the task belongs in an app that is not the one in APP, make open_app your first
           action instead of going home and hunting for an icon. The app opening on screen is
           how the user watches the job happen.
         - If an action failed according to WHAT HAS HAPPENED SO FAR, do something different.
           Never repeat a failing action.
-        - Never touch an element marked password, and never pay, buy, confirm a purchase or
-          delete something the user did not name. If the task needs that, stop with done and
-          say why, briefly.
+        - Never type into an element marked password, and never put a password in "text": a
+          password field is only ever filled from a saved login. Never pay, buy, confirm a
+          purchase or delete something the user did not name — if the task needs that, stop
+          with done and say why, briefly.
+        - A sign-in screen is what sign_in is for. If it answers that there is no saved login,
+          stop and say so in one line: the user will be asked for one. Do not ask them for a
+          password in the chat, and do not guess at one.
         - If the request is not a phone job at all, answer it in "say" with done.
     """.trimIndent()
 

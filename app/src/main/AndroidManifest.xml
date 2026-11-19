@@ -62,6 +62,13 @@
             android:name=".DiagnosticsActivity"
             android:exported="false" />
 
+        <!-- Where the user gives Pip a login to use. Nothing here is ever sent anywhere: the
+             vault it writes to is encrypted with a key held by the device's keystore. -->
+        <activity
+            android:name=".VaultActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Tells the overlay where the keyboard is, whichever app it belongs to. Window
              bounds only: no window contents are ever read. -->
         <service

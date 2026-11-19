@@ -30,6 +30,11 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
 - A **Personality** screen shows the full prompt that defines him, and lets you rewrite it.
 - A **Memory** screen lists the facts he keeps between conversations, and lets you add or
   delete them.
+- A **Logins** screen holds the logins he is allowed to use: a website, a username, a
+  password. They are encrypted on the phone under a key from the Android Keystore and never
+  leave it — not in a prompt, not in the chat, not in any request. Ask him to sign in
+  somewhere he has a login for and he fills the form himself; ask him somewhere he does not
+  and he says so and opens the form with the site already in it.
 - A **Diagnostics** screen shows, live, exactly what Android tells the app rather than what
   it should: the keyboard height the accessibility service reports, whether that service is
   switched on, whether a keyboard is up, where he is sitting against it, what is on the
@@ -69,9 +74,10 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   way is not un-pressed, but nothing new happens
   after the Stop — a step the model was still deciding is thrown away instead of carried out,
   which includes cancelling by sending him a new message. He says what he is starting,
-  then reports in his bubble. His hands go through the accessibility service: he refuses
-  password fields, payments, purchases and deletions he was not asked for, whatever the model
-  suggests, because those refusals are in the code and not only in the instructions.
+  then reports in his bubble. His hands go through the accessibility service: a password
+  field can only ever be filled from a login saved on the phone, never from anything the
+  model suggests, and he refuses payments, purchases and deletions he was not asked for —
+  those refusals are in the code and not only in the instructions.
 - Drag it anywhere. It lives in a foreground service with a persistent notification.
 
 ## Toys
@@ -171,7 +177,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.68-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.69-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
@@ -183,8 +189,9 @@ Tagged builds are also published as GitHub Releases by
    **Notifications**. **Pip can work other apps** (an accessibility service) is needed for
    phone jobs, and is the only way he can see a keyboard opened in another app — a floating
    overlay is never told about a keyboard it did not raise itself. He reads the labels of the
-   app in front only while a job is running, never a password field, and that list of labels
-   is the only thing that leaves the phone. Nothing is stored. If the switch was already on
+   app in front only while a job is running — never what is inside a text field, and never a
+   password — and that list of labels is the only thing that leaves the phone. Nothing he
+   reads is stored. If the switch was already on
    from an older build, turn it off and on once so Android picks up the new capabilities:
    before 0.59 it could only see window bounds. **Diagnostics** on the main screen shows
    whether it is reporting at all, which is the quickest way to tell a working service from a
@@ -223,6 +230,34 @@ git push origin v0.3
 
 `.github/workflows/release.yml` builds the APK and publishes it on a GitHub Release, so
 binaries never enter git history.
+
+## Logins
+
+The **Logins** screen is where you give Pip a login he may use: a website, a username and a
+password. There is exactly one place they exist, and it is worth being precise about what
+that means:
+
+- They are encrypted at rest with AES-GCM under a key that lives in the Android Keystore and
+  cannot be read out of the device. The ciphertext is all that is written to storage, and no
+  screen ever shows a saved password again — not even masked.
+- They are never put in a prompt. The model learns that a login exists only when it asks for
+  one for a site it named; it never sees a username, a password, or the list of sites you
+  have saved.
+- Nothing on the sign-in path can reach the network. `Vault.kt` has no network code and
+  nothing that reads it does either: the agent's `sign_in` step reads the value, types it
+  into the field, and records only the site.
+- The chat is not a place to type a password and he will not ask for one there. If a job
+  needs a login he does not have, he says so in one line and opens the form with the site
+  filled in. Android redacts what you type into a site, which is exactly why he has to ask
+  rather than watch you do it.
+- Deleting an entry deletes it; uninstalling the app takes the whole vault with it. A vault
+  that cannot be decrypted — a restore onto a new phone, since the key stays behind — reads as
+  empty and says so in Diagnostics rather than failing silently.
+
+`sign_in` is the only thing that ever fills a password field: `Screen.type` refuses one
+unless its caller passes `secret = true`, and that call is in `Agent.signIn` alone. What a
+text field contains is never part of the screen listing that goes to the model at all — only
+whether it has something in it.
 
 ## Memory
 

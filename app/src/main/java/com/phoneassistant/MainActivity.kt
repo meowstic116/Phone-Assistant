@@ -88,6 +88,10 @@ class MainActivity : Activity() {
             startActivity(Intent(this, MemoryActivity::class.java))
         }
 
+        findViewById<Button>(R.id.loginsButton).setOnClickListener {
+            startActivity(Intent(this, VaultActivity::class.java))
+        }
+
         findViewById<Button>(R.id.diagnosticsButton).setOnClickListener {
             startActivity(Intent(this, DiagnosticsActivity::class.java))
         }

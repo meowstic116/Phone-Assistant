@@ -129,6 +129,20 @@ class OverlayService : Service(), PropHost {
         fun toysOnStage(): String = instance?.let { Toys.summary(it) } ?: ""
 
         /**
+         * A login was just saved from the form he opened for it, so he has an answer in the
+         * bubble instead of the form closing into silence.
+         */
+        fun loginSaved(site: String) {
+            instance?.sayAloud(
+                if (site.isBlank()) {
+                    "saved. I'll use it next time."
+                } else {
+                    "saved the login for ${Vault.host(site)}. name the job and I'll sign in."
+                }
+            )
+        }
+
+        /**
          * Runs a phone job handed over from a screen that is not the overlay's own chat —
          * the history screen — where the reply is a JSON object that would otherwise be
          * shown to the user as if it were something he said. False when nothing started:
@@ -1591,7 +1605,11 @@ class OverlayService : Service(), PropHost {
             // step out of the way of the press instead of catching it. This call does not
             // return until they really are out of the way — a gesture dispatched before the
             // window was updated is exactly the press the duck is there to protect.
-            onAct = { touching -> duckOverlay(touching) }
+            onAct = { touching -> duckOverlay(touching) },
+            // A step wanted a login he does not have. The ask comes from the main looper,
+            // like everything else that touches a window, and the password itself is never
+            // anything he has seen: it will be typed into the form by the user.
+            onNeedLogin = { site -> handler.post { if (running) askForLogin(site) } }
         )
         if (!started) {
             hideJobBar()
@@ -1609,6 +1627,27 @@ class OverlayService : Service(), PropHost {
         beginJobWatch()
         showJobBar()
         return true
+    }
+
+    /**
+     * A step needed a login for [site] and there is none saved. He says so in one line and
+     * opens the form with the site already in it, because Android will not let him read a
+     * password the user types into a site — asking here is the only way to remember one.
+     */
+    private fun askForLogin(site: String) {
+        sayAloud(
+            if (site.isBlank()) {
+                "I don't have a login for that. give me one and I'll use it."
+            } else {
+                "I don't have a login for ${Vault.host(site)}. give me one and I'll use it."
+            }
+        )
+        val form = Intent(this, VaultActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (site.isNotBlank()) form.putExtra(VaultActivity.EXTRA_SITE, site)
+        // His own app asking for a login is exactly the kind of start the overlay permission
+        // allows; if the system refuses anyway, the bubble has already said where to go.
+        runCatching { startActivity(form) }
     }
 
     // --------------------------------------------------------------------- job bar

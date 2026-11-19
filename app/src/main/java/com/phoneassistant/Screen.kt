@@ -24,7 +24,8 @@ import java.util.ArrayDeque
  *
  * Password fields are listed so the model can see they exist, and refused if it tries to
  * type into one. That refusal is here, at the point of typing, rather than only in the
- * instructions: a suggestion is not a guarantee.
+ * instructions: a suggestion is not a guarantee. The one caller allowed past it is [Vault]'s
+ * sign-in, which is on the phone and stays there.
  */
 object Screen {
 
@@ -36,6 +37,8 @@ object Screen {
         val hint: String,
         val editable: Boolean,
         val password: Boolean,
+        /** Whether a text field already holds something. Its contents are never kept. */
+        val filled: Boolean,
         val scrollable: Boolean,
         val id: String?,
         val bounds: Rect,
@@ -89,9 +92,14 @@ object Screen {
     }
 
     private fun consider(node: AccessibilityNodeInfo, out: MutableList<Item>) {
-        val label = (node.text ?: node.contentDescription)?.toString()
-            ?.replace(WHITESPACE, " ")?.trim()?.take(LABEL_MAX).orEmpty()
         val editable = node.isEditable
+        // What a field contains is never put in the listing, and the listing is the one thing
+        // that leaves the phone: a username, a search for something private, or a password in
+        // a field the app did not flag. Only the field's own label, whether it has anything in
+        // it, and the app's placeholder go out — never the text.
+        val label = (if (editable) node.contentDescription else node.text ?: node.contentDescription)
+            ?.toString()?.replace(WHITESPACE, " ")?.trim()?.take(LABEL_MAX).orEmpty()
+        val filled = editable && !node.text.isNullOrEmpty()
         val scrollable = node.isScrollable
         // Everything that can be pressed, typed into or scrolled, plus plain text: the text
         // is how the model knows it is looking at the right conversation or message.
@@ -110,6 +118,7 @@ object Screen {
                 ?.take(HINT_MAX).orEmpty(),
             editable = editable,
             password = node.isPassword,
+            filled = filled,
             scrollable = scrollable,
             id = node.viewIdResourceName?.substringAfterLast('/'),
             bounds = bounds,
@@ -127,8 +136,10 @@ object Screen {
                     item.id != null -> append("id/").append(item.id)
                     else -> append("(no label)")
                 }
-                if (item.editable) append(" · text field")
-                if (item.password) append(" · password, never touch")
+                if (item.editable) {
+                    append(if (item.filled) " · text field, has text" else " · text field, empty")
+                }
+                if (item.password) append(" · password, never type into it")
                 else if (item.scrollable) append(" · scrollable")
                 append('\n')
             }
@@ -187,8 +198,11 @@ object Screen {
      * ACTION_SET_TEXT needs no keyboard, which is why it is used instead of typing key by
      * key — and why a job can fill a field in an app that is not even in front yet.
      */
-    fun type(item: Item, text: String): Boolean {
-        if (item.password) return false
+    fun type(item: Item, text: String, secret: Boolean = false): Boolean {
+        // Only the vault may fill a password field. [secret] is the one thing that says so,
+        // and it is passed by the sign-in path alone — so no prompt, however it is worded,
+        // can get a password typed by the model into a field.
+        if (item.password && !secret) return false
         val args = Bundle().apply {
             putCharSequence(
                 AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
