@@ -176,12 +176,11 @@ object Agent {
             }
         }
         val history = StringBuilder()
-        // One search is one search. A model that cannot see whether the first one landed
-        // asks for it again, and every repeat opens another tab on the page already in front
-        // while the user is reading the results. What has been searched is kept here so the
-        // answer to a repeat is the end of the job, not a second tab.
-        val searched = HashSet<String>()
         var steps = 0
+        // Whether this job has already searched. A second one is never needed: the browser
+        // has the page, and asking again is the model going round rather than the job going
+        // on — each repeat opening another tab while the user reads the first results.
+        var searched = false
         try {
             // The apps on this phone, read once: searched so a job that names an app starts
             // in that app, and named in every step so the model can only ask for something
@@ -224,8 +223,8 @@ object Agent {
                         return
                     }
 
-                val query = if (decision.action == "search") decision.searchKey() else null
-                val repeated = query != null && query in searched
+                val search = decision.action == "search"
+                val repeated = search && searched
                 // A repeat does not say the model's line: "searching for it again" is not an
                 // answer to a search that is already open, and the line that ends the job
                 // says what is true instead.
@@ -247,8 +246,8 @@ object Agent {
                 if (!alive()) return
                 if (repeated) {
                     finish(
-                        "That was already searched — it's open in your browser.",
-                        "asked for the same search again — the first one is open"
+                        "I stopped at one search — it's open in your browser.",
+                        "asked for a second search in the same job — the first one is open"
                     )
                     return
                 }
@@ -279,10 +278,24 @@ object Agent {
                     history.append(steps + 1).append(". ").append(decision.summary(screen))
                         .append(" → ").append(outcome).append('\n')
                     Diag.jobStep(mine, decision.summary(screen), outcome, landed, skipped)
-                    // Only a search that really went through counts: one that failed is
-                    // worth asking for again.
-                    if (query != null && landed) searched.add(query)
                     steps++
+                    // A search that went through is the job. Waiting to be told "done"
+                    // spends a request on an answer already known, and leaves the chip up
+                    // over results the user can already read. Only a search the model says
+                    // it will follow up, one that failed, or the task's own later steps
+                    // keep it going.
+                    if (search && landed) {
+                        searched = true
+                        if (!decision.more) {
+                            val query = decision.text.trim()
+                            finish(
+                                if (decision.images) "Pictures of \"$query\" are up in your browser."
+                                else "\"$query\" is up in your browser.",
+                                "the search was the whole task — it is open in the browser"
+                            )
+                            return
+                        }
+                    }
                     if (landed) SystemClock.sleep(SETTLE_MS)
                     // A sign-in he could not do himself. The job ends here, on this thread,
                     // before the ask goes out: the form is about to be the screen in front, and
@@ -577,15 +590,14 @@ object Agent {
         /** The site a sign-in is for. A name, never a credential. */
         val site: String,
         /** Whether a search should land on the pictures. */
-        val images: Boolean
-    ) {
-
+        val images: Boolean,
         /**
-         * This search in a form two answers can be compared on. The same words, and whether
-         * it was the pictures or the results, are the same search however it was capitalised.
+         * Whether the task goes on after this step. Only a search reads it: a search ends the
+         * job unless this says otherwise, so a task of one search does not spend another
+         * request being told what it already did.
          */
-        fun searchKey(): String =
-            text.trim().lowercase().replace(Regex("\\s+"), " ") + if (images) " (images)" else ""
+        val more: Boolean
+    ) {
 
         /** What the model tried, in the words the next step will be given it. */
         fun summary(screen: Screen.Snapshot): String {
@@ -616,7 +628,8 @@ object Agent {
                         text = "",
                         app = "",
                         site = "",
-                        images = false
+                        images = false,
+                        more = false
                     )
                 val rawAction = json.optString("action").ifBlank { json.optString("do") }
                 return Decision(
@@ -629,7 +642,8 @@ object Agent {
                     // "images":true is the documented way; an action that names pictures is
                     // taken as meaning it too, since that is what it was asked for.
                     images = json.optBoolean("images", false) ||
-                        rawAction.contains("image", ignoreCase = true)
+                        rawAction.contains("image", ignoreCase = true),
+                    more = json.optBoolean("more", false)
                 )
             }
 
@@ -710,8 +724,8 @@ object Agent {
           app is opened in front of the user first and read on the next turn.
         - search: text is what to look up, e.g. "cats". Add "images":true to land on the
           pictures instead of the results. It opens the phone's own default browser on that
-          search in one action. The same search is never worth asking for twice: the first
-          one has already put the page in front of the user.
+          search in one action, and that search then ends the job: add "more":true only when
+          the task has something to do after it. Never search for the same thing twice.
         - wait: when a screen is still loading.
         - done: the job is finished, or cannot be done at all.
 
@@ -731,8 +745,8 @@ object Agent {
           the images". Do it with search on the first turn — never by opening a browser and
           typing in its search box. That box cannot be submitted by typing, so it leaves the
           text sitting there and nothing searched; the browser is also then whichever one the
-          app list offered rather than the one the user actually uses. Follow a search with
-          done unless more was asked for.
+          app list offered rather than the one the user actually uses. A search is normally
+          the whole job and ends it; "more":true is only for a task that goes on afterwards.
         - If an action failed according to WHAT HAS HAPPENED SO FAR, do something different.
           Never repeat a failing action.
         - Never type into an element marked password, and never put a password in "text": a

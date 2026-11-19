@@ -643,7 +643,11 @@ class OverlayService : Service(), PropHost {
     /** Called when the accessibility service sees a keyboard appear, move or go. */
     private fun onImeChanged(ime: Int) {
         keyboardUp = ime > 0
-        if (ime == 0) return
+        if (ime == 0) {
+            // The keyboard has gone, so the box can go back down to his feet.
+            positionInputBar()
+            return
+        }
         if (abs(ime - keyboardHeightPx) > dpInt(2f)) {
             keyboardHeightPx = ime
             Keyboard.remember(this, ime)
@@ -1556,6 +1560,10 @@ class OverlayService : Service(), PropHost {
      * cannot leave him avoiding a keyboard that went away long ago.
      */
     private fun watchKeyboard() {
+        // Measure it rather than re-reading the last answer. A keyboard measured while it was
+        // still rising keeps that height in the cache for good, and a height that is too
+        // small is exactly what leaves him standing in the keyboard with his box behind it.
+        ImeWatch.probe()
         onImeChanged(imeHeight())
     }
 
@@ -1620,8 +1628,18 @@ class OverlayService : Service(), PropHost {
         val width = params.width
         params.x = (posX + petW / 2f - width / 2f).toInt()
             .coerceIn(dpInt(6f), (screenW - width - dpInt(6f)).coerceAtLeast(dpInt(6f)))
-        params.y = (posY + petH + dpInt(6f)).toInt()
-            .coerceAtMost(screenH - bottomInset - dpInt(60f))
+        // At his feet while there is room, and against the keyboard when there is not. The box
+        // is the thing being typed into, so it cannot be behind the keyboard even for the
+        // second or two it takes him to walk above it — anchored to him alone it sat under the
+        // keyboard for exactly as long as his feet were below its top. Its own height is part
+        // of the sum, so a box that wraps to a second line still clears it.
+        val barHeight = bar.height.toFloat().takeIf { it > 0f } ?: dp(62f)
+        val atFeet = (posY + petH + dpInt(6f)).toInt()
+        val aboveKeyboard = (keyboardCeiling() - barHeight - dp(4f)).toInt()
+        val wanted = if (keyboardUp) minOf(atFeet, aboveKeyboard) else atFeet
+        // Never off the bottom of the screen either, which is what the old fixed clamp did.
+        params.y = minOf(wanted, screenH - bottomInset - barHeight.toInt())
+            .coerceAtLeast(topInset + dpInt(4f))
         runCatching { windowManager.updateViewLayout(bar, params) }
         keepBarClear()
     }

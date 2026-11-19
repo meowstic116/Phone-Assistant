@@ -28,6 +28,7 @@ class ImeWatcher : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         Screen.connect(this)
+        ImeWatch.measure = { refresh() }
         refresh()
     }
 
@@ -50,6 +51,7 @@ class ImeWatcher : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onUnbind(intent: Intent?): Boolean {
+        ImeWatch.measure = null
         ImeWatch.publish(0)
         // Hands off at once: a job in flight must stop rather than act on a service that is
         // on its way out.
@@ -59,6 +61,7 @@ class ImeWatcher : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        ImeWatch.measure = null
         ImeWatch.publish(0)
         Screen.disconnect(this)
         Agent.cancel()
@@ -111,6 +114,22 @@ object ImeWatch {
         private set
 
     @Volatile var onChange: ((Int) -> Unit)? = null
+
+    /**
+     * Measures the keyboard again, now. Events only arrive when a window changes, and a
+     * keyboard caught while it was still rising reports a height it never has once it is up —
+     * with no second event to correct it. The overlay calls this on its own re-read so the
+     * number it walks clear of is the one on the screen.
+     *
+     * Direct rather than posted: the service and the overlay are one process on one thread,
+     * so this is a read of the window list at the moment it is asked for. Null while the
+     * service is not connected.
+     */
+    internal var measure: (() -> Unit)? = null
+
+    fun probe() {
+        measure?.invoke()
+    }
 
     /** Whether the user has switched the service on in Settings. */
     fun enabled(ctx: Context): Boolean {
