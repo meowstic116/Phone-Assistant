@@ -396,8 +396,10 @@ object Agent {
      *
      * A feed where one button repeats — "Give Kudos", "Like", "Follow" — is the same answer
      * happening many times. Once the model has pressed one, the others are pressed here: read
-     * the screen, find the next, press it, until it is gone or [REPEAT_LIMIT] have been
-     * pressed. A list that used to cost a request an item now costs one request.
+     * the screen, find the next, press it. When the screen has none left it scrolls on and
+     * keeps looking, up to [REPEAT_SCROLLS] screens down, until [REPEAT_LIMIT] have been
+     * pressed or the list runs out. A list that used to cost a request an item now costs one
+     * request for a stretch of it.
      *
      * It is deliberately narrow. Only a plain tap is replayed; only for a label that was
      * already on the screen more than once; only while the app stays the same; and never for a
@@ -418,11 +420,40 @@ object Agent {
         var screen = Screen.snapshot() ?: return 0
         val app = screen.app
         var count = 0
+        var scrolls = 0
+        // The screen the last scroll was taken from, for noticing the end of the list.
+        var scrolledFrom = ""
         while (count < REPEAT_LIMIT) {
+            if (ticket.get() != mine) return count
             val item = screen.items.firstOrNull { item ->
                 !item.password && item.label.equals(label, ignoreCase = true) &&
                     item.bounds.flattenToString() !in pressed
-            } ?: return count
+            }
+            if (item == null) {
+                // None of them left on this screen: the rest of the list is further down. The
+                // pass carries on down it rather than handing back a screenful at a time,
+                // because a feed is one list and a request per screenful is the cost this is
+                // here to remove. Bounded like the pressing is, and it stops at the end of
+                // the list: a scroll that changes nothing means there is nothing below.
+                if (scrolls >= REPEAT_SCROLLS) return count
+                val scene = screen.app + '\u0000' + screen.listing
+                if (scene == scrolledFrom) return count
+                scrolledFrom = scene
+                if (!onAct(true)) return count
+                val moved = try {
+                    Screen.scroll(true, null)
+                } finally {
+                    onAct(false)
+                }
+                if (!moved) return count
+                scrolls++
+                Diag.jobStep(mine, "scroll down", "scrolled down, still finding \"$label\"", true)
+                SystemClock.sleep(SETTLE_MS)
+                val below = Screen.snapshot() ?: return count
+                if (below.app != app) return count
+                screen = below
+                continue
+            }
             pressed += item.bounds.flattenToString()
             if (!onAct(true)) return count
             val landed = try {
@@ -801,6 +832,9 @@ object Agent {
 
     /** How many repeats of one answer are pressed before the model is asked again. */
     private const val REPEAT_LIMIT = 10
+
+    /** How many screens down one pass may carry on looking for the same label. */
+    private const val REPEAT_SCROLLS = 4
 
     /**
      * Labels whose press cannot be taken back, or costs money. Only these are refused.
