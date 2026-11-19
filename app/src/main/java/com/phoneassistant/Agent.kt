@@ -401,7 +401,7 @@ object Agent {
      *
      * It is deliberately narrow. Only a plain tap is replayed; only for a label that was
      * already on the screen more than once; only while the app stays the same; and never for a
-     * label with a word like buy or delete in it, because a repeated "Buy" is not the sort of
+     * label that reads like money or deletion, because a repeated "Buy" is not the sort of
      * help anyone asked for. Each element is pressed at most once, recognised by where it
      * sits, and the one the model itself just pressed is not pressed again — so a button that
      * ignores a press cannot be pressed at all day.
@@ -803,12 +803,17 @@ object Agent {
     private const val REPEAT_LIMIT = 10
 
     /**
-     * Words that mean something instead of a list item. A label with one of these in it is
-     * never replayed: pressing "Buy" ten times is a very different thing from ten kudos.
+     * Labels whose press cannot be taken back, or costs money. Only these are refused.
+     *
+     * The list is short on purpose: it is here to stop a replay pressing "Buy" ten times, not
+     * to pass judgement on every verb. "Send", "Share", "Post", "Subscribe", "Follow" and
+     * "Report" all belong to buttons that are perfectly reasonable to press down a list — a
+     * row of "Subscribe" on channels is not ten purchases — and refusing them only made the
+     * replay skip work the model had already decided to do.
      */
     private val UNSAFE_REPEAT = Regex(
-        "\\b(buy|pay|purchase|order|checkout|check ?out|delete|remove|uninstall|confirm|reset|" +
-            "send|share|post|publish|report|block|call|subscribe|unfollow)\\b"
+        "\\b(buy|pay|payment|purchase|order|checkout|check out|donate|tip|upgrade|" +
+            "delete|remove|uninstall|erase|wipe|reset)\\b"
     )
 
     /** A step that was never pressed, because his own windows would not move off the screen. */
