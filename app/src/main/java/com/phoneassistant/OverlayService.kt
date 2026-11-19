@@ -344,6 +344,16 @@ class OverlayService : Service(), PropHost {
     private val handler = Handler(Looper.getMainLooper())
     private val rnd = Random(System.currentTimeMillis())
 
+    /**
+     * A reused copy of [props] for the frame loop. A toy can take itself off the screen from
+     * inside its own frame, so the loop cannot walk the live list — but a fresh list of them
+     * every frame is a list a second at thirty frames a second, for nothing.
+     */
+    private val frameScratch = ArrayList<Prop>(8)
+
+    /** Counts down to the next look for a toy that has outstayed its welcome. */
+    private var retireCheck = 1_000L
+
     /** Everything Pip has put on the screen: stands, paintings, games, plants. */
     private val props = mutableListOf<Prop>()
 
@@ -973,14 +983,22 @@ class OverlayService : Service(), PropHost {
         if (props.isNotEmpty()) {
             // Caught rather than left to crash the tick, but recorded: a toy throwing every
             // frame used to freeze that toy silently, with nothing anywhere saying why.
-            props.toList().forEach { prop ->
+            frameScratch.clear()
+            frameScratch.addAll(props)
+            frameScratch.forEach { prop ->
                 try {
                     prop.onFrame()
                 } catch (t: Throwable) {
                     Diag.caught(prop.javaClass.simpleName + ".onFrame", t)
                 }
             }
-            retireIfStale()
+            // A toy's welcome is minutes long. Looking for an old one thirty times a second
+            // scans every prop on the screen for an answer that cannot have changed.
+            retireCheck -= frameMs
+            if (retireCheck <= 0L) {
+                retireCheck = 1_000L
+                retireIfStale()
+            }
         }
 
         watchCountdown += frameMs
@@ -2231,11 +2249,14 @@ class OverlayService : Service(), PropHost {
                 Intent.ACTION_SCREEN_OFF -> {
                     paused = true
                     pet?.walking = false
+                    // Nothing is looking at him: stop repainting the idle sway.
+                    pet?.animating = false
                 }
                 // Awake or unlocked: check the real deadline, since the timer sleeps with
                 // the phone. A locked one is skipped here and caught by USER_PRESENT.
                 Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
                     paused = false
+                    pet?.animating = true
                     settleBreak()
                 }
             }

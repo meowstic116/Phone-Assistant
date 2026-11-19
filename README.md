@@ -11,6 +11,9 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
 - Everything moves rather than appears: a toy he puts down pops into place and shrinks away
   when it goes, a prop lifts slightly under your finger while you drag it, and the speech
   bubble eases in, then drifts out. A line stays up for as long as it takes to read.
+- He is drawn no more often than there is something to see: a walk gets every frame, the
+  idle sway twenty a second, and nothing at all while the screen is off. Drawing the same
+  small body sixty times a second to show a 1dp bob was the largest fixed cost on the overlay.
 - And nothing sits still once it is down: the stand's sign swings on its nail, the plant
   leans toward wherever he is standing, the painting keeps catching the light as the paint
   dries, and the bubble wrap sheet glints between pops. None of it redraws while it isn't
@@ -188,7 +191,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.78-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.79-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

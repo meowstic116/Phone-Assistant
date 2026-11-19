@@ -52,6 +52,9 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
     private val clothEdge = stroke(0xFFD9CFBB.toInt(), 1f)
     private val artArea = RectF()
     private val scratch = RectF()
+
+    /** The frame's outer box, reused: this canvas is redrawn while it is being painted. */
+    private val frameRect = RectF()
     private val path = Path()
 
     private val sheen = Sheen(dp(52f), 0x22FFFFFF.toInt(), SHEEN_PERIOD_MS)
@@ -85,7 +88,8 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
         val w = width.toFloat()
         val h = height.toFloat()
 
-        panel(canvas, RectF(dp(1f), dp(1f), w - dp(1f), h - dp(1f)), 4f, frameEdge, frame)
+        frameRect.set(dp(1f), dp(1f), w - dp(1f), h - dp(1f))
+        panel(canvas, frameRect, 4f, frameEdge, frame)
         artArea.set(dp(8f), dp(8f), w - dp(8f), h - dp(16f))
         canvas.drawRect(artArea, cloth)
 

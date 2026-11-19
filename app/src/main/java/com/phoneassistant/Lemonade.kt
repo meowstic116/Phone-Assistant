@@ -28,6 +28,17 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     private val tiny = text(0xFF6B4A2C.toInt(), 6.5f)
     private val slicePaint = fill(0xFFFFF1A8.toInt())
 
+    /**
+     * The stand is one size for its whole life, and it redraws every frame the sign swings,
+     * so its geometry is worked out once instead of five RectFs a frame for the bin.
+     */
+    private val jugRect = RectF(dp(6f), dp(72f), dp(26f), dp(96f))
+    private val jugHandle = RectF(dp(24f), dp(76f), dp(34f), dp(92f))
+    private val cupRect = RectF(dp(88f), dp(82f), dp(106f), dp(98f))
+    private val counterRect = RectF()
+    private val boardRect = RectF()
+    private var rectWidth = -1f
+
     /** Glasses promised and not yet poured, capped at what the stand can hold. */
     private var owed = 0
 
@@ -36,9 +47,17 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     /** Runs the next owed pour, a beat after the last one. */
     private val pourNext = Runnable { pourPending(announce = false) }
 
+    private fun buildRects(w: Float) {
+        if (w == rectWidth) return
+        rectWidth = w
+        counterRect.set(dp(2f), dp(96f), w - dp(2f), dp(112f))
+        boardRect.set(dp(14f), dp(115f), w - dp(14f), dp(137f))
+    }
+
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
+        buildRects(w)
 
         // Two uprights carrying the awning, and the legs under the counter. Every number
         // here is in the stand's own dp, and the block below is what Pip has to fit around:
@@ -50,22 +69,20 @@ class LemonadeStand(host: PropHost) : Prop(host) {
 
         // Pitcher and a spare cup, at the ends of the counter: the middle is where Pip
         // stands, so nothing on this stand is painted over his face.
-        val jug = RectF(dp(6f), dp(72f), dp(26f), dp(96f))
-        panel(canvas, jug, 4f, glassEdge, juice)
-        canvas.drawArc(RectF(dp(24f), dp(76f), dp(34f), dp(92f)), -70f, 140f, false, glassEdge)
+        panel(canvas, jugRect, 4f, glassEdge, juice)
+        canvas.drawArc(jugHandle, -70f, 140f, false, glassEdge)
         canvas.drawCircle(dp(10f), dp(74f), dp(4f), slicePaint)
-        val cup = RectF(dp(88f), dp(82f), dp(106f), dp(98f))
-        canvas.drawRect(cup, glassFill)
-        canvas.drawRect(cup, glassEdge)
+        canvas.drawRect(cupRect, glassFill)
+        canvas.drawRect(cupRect, glassEdge)
 
         // The counter, drawn over his hips and feet, just below his chin when he stands
         // behind it. Sixteen dp thick so his feet stay hidden even when he bobs downwards.
-        panel(canvas, RectF(dp(2f), dp(96f), w - dp(2f), dp(112f)), 2f, woodEdge, wood)
+        panel(canvas, counterRect, 2f, woodEdge, wood)
 
         // The sign, which is the entire marketing strategy, hanging on the counter front,
         // below where he stands rather than across his face. It swings from its top edge,
         // the way anything hung on one nail would.
-        val board = RectF(dp(14f), dp(115f), w - dp(14f), dp(137f))
+        val board = boardRect
         canvas.save()
         canvas.rotate(signSway(SystemClock.uptimeMillis()), board.centerX(), board.top)
         panel(canvas, board, 3f, woodEdge, cream)
@@ -299,6 +316,9 @@ class LemonadeGlass(host: PropHost) : Prop(host) {
     private val ice = fill(0x66FFFFFF)
     private val glassPath = Path()
 
+    /** The ice cube's box, reused: a glass is redrawn while it wobbles. */
+    private val iceRect = RectF()
+
     override fun onTap(x: Float, y: Float) {
         if (!drunk) {
             drunk = true
@@ -345,10 +365,8 @@ class LemonadeGlass(host: PropHost) : Prop(host) {
             canvas.save()
             val iceY = levelTop + dp(4f) + wobble * dp(2f)
             canvas.rotate(wobble * 8f, cx, iceY)
-            canvas.drawRoundRect(
-                RectF(cx - dp(7f), iceY, cx + dp(1f), iceY + dp(7f)),
-                dp(1.5f), dp(1.5f), ice
-            )
+            iceRect.set(cx - dp(7f), iceY, cx + dp(1f), iceY + dp(7f))
+            canvas.drawRoundRect(iceRect, dp(1.5f), dp(1.5f), ice)
             canvas.restore()
             canvas.restore()
         }

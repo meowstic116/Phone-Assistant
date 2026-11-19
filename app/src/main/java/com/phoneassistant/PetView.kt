@@ -75,6 +75,26 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
     private var blinkEndsAt = 0L
     private var blinkSeed = bornAt
 
+    /** When a frame was last actually drawn, so idle frames can be skipped. */
+    private var lastDrawAt = 0L
+
+    /** Whether the eyes were shut on the last frame, so both ends of a blink get drawn. */
+    private var drewBlinking = false
+
+    /**
+     * False while the screen is off. Nothing can see him then, and this window would otherwise
+     * keep drawing the idle sway sixty times a second into a display that is not on.
+     */
+    var animating: Boolean = true
+        set(value) {
+            if (field == value) return
+            field = value
+            // Waking draws at once rather than waiting out the idle gap. The frame callback
+            // itself stays alive either way, so there is only ever one of them and nothing
+            // has to be re-posted — and re-posting on wake could have left two running.
+            if (value) lastDrawAt = 0L
+        }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         Choreographer.getInstance().postFrameCallback(this)
@@ -85,15 +105,53 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         super.onDetachedFromWindow()
     }
 
+    /**
+     * Draws only when there is something different to draw.
+     *
+     * The frame callback itself is the cheapest part of a frame; the draw that follows it is
+     * the expensive one, and this window is on the screen for as long as he runs. So an idle
+     * Pip — a 1.1dp sway and an occasional blink — is repainted twenty times a second instead
+     * of sixty, which is indistinguishable on a body this small. A walk still gets every
+     * frame, because a hop that misses one is visible.
+     */
     override fun doFrame(frameTimeNanos: Long) {
+        Choreographer.getInstance().postFrameCallback(this)
+        // Screen off: the callback is kept so waking is instant, but nothing is drawn into a
+        // display nobody is looking at.
+        if (!animating) return
         val now = SystemClock.uptimeMillis()
+        var redraw = false
+
         if (soonToBlink(now)) {
             blinkEndsAt = now + 110L
             blinkSeed = (blinkSeed * 1103515245L + 12345L) and 0x7FFFFFFF
             nextBlinkAt = now + 2400L + (blinkSeed % 4200L)
+            redraw = true
         }
-        invalidate()
-        Choreographer.getInstance().postFrameCallback(this)
+        // Both ends of a blink have to be drawn, or a skipped frame leaves him mid-blink.
+        val blinking = now < blinkEndsAt
+        if (blinking != drewBlinking) {
+            drewBlinking = blinking
+            redraw = true
+        }
+        if (now - lastDrawAt >= frameGapMs()) redraw = true
+
+        if (redraw) {
+            lastDrawAt = now
+            invalidate()
+        }
+    }
+
+    /**
+     * How long may pass between redraws, by how much is moving. Walking is the one thing that
+     * has to be smooth; a talking mouth and a changing mood a little less; the idle sway much
+     * less still.
+     */
+    private fun frameGapMs(): Long = when {
+        walking -> 0L
+        mood == Mood.TALKING -> 33L
+        mood != Mood.NEUTRAL -> 40L
+        else -> 50L
     }
 
     private fun soonToBlink(now: Long) = now >= nextBlinkAt
