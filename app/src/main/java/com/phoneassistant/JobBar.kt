@@ -7,12 +7,16 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
- * The way out of a phone job: a small chip at the bottom of the screen for as long as Pip's
- * hands are busy, with one button on it.
+ * The way out of a phone job: a small chip with one button, for as long as Pip's hands are
+ * busy.
  *
  * It is a window of the overlay rather than part of the bubble, because the app being worked
  * on is the whole point of a job — a button on Pip's own app would be no use from inside
  * Messages. It says only what is true (he is working) and offers only what is useful (stop).
+ *
+ * Nothing inside it is a separate touch target: the whole chip is one, so the service can tell
+ * a tap (stop) from a drag (put it somewhere the job is not pressing) without half of a 32dp
+ * pill behaving differently from the other half.
  */
 class JobBar(ctx: Context, onStop: () -> Unit) : LinearLayout(ctx) {
 
@@ -21,6 +25,12 @@ class JobBar(ctx: Context, onStop: () -> Unit) : LinearLayout(ctx) {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(13f), dp(6f), dp(5f), dp(6f))
         setBackgroundResource(R.drawable.overlay_panel)
+        // Clickable for accessibility only: a touch is handled by the service, which needs the
+        // same gesture to be a drag when the finger moves. TalkBack activates the chip through
+        // this listener rather than through a gesture.
+        isClickable = true
+        contentDescription = "Pip is working. Tap to stop, drag to move."
+        setOnClickListener { onStop() }
 
         val label = TextView(ctx).apply {
             text = "Pip is working"
@@ -35,9 +45,6 @@ class JobBar(ctx: Context, onStop: () -> Unit) : LinearLayout(ctx) {
             setTextColor(0xFFFFB4AB.toInt())
             setPadding(dp(11f), dp(5f), dp(11f), dp(5f))
             setBackgroundResource(R.drawable.stop_chip)
-            isClickable = true
-            contentDescription = "Stop Pip's job"
-            setOnClickListener { onStop() }
         }
 
         addView(label)

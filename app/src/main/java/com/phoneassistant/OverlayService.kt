@@ -59,6 +59,9 @@ class OverlayService : Service(), PropHost {
         private const val CHANNEL_ID = "assistant"
         private const val ACTION_STOP = "com.phoneassistant.STOP"
 
+        /** Where the cancel chip's last dragged position is kept. */
+        private const val PREFS = "chip"
+
         /** How long a model reply keeps the floor after it lands, over any toy line. */
         private const val REPLY_HOLD_MS = 4_000L
 
@@ -203,9 +206,24 @@ class OverlayService : Service(), PropHost {
     private var hud: DiagHud? = null
     private var hudParams: WindowManager.LayoutParams? = null
 
-    /** The cancel chip at the bottom of the screen, while a phone job is running. */
+    /** The cancel chip, while a phone job is running. */
     private var jobBar: JobBar? = null
     private var jobBarParams: WindowManager.LayoutParams? = null
+
+    /**
+     * Where the chip was left after a drag, as a fraction of the room it has to move in. Null
+     * means it has never been moved and sits in its corner. Stored as a fraction rather than
+     * pixels so the same spot means the same corner after a rotation.
+     */
+    private var chipSpot: Pair<Float, Float>? = null
+
+    /** True while a finger is on the chip, so the ticker does not drag it back mid-drag. */
+    private var chipDragging = false
+    private var chipMoved = false
+    private var chipDownX = 0f
+    private var chipDownY = 0f
+    private var chipLeft = 0
+    private var chipTop = 0
 
     /** Where the panel was when the finger went down, so a drag follows it exactly. */
     private var hudDownX = 0f
@@ -325,6 +343,7 @@ class OverlayService : Service(), PropHost {
         petH = (86 * dp).toInt()
         speed = 55 * dp
         keyboardHeightPx = Keyboard.rememberedPx(this)
+        chipSpot = loadChipSpot()
 
         posX = (screenW - petW) * 0.55f
         posY = (screenH - petH - bottomInset) * 0.62f
@@ -1528,7 +1547,10 @@ class OverlayService : Service(), PropHost {
      */
     private fun showJobBar() {
         if (jobBar != null) return
+        // The listener is for TalkBack, which activates the chip without a finger: a real
+        // touch goes through the service's own listener so it can become a drag.
         val view = JobBar(this) { stopJob() }
+        view.setOnTouchListener(jobBarTouch)
         val unspecified = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         view.measure(unspecified, unspecified)
         val width = view.measuredWidth.coerceAtLeast(dpInt(130f))
@@ -1564,20 +1586,125 @@ class OverlayService : Service(), PropHost {
         jobBar?.let { view -> runCatching { windowManager.removeView(view) } }
         jobBar = null
         jobBarParams = null
+        chipDragging = false
+        chipMoved = false
     }
 
     /**
-     * Bottom centre, and above the keyboard when one is up, so the way out of a job is never
-     * behind the thing the job opened.
+     * The bottom left corner, or wherever the chip was last dragged to, and above the keyboard
+     * when one is up so the way out of a job is never behind the thing the job opened.
+     *
+     * The corner is the point: a job presses what it needs pressed all over the screen, and the
+     * middle of the bottom edge is the one strip a list row, a keyboard's space bar or a game's
+     * control is most likely to be in. A corner is small, out of the way of the app's own
+     * controls, and — with the drag — somewhere the user can put out of the way entirely.
      */
     private fun positionJobBar() {
         val view = jobBar ?: return
         val params = jobBarParams ?: return
-        params.x = ((screenW - params.width) / 2).coerceAtLeast(0)
+        val spanX = (screenW - params.width).coerceAtLeast(0)
+        val spanY = (screenH - params.height - topInset).coerceAtLeast(0)
+        val spot = chipSpot
+
+        params.x = if (spot == null) {
+            dpInt(10f)
+        } else {
+            (spot.first * spanX).toInt().coerceIn(0, spanX)
+        }
+
+        var y = if (spot == null) {
+            (screenH - bottomInset - params.height - dpInt(14f))
+        } else {
+            (topInset + spot.second * spanY).toInt().coerceIn(topInset, topInset + spanY)
+        }
+
+        // A keyboard takes the bottom of the screen. The chip stays visible above it instead of
+        // hiding under it: a Stop nobody can reach is the same as no Stop.
         val floor = if (keyboardUp) keyboardCeiling() else (screenH - bottomInset).toFloat()
-        params.y = (floor - params.height - dp(18f)).toInt()
-            .coerceIn(topInset, (screenH - params.height).coerceAtLeast(topInset))
+        if (y + params.height > floor - dpInt(4f)) {
+            y = (floor - params.height - dpInt(14f)).toInt()
+        }
+
+        params.y = y.coerceIn(topInset, (screenH - params.height).coerceAtLeast(topInset))
         runCatching { windowManager.updateViewLayout(view, params) }
+    }
+
+    /**
+     * One finger, one target: still means stop, moving means put the chip down somewhere else.
+     * The measured distance is from where the finger went down rather than added per frame, so
+     * a dropped frame cannot make the chip lag behind the finger holding it.
+     */
+    private val jobBarTouch = View.OnTouchListener { _, event ->
+        val params = jobBarParams ?: return@OnTouchListener false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                chipDownX = event.rawX
+                chipDownY = event.rawY
+                chipLeft = params.x
+                chipTop = params.y
+                chipMoved = false
+                chipDragging = true
+                true
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.rawX - chipDownX
+                val dy = event.rawY - chipDownY
+                if (abs(dx) > dp(6f) || abs(dy) > dp(6f)) chipMoved = true
+                if (chipMoved) {
+                    params.x = (chipLeft + dx).toInt()
+                        .coerceIn(0, (screenW - params.width).coerceAtLeast(0))
+                    params.y = (chipTop + dy).toInt()
+                        .coerceIn(topInset, (screenH - params.height).coerceAtLeast(topInset))
+                    jobBar?.let { view ->
+                        runCatching { windowManager.updateViewLayout(view, params) }
+                    }
+                }
+                true
+            }
+
+            MotionEvent.ACTION_UP -> {
+                chipDragging = false
+                if (chipMoved) {
+                    // Kept, so the chip stays where it was put for the whole job and for the
+                    // next one: a place the user chose is better than a place guessed at.
+                    rememberChipSpot(params)
+                } else {
+                    stopJob()
+                }
+                true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                chipDragging = false
+                // A press the system took away is not a stop: the chip just goes back to where
+                // it belongs.
+                if (chipMoved) rememberChipSpot(params) else positionJobBar()
+                true
+            }
+
+            else -> false
+        }
+    }
+
+    /** Saves the chip's place, relative to the room it has to move in. */
+    private fun rememberChipSpot(params: WindowManager.LayoutParams) {
+        val spanX = (screenW - params.width).coerceAtLeast(1)
+        val spanY = (screenH - params.height - topInset).coerceAtLeast(1)
+        val spot = (params.x.toFloat() / spanX).coerceIn(0f, 1f) to
+            ((params.y - topInset).toFloat() / spanY).coerceIn(0f, 1f)
+        chipSpot = spot
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putFloat("chip_x", spot.first)
+            .putFloat("chip_y", spot.second)
+            .apply()
+    }
+
+    /** Where the chip was left last time, or null if it has never been dragged. */
+    private fun loadChipSpot(): Pair<Float, Float>? {
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!prefs.contains("chip_x") || !prefs.contains("chip_y")) return null
+        return prefs.getFloat("chip_x", 0f) to prefs.getFloat("chip_y", 0f)
     }
 
     /**
@@ -1593,7 +1720,9 @@ class OverlayService : Service(), PropHost {
                 endJobWatch()
                 return
             }
-            positionJobBar()
+            // A chip being held follows the finger; only one that is resting is put back in
+            // its place (or lifted above a keyboard that has just arrived).
+            if (!chipDragging) positionJobBar()
             handler.postDelayed(this, JOB_REFRESH_MS)
         }
     }

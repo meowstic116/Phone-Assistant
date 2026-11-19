@@ -51,9 +51,12 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   screen alone — so the job happens in front of you rather than somewhere behind it, and he
   moves into the bottom corner so he is not covering it. He is given the list of apps really
   installed on the phone, so "open WhatsApp" reaches that WhatsApp and not a guess. While a
-  job is running there is a small **Stop** chip at the bottom of the screen, over whatever app
-  he is working in: one tap ends the job where it stands, and the record on Diagnostics says
-  it was cancelled. An action already under way is not un-pressed, but nothing new happens
+  job is running there is a small **Stop** chip in the bottom left corner, over whatever app
+  he is working in — a corner rather than the middle of the bottom edge, which is where a job
+  is most likely to need to press: one tap ends the job where it stands, and the record on
+  Diagnostics says it was cancelled. Drag the chip anywhere you like and it stays there, for
+  this job and the next one; it lifts above the keyboard when one comes up, so it is never
+  behind the app. An action already under way is not un-pressed, but nothing new happens
   after the Stop — a step the model was still deciding is thrown away instead of carried out,
   which includes cancelling by sending him a new message. He says what he is starting,
   then reports in his bubble. His hands go through the accessibility service: he refuses
@@ -158,7 +161,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.62-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.63-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 
