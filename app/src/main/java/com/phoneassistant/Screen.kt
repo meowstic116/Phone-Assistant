@@ -45,18 +45,40 @@ object Screen {
         val id: String?,
         val bounds: Rect,
         val node: AccessibilityNodeInfo
-    )
+    ) {
+        /**
+         * The read this item came from. Its labels and bounds are copies that outlive the
+         * read — the record and the history still name them — but its node does not, so an
+         * action aimed through it has to know whether that read is still alive.
+         */
+        internal var source: Snapshot? = null
+    }
 
     /**
      * The screen, read once: what it is, what is on it, and the listing for the model.
      *
      * It owns the nodes it was read from, so it has a lifetime. [release] is what ends it, and
      * after that the items' nodes may no longer be used to act on — everything else about an
-     * item is a copy and outlives it.
+     * item is a copy and outlives it, and an action aimed through a released one throws rather
+     * than pressing a recycled node.
      */
     class Snapshot(val app: String, val items: List<Item>, val listing: String) {
 
+        init {
+            items.forEach { item -> item.source = this }
+        }
+
+        @Volatile
         private var released = false
+
+        /**
+         * Throws when an action is aimed through an item from a read that is over. The click
+         * would otherwise go to a recycled node, or to whatever the framework has since put
+         * in its place — a wrong press rather than a missing one, and silence about it.
+         */
+        internal fun ensureLive() = check(!released) {
+            "an action was aimed through an element from a screen read that was already released"
+        }
 
         /**
          * Hands the nodes back to the framework, once. From API 33 a node is an ordinary
@@ -138,6 +160,11 @@ object Screen {
         runCatching { node.recycle() }
     }
 
+    /** Refuses to act through an element whose screen read has been handed back. */
+    private fun Item.ensureRead() {
+        source?.ensureLive()
+    }
+
     /** Whether this node became an item. One that did is kept until its snapshot is released. */
     private fun consider(node: AccessibilityNodeInfo, out: MutableList<Item>): Boolean {
         val editable = node.isEditable
@@ -210,34 +237,58 @@ object Screen {
      * Presses the element. The label is usually a child of the row that takes the press, so
      * a clickable ancestor is tried before falling back to a real tap on the element's
      * middle — which is also what gets through for windows that report nothing clickable.
+     *
+     * The element's own node belongs to the read it came from. Every ancestor walked on the
+     * way up is a fresh node asked of the framework, and is given straight back once it has
+     * been tried — a press costs up to four of them, and a repeat pass dozens.
      */
     fun tap(item: Item): Boolean {
-        var node: AccessibilityNodeInfo? = item.node
-        repeat(TAP_ANCESTORS) {
-            val current = node ?: return@repeat
-            if (current.isClickable) {
+        item.ensureRead()
+        var node = item.node
+        var owned = false
+        var hops = 0
+        while (hops < TAP_ANCESTORS) {
+            hops++
+            if (node.isClickable) {
                 val clicked = runCatching {
-                    current.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 }.getOrDefault(false)
-                if (clicked) return true
+                if (clicked) {
+                    if (owned) hand(node)
+                    return true
+                }
             }
-            node = runCatching { current.parent }.getOrNull()
+            val parent = runCatching { node.parent }.getOrNull() ?: break
+            if (owned) hand(node)
+            node = parent
+            owned = true
         }
+        if (owned) hand(node)
         return gestureTap(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
     }
 
     fun longPress(item: Item): Boolean {
-        var node: AccessibilityNodeInfo? = item.node
-        repeat(TAP_ANCESTORS) {
-            val current = node ?: return@repeat
-            if (current.isLongClickable) {
+        item.ensureRead()
+        var node = item.node
+        var owned = false
+        var hops = 0
+        while (hops < TAP_ANCESTORS) {
+            hops++
+            if (node.isLongClickable) {
                 val held = runCatching {
-                    current.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
+                    node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
                 }.getOrDefault(false)
-                if (held) return true
+                if (held) {
+                    if (owned) hand(node)
+                    return true
+                }
             }
-            node = runCatching { current.parent }.getOrNull()
+            val parent = runCatching { node.parent }.getOrNull() ?: break
+            if (owned) hand(node)
+            node = parent
+            owned = true
         }
+        if (owned) hand(node)
         return gestureLongPress(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
     }
 
@@ -248,6 +299,7 @@ object Screen {
      * key — and why a job can fill a field in an app that is not even in front yet.
      */
     fun type(item: Item, text: String, secret: Boolean = false): Boolean {
+        item.ensureRead()
         // Only the vault may fill a password field. [secret] is the one thing that says so,
         // and it is passed by the sign-in path alone — so no prompt, however it is worded,
         // can get a password typed by the model into a field.
@@ -274,24 +326,39 @@ object Screen {
         }.getOrDefault(false)
     }
 
-    /** Scrolls the given element, its nearest scrollable parent, or the screen itself. */
+    /**
+     * Scrolls the given element, its nearest scrollable parent, or the screen itself.
+     *
+     * Nothing here is the read's except the element's own node: a walk with no element starts
+     * from the root, which is asked of the framework like any ancestor and given back the same
+     * way — it used to be neither, and a scroll cost a node apiece.
+     */
     fun scroll(forward: Boolean, item: Item?): Boolean {
         val action = if (forward) {
             AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
         } else {
             AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
         }
-        var node: AccessibilityNodeInfo? = item?.node
+        item?.ensureRead()
+        var node: AccessibilityNodeInfo = item?.node
             ?: runCatching { service?.rootInActiveWindow }.getOrNull()
-        repeat(SCROLL_ANCESTORS) {
-            val current = node ?: return@repeat
-            if (current.isScrollable &&
-                runCatching { current.performAction(action) }.getOrDefault(false)
+            ?: return gestureScroll(forward)
+        var owned = item == null
+        var hops = 0
+        while (hops < SCROLL_ANCESTORS) {
+            hops++
+            if (node.isScrollable &&
+                runCatching { node.performAction(action) }.getOrDefault(false)
             ) {
+                if (owned) hand(node)
                 return true
             }
-            node = runCatching { current.parent }.getOrNull()
+            val parent = runCatching { node.parent }.getOrNull() ?: break
+            if (owned) hand(node)
+            node = parent
+            owned = true
         }
+        if (owned) hand(node)
         return gestureScroll(forward)
     }
 
