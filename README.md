@@ -19,8 +19,9 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   thinking dots, then answers in a speech bubble that follows him around and flips below
   him near the top of the screen. The box leaves as soon as you send, or when you press
   back. He steps straight up clear of the keyboard using its measured height, not a guess —
-  and he keeps clear of a keyboard you open in any other app too, because a small
-  accessibility service reports where the keyboard window is. That report is the only place
+  and he keeps clear of a keyboard you open in any other app too — clearing the row above it
+  as well as the keyboard, so the box you are typing in stays visible instead of being stood
+  on — because a small accessibility service reports where the keyboard window is. That report is the only place
   the keyboard is measured, and a toy he puts out while you are typing is placed above it
   rather than in the middle of your words. Without the service switched on he still steps
   clear of his own chat box, but not of anything else's keyboard.
@@ -183,7 +184,7 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.74-debug.apk` if you just want to
+The current build is committed at `dist/phone-assistant-0.75-debug.apk` if you just want to
 sideload it without building. Each new build replaces the file in `dist/`, so there is
 always exactly one APK to grab — easiest thing to download from a phone.
 

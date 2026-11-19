@@ -83,6 +83,15 @@ class OverlayService : Service(), PropHost {
         /** How long a toy stays out before he has had enough of it. */
         private const val TOY_LIFE_MS = 4 * 60_000L
 
+        /**
+         * Height, in dp, of the row a keyboard sits under: a chat's message box, a comment
+         * field, a search bar. He keeps this much room between himself and any keyboard that
+         * is not his own, so the box being typed into stays visible instead of being stood
+         * on — clearing the keyboard alone leaves his feet on the keyboard's top edge, which
+         * is exactly where that row begins.
+         */
+        private const val INPUT_ROW_DP = 60f
+
         fun start(ctx: Context) {
             ctx.startForegroundService(Intent(ctx, OverlayService::class.java))
         }
@@ -1030,8 +1039,12 @@ class OverlayService : Service(), PropHost {
     private fun pickTarget(now: Long) {
         val maxX = (screenW - petW).coerceAtLeast(0).toFloat()
         val minY = topInset + dp(8f)
-        // Nowhere in the keyboard, whoever is typing in it.
-        val floor = if (keyboardUp) keyboardCeiling() else (screenH - bottomInset).toFloat()
+        // Nowhere in the keyboard, whoever is typing in it, and nowhere on the box above it.
+        val floor = if (keyboardUp) {
+            keyboardCeiling() - keyboardAbove()
+        } else {
+            (screenH - bottomInset).toFloat()
+        }
         val maxY = (floor - petH - dp(8f)).coerceAtLeast(minY)
         val reach = dp(230f)
 
@@ -1447,22 +1460,13 @@ class OverlayService : Service(), PropHost {
     }
 
     /**
-     * If the bar would sit under the keyboard, he walks straight up until the box clears
-     * it. He keeps his column: the bar follows him and is kept on screen on its own, so
-     * there is nothing to be gained by sliding sideways — and re-targeting on every probe
-     * sample used to drag him into a corner.
+     * If the bar would sit under the keyboard, or he would be standing on the box above it,
+     * he walks straight up until both are clear. He keeps his column: the bar follows him and
+     * is kept on screen on its own, so there is nothing to be gained by sliding sideways —
+     * and re-targeting on every probe sample used to drag him into a corner.
      */
     private fun walkClearOfKeyboard() {
-        val ceiling = keyboardCeiling()
-        // With his own box open the box has to clear the keyboard; on somebody else's
-        // keyboard he only has to keep himself out of it. The bar has no height on the
-        // frame it is added, so fall back to its usual size rather than under-clearing.
-        val barHeight = if (inputBar == null) {
-            dp(8f)
-        } else {
-            inputBar?.height?.toFloat()?.takeIf { it > 0f } ?: dp(62f)
-        }
-        val neededY = ceiling - petH - dp(6f) - barHeight
+        val neededY = keyboardCeiling() - keyboardAbove() - petH - dp(6f)
         if (neededY >= posY) return
 
         targetX = posX
@@ -1476,6 +1480,22 @@ class OverlayService : Service(), PropHost {
         walking = true
         toyWalk = false
         relocating = true
+    }
+
+    /**
+     * How much of the screen above the keyboard he has to keep clear as well as the keyboard
+     * itself, because clearing only the keyboard leaves his feet on its top edge — which is
+     * where the row above it starts.
+     *
+     * With his own chat box open that row is his box, and he stands on top of it. On anybody
+     * else's keyboard it is their message box, comment field or search bar: the one thing on
+     * that screen the user is actually looking at while they type, and the one thing he must
+     * not be sitting on. A row's worth of room above the keyboard clears it.
+     */
+    private fun keyboardAbove(): Float {
+        val bar = inputBar ?: return dp(INPUT_ROW_DP)
+        // The bar has no height on the frame it is added, so its usual size is the floor.
+        return bar.height.toFloat().takeIf { it > 0f } ?: dp(62f)
     }
 
     /**
