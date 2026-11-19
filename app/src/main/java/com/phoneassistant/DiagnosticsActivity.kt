@@ -191,6 +191,9 @@ class DiagnosticsActivity : Activity() {
                 if (status.keyboardUsedPx <= 0) "unknown — ${status.ceilingPx}px is a guess"
                 else "${status.keyboardTopPx}px"
             )
+            // His windows are placed from under the status bar, the keyboard is measured from
+            // the top of the screen. This is that difference, measured rather than assumed.
+            line("window offset", "${status.windowOffsetPx}px")
             line("remembered height", "${status.rememberedPx}px")
             line(
                 "his ceiling",
@@ -199,10 +202,10 @@ class DiagnosticsActivity : Activity() {
                 // saying so is the difference between a reading and a guess.
                 else "${status.ceilingPx}px — guess, never measured"
             )
-            // The box's own edges against that top: the height can be right and the placement
-            // wrong, and this is the line that tells the two apart.
+            // The box's own edges in the display's coordinates, against that top: the height
+            // can be right and the placement wrong, and this line tells the two apart.
             line(
-                "his box",
+                "box (screen)",
                 when {
                     status.boxTopPx < 0 -> "not open"
                     status.keyboardUsedPx > 0 && status.boxBottomPx > status.keyboardTopPx ->

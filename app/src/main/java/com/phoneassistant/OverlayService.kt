@@ -243,6 +243,8 @@ class OverlayService : Service(), PropHost {
         /** The height the placement is worked out from, and the keyboard top it implies. */
         val keyboardUsedPx: Int,
         val keyboardTopPx: Int,
+        /** The gap between the window's own y and the display's, as measured. */
+        val windowOffsetPx: Int,
         /** Where the chat box is, top and bottom. Top is -1 when it is not open. */
         val boxTopPx: Int,
         val boxBottomPx: Int,
@@ -533,8 +535,12 @@ class OverlayService : Service(), PropHost {
         ceilingPx = keyboardCeiling().toInt(),
         keyboardUsedPx = keyboardPx(),
         keyboardTopPx = (screenH - keyboardPx()).coerceAtLeast(0),
-        boxTopPx = inputParams?.y ?: -1,
-        boxBottomPx = (inputParams?.y ?: -1) + (inputBar?.height ?: 0),
+        windowOffsetPx = windowOffsetY().toInt(),
+        // In the display's own coordinates, so they can be read against the keyboard's top.
+        boxTopPx = inputParams?.y?.plus(windowOffsetY().toInt()) ?: -1,
+        boxBottomPx = inputParams?.y
+            ?.plus(windowOffsetY().toInt())
+            ?.plus(inputBar?.height ?: 0) ?: -1,
         petY = posY.toInt(),
         petHeightPx = petH,
         props = props.toList().map { prop -> prop.javaClass.simpleName },
@@ -1636,18 +1642,37 @@ class OverlayService : Service(), PropHost {
     private fun keyboardPx(): Int = imeHeight().takeIf { it > 0 } ?: keyboardHeightPx
 
     /**
-     * Top of the keyboard, less the room he keeps above it, or a guess before one has ever
-     * been measured.
+     * The gap between this window's own y and the display's.
      *
-     * An eighth of the keyboard's own height is held back on top of its edge. A keyboard that
-     * reports itself a little short is what puts his box behind it, and standing a touch too
-     * high for the few seconds of a chat costs nothing — so the arithmetic errs that way on
-     * purpose rather than landing exactly on the line.
+     * A TOP-gravity overlay window is placed below the status bar unless it has been given the
+     * whole display, so his "y" and the keyboard's top are not the same measurement: one
+     * starts at the status bar's lower edge and the other at the top of the screen. Measuring
+     * the difference from his own window is what makes them comparable — a fixed status-bar
+     * inset would be a guess, and wrong on any phone that reports its insets differently.
+     * This is small enough not to look like the fault, and it is exactly the height of his
+     * box, which is how "the box is just behind the keyboard" happens.
+     */
+    private fun windowOffsetY(): Float {
+        val view = pet ?: return 0f
+        val onScreen = IntArray(2)
+        view.getLocationOnScreen(onScreen)
+        return (onScreen[1] - petParams.y).toFloat()
+    }
+
+    /**
+     * Top of the keyboard in his own coordinates, less the room he keeps above it, or a guess
+     * before one has ever been measured.
+     *
+     * The keyboard's top is measured from the top of the display, so the window's own offset
+     * comes off it first. After that, a tenth of the keyboard's height is held back on top of
+     * its edge: a keyboard that reports itself short puts his box behind it, and standing a
+     * little too high for the seconds a chat lasts costs nothing — so this errs that way on
+     * purpose instead of landing exactly on the line.
      */
     private fun keyboardCeiling(): Float {
         val px = keyboardPx()
         if (px <= 0) return screenH * 0.52f
-        return (screenH - px).toFloat() - px * 0.08f
+        return (screenH - px).toFloat() - windowOffsetY() - px * 0.12f
     }
 
     private fun positionInputBar() {
