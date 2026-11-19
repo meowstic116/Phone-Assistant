@@ -303,13 +303,30 @@ object Screen {
         val text = request.lowercase()
         return apps
             .filter { it.label.length >= 3 }
-            .filter { app ->
-                val label = app.label.lowercase()
-                runCatching {
-                    Regex("\\b" + Regex.escape(label) + "\\b").containsMatchIn(text)
-                }.getOrDefault(false)
-            }
+            .filter { app -> mentions(text, app.label.lowercase()) }
             .sortedByDescending { it.label.length }
+    }
+
+    /**
+     * Whether [text] says [word] as a whole word. Written as a scan rather than a pattern: this
+     * runs for every installed app on every step of every job, and a regex compiled per app on
+     * that path is work paid between steps for an answer that cannot change.
+     */
+    private fun mentions(text: String, word: String): Boolean {
+        var from = 0
+        while (from <= text.length - word.length) {
+            val at = text.indexOf(word, from)
+            if (at < 0) return false
+            val before = text.getOrNull(at - 1)
+            val after = text.getOrNull(at + word.length)
+            if ((before == null || !before.isLetterOrDigit()) &&
+                (after == null || !after.isLetterOrDigit())
+            ) {
+                return true
+            }
+            from = at + 1
+        }
+        return false
     }
 
     /**
@@ -340,15 +357,9 @@ object Screen {
      * anything containing it, then the package name — "messages" should reach Messages and
      * not something with the word buried in a longer title.
      */
-    fun openApp(ctx: Context, query: String): String? {
-        val app = findApp(ctx, query) ?: return null
-        return if (open(ctx, app)) app.label else null
-    }
-
-    fun findApp(ctx: Context, query: String): AppRef? {
+    fun findApp(all: List<AppRef>, query: String): AppRef? {
         val wanted = query.trim().lowercase()
         if (wanted.isEmpty()) return null
-        val all = apps(ctx)
         return all.firstOrNull { it.label.lowercase() == wanted }
             ?: all.firstOrNull { it.label.lowercase().startsWith(wanted) }
             ?: all.firstOrNull { it.label.lowercase().contains(wanted) }

@@ -241,8 +241,9 @@ object Agent {
                     )
                     return
                 }
-                val decision = decide(ctx, request, history.toString(), screen, steps, apps)
-                    ?: run {
+                val decision =
+                    decide(ctx, request, history.toString(), screen, steps, apps) { alive() }
+                        ?: run {
                         finish("My brain stopped answering halfway through.", STOP_BRAIN)
                         return
                     }
@@ -312,7 +313,7 @@ object Agent {
                 val skipped = !clear
                 try {
                     val act = if (clear) {
-                        perform(ctx, decision, screen)
+                        perform(ctx, decision, screen, apps)
                     } else {
                         // The overlay could not get out of the way in time. Pressing anyway
                         // risks the press landing on one of his own windows, which is the bug
@@ -498,7 +499,8 @@ object Agent {
         history: String,
         screen: Screen.Snapshot,
         step: Int,
-        apps: List<Screen.AppRef>
+        apps: List<Screen.AppRef>,
+        alive: () -> Boolean
     ): Decision? {
         val app = Screen.appLabel(ctx, screen.app) ?: screen.app
         val user = buildString {
@@ -522,17 +524,30 @@ object Agent {
                 append("\nRunning out of steps: do what matters most now, then finish.\n")
             }
         }
+        // A call that throws is caught here, not left to the loop below: a dropped connection
+        // arrives as an exception rather than as a failed reply, and that is exactly the case
+        // the retry is for — the loop's own catch would end the whole job on it.
+        fun ask(): Pair<Boolean, String> = runCatching {
+            AssistantBrain.complete(ctx, SYSTEM, user)
+        }.getOrElse { t ->
+            Diag.apiFailed(
+                "did not finish",
+                "${t.javaClass.simpleName}: ${t.message.orEmpty()}"
+            )
+            false to ""
+        }
         // One retry. A call that never comes back is usually a dropped connection or a hiccup
         // in the free tier's queue rather than a refusal, and a job the user has watched for
         // half a minute should not be thrown away on one of them. Only the call is repeated;
-        // nothing on the phone has been touched at this point.
-        val first = AssistantBrain.complete(ctx, SYSTEM, user)
-        val (ok, raw) = if (first.first) first else {
-            SystemClock.sleep(RETRY_MS)
-            AssistantBrain.complete(ctx, SYSTEM, user)
-        }
-        if (!ok) return null
-        return Decision.parse(raw)
+        // nothing on the phone has been touched at this point. A job the user has stopped in
+        // the meantime is not retried at all: the answer would be thrown away unread.
+        val first = ask()
+        if (first.first) return Decision.parse(first.second)
+        if (!alive()) return null
+        SystemClock.sleep(RETRY_MS)
+        if (!alive()) return null
+        val second = ask()
+        return if (second.first) Decision.parse(second.second) else null
     }
 
     // ---------------------------------------------------------------- the actions
@@ -541,15 +556,25 @@ object Agent {
      * Does one step. A sign-in is answered from the phone's own vault rather than from the
      * model, so it is handled apart from the actions that only need the screen.
      */
-    private fun perform(ctx: Context, decision: Decision, screen: Screen.Snapshot): Act =
+    private fun perform(
+        ctx: Context,
+        decision: Decision,
+        screen: Screen.Snapshot,
+        apps: List<Screen.AppRef>
+    ): Act =
         if (decision.action == "sign_in") {
             signIn(ctx, decision, screen)
         } else {
-            Act(simple(ctx, decision, screen))
+            Act(simple(ctx, decision, screen, apps))
         }
 
     /** Every action that needs nothing but what is on the screen. */
-    private fun simple(ctx: Context, decision: Decision, screen: Screen.Snapshot): String {
+    private fun simple(
+        ctx: Context,
+        decision: Decision,
+        screen: Screen.Snapshot,
+        apps: List<Screen.AppRef>
+    ): String {
         val item = screen.items.firstOrNull { it.index == decision.target }
 
         fun missing(): String = "$FAILED there is no element ${decision.target}"
@@ -597,9 +622,15 @@ object Agent {
                 val name = decision.app.ifBlank { decision.text }
                 when {
                     name.isBlank() -> "$FAILED no app was named"
+                    // The list read at the start of the job, rather than asking the package
+                    // manager again for one more step.
                     else -> {
-                        val opened = Screen.openApp(ctx, name)
-                        if (opened == null) "$FAILED no app called $name" else "opened $opened"
+                        val app = Screen.findApp(apps, name)
+                        when {
+                            app == null -> "$FAILED no app called $name"
+                            Screen.open(ctx, app) -> "opened ${app.label}"
+                            else -> "$FAILED $name would not open"
+                        }
                     }
                 }
             }

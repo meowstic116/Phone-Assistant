@@ -1971,13 +1971,17 @@ class OverlayService : Service(), PropHost {
             // Still in his own screens: the way out has not happened yet, and a step taken now
             // would read the Logins form. The minute is only spent once the user is actually
             // elsewhere, so filling the form in slowly costs nothing.
-            if (front == null || front == packageName) {
+            if (front == packageName) {
                 resumeBy = SystemClock.uptimeMillis() + RESUME_WINDOW_MS
                 handler.postDelayed(this, RESUME_POLL_MS)
                 return
             }
-            if (SystemClock.uptimeMillis() > resumeBy) {
-                resumeJob = null
+            // A screen that cannot be read is not a way out of the form, but it is not a reason
+            // to watch for ever either: the clock is not put back, so this wait ends like any
+            // other where nothing happened.
+            if (front == null) {
+                if (SystemClock.uptimeMillis() > resumeBy) resumeJob = null
+                else handler.postDelayed(this, RESUME_POLL_MS)
                 return
             }
             resumeJob = null
