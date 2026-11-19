@@ -27,14 +27,13 @@ import java.util.ArrayDeque
  *
  * Password fields are listed so the model can see they exist, and refused if it tries to
  * type into one. That refusal is here, at the point of typing, rather than only in the
- * instructions: a suggestion is not a guarantee. The one caller allowed past it is [Vault]'s
- * sign-in, which is on the phone and stays there.
+ * instructions: a suggestion is not a guarantee. The job runner has no vault access.
  */
 object Screen {
 
     /** One usable thing on the screen, numbered the way the model is shown it. */
     class Item(
-        val index: Int,
+        var index: Int,
         val role: String,
         val label: String,
         val hint: String,
@@ -56,7 +55,7 @@ object Screen {
      * those was followed by a job that opened an app and then could not read it at all. They
      * are left to be collected instead.
      */
-    class Snapshot(val app: String, val items: List<Item>, val listing: String)
+    class Snapshot(val app: String, val windowId: Int, val items: List<Item>, val listing: String)
 
     @Volatile
     private var service: AccessibilityService? = null
@@ -74,7 +73,7 @@ object Screen {
 
     // -------------------------------------------------------------------- reading
 
-    fun snapshot(): Snapshot? {
+    fun snapshot(web: Boolean = false, feed: Boolean = false): Snapshot? {
         val svc = service ?: return null
         // No window at all and a framework that refused are the same thing to a caller — both
         // are a screen it cannot read — but only one of them is normal, and the record says
@@ -86,21 +85,37 @@ object Screen {
             return null
         } ?: return null
         // Read before the walk: the walk gives its nodes back as it goes, the root included.
-        val app = root.packageName?.toString().orEmpty()
+        val app = root.packageName?.toString()?.takeIf { it.isNotBlank() && it != svc.packageName }
+            ?: return null
+        val windowId = root.windowId
         val items = ArrayList<Item>()
-        collect(svc.packageName?.toString(), root, items)
-        return Snapshot(app, items, listing(items))
+        val localFeed = feed
+        val limit = if (web || localFeed) MAX_NODES else MAX_ITEMS
+        collect(svc.packageName?.toString(), root, items, limit)
+        val visible = if (web) {
+            // Reserve space for labelled controls nested below the shallow browser chrome.
+            val topFirst = compareBy<Item>({ it.bounds.top }, { it.bounds.left })
+            val ordered = items.sortedWith(topFirst)
+            val controls = ordered.filter { it.label.isNotBlank() && it.node.isClickable }
+                .take(MAX_ITEMS * 2 / 3)
+            (controls + ordered.filter { it.label.isNotBlank() || it.scrollable } + ordered)
+                .distinct().take(MAX_ITEMS).sortedWith(topFirst)
+                .also { list -> list.forEachIndexed { i, item -> item.index = i + 1 } }
+        } else items
+        return Snapshot(app, windowId, visible, if (localFeed) "" else listing(visible, web))
     }
 
     /**
      * Walks the tree in reading order. Our own overlay windows are skipped: Pip's bubble and
      * his panel are not things he should be pressing.
      */
-    private fun collect(ownPackage: String?, root: AccessibilityNodeInfo, out: MutableList<Item>) {
+    private fun collect(
+        ownPackage: String?, root: AccessibilityNodeInfo, out: MutableList<Item>, limit: Int
+    ) {
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         var seen = 0
-        while (queue.isNotEmpty() && out.size < MAX_ITEMS && seen < MAX_NODES) {
+        while (queue.isNotEmpty() && out.size < limit && seen < MAX_NODES) {
             val node = queue.removeFirst()
             seen++
             // His own windows are skipped whole: a child of one cannot be pressed either.
@@ -111,7 +126,10 @@ object Screen {
             val kept = node.isVisibleToUser && consider(node, out)
             // The children are read before the node goes back: a child is its own instance, so
             // giving the parent back now cannot take one of them with it.
-            for (child in 0 until node.childCount) {
+            // Cap queued descendants as well as processed nodes; a large tree must not
+            // allocate unbounded Binder-backed nodes before the outer limit is reached.
+            val children = node.childCount.coerceAtMost(MAX_NODES - seen - queue.size)
+            for (child in 0 until children) {
                 node.getChild(child)?.let { queue.add(it) }
             }
             // The root is the window rather than a node asked of it, so it is left alone even
@@ -142,8 +160,7 @@ object Screen {
         // that leaves the phone: a username, a search for something private, or a password in
         // a field the app did not flag. Only the field's own label, whether it has anything in
         // it, and the app's placeholder go out — never the text.
-        val label = (if (editable) node.contentDescription else node.text ?: node.contentDescription)
-            ?.toString()?.replace(WHITESPACE, " ")?.trim()?.take(LABEL_MAX).orEmpty()
+        val label = nodeLabel(node)
         val filled = editable && !node.text.isNullOrEmpty()
         val scrollable = node.isScrollable
         // Everything that can be pressed, typed into or scrolled, plus plain text: the text
@@ -159,7 +176,7 @@ object Screen {
             index = out.size + 1,
             role = role,
             label = label,
-            hint = node.hintText?.toString()?.replace(WHITESPACE, " ")?.trim()
+            hint = node.hintText?.takeUnless { node.isPassword }?.toString()?.replace(WHITESPACE, " ")?.trim()
                 ?.take(HINT_MAX).orEmpty(),
             editable = editable,
             password = node.isPassword,
@@ -172,7 +189,27 @@ object Screen {
         return true
     }
 
-    private fun listing(items: List<Item>): String {
+    private fun nodeLabel(node: AccessibilityNodeInfo): String {
+        if (node.isPassword) return "Password field"
+        return (if (node.isEditable) node.contentDescription else node.text ?: node.contentDescription)
+            ?.toString()?.replace(WHITESPACE, " ")?.trim()?.take(LABEL_MAX).orEmpty()
+    }
+
+    internal fun sameWindow(screen: Snapshot): Boolean = runCatching {
+        val root = service?.rootInActiveWindow ?: return false
+        root.windowId == screen.windowId && root.packageName?.toString() == screen.app
+    }.getOrDefault(false)
+
+    /** Models can take seconds. IDs and coordinates from an old page must not be reused. */
+    internal fun targetStillVisible(screen: Snapshot, item: Item): Boolean = runCatching {
+        val node = item.node
+        sameWindow(screen) && node.refresh() && node.isVisibleToUser && node.isEnabled &&
+            node.windowId == screen.windowId && node.packageName?.toString() == screen.app &&
+            node.isEditable == item.editable && node.isPassword == item.password &&
+            nodeLabel(node) == item.label && Rect().also(node::getBoundsInScreen) == item.bounds
+    }.getOrDefault(false)
+
+    private fun listing(items: List<Item>, web: Boolean): String {
         if (items.isEmpty()) return "(nothing usable — a picture, a game, or still loading)"
         return buildString {
             items.forEach { item ->
@@ -187,6 +224,7 @@ object Screen {
                 }
                 if (item.password) append(" · password, never type into it")
                 else if (item.scrollable) append(" · scrollable")
+                if (web && item.node.isClickable && !item.editable) append(" · can tap")
                 append('\n')
             }
         }.trimEnd()
@@ -239,47 +277,71 @@ object Screen {
      * a clickable ancestor is tried before falling back to a real tap on the element's
      * middle — which is also what gets through for windows that report nothing clickable.
      */
-    fun tap(item: Item): Boolean =
+    fun tap(item: Item): Boolean = accessibilityTap(item) || touch(item)
+
+    fun accessibilityTap(item: Item): Boolean =
         actUpwards(item.node, AccessibilityNodeInfo.ACTION_CLICK, TAP_ANCESTORS) {
             it.isClickable
-        } || gestureTap(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
+        }
+
+    fun touch(item: Item): Boolean = gestureTap(
+        item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat()
+    )
+
+    internal fun reactionState(item: Item, reaction: JobProgress.Reaction): JobProgress.ReactionState {
+        val node = item.node
+        if (node.isEditable || node.isPassword) return JobProgress.ReactionState.UNKNOWN
+        val state = if (Build.VERSION.SDK_INT >= 30) node.stateDescription?.toString().orEmpty() else ""
+        val result = JobProgress.reactionState(
+            reaction, node.contentDescription?.toString().orEmpty(), node.text?.toString().orEmpty(), state,
+            checked = when {
+                node.isSelected -> true
+                node.isCheckable -> node.isChecked
+                else -> null
+            }
+        )
+        return if (result == JobProgress.ReactionState.READY && (!node.isEnabled || !node.isClickable)) {
+            JobProgress.ReactionState.UNKNOWN
+        } else result
+    }
+
+    /** Re-read the same control before acting, with no coordinate or parent fallback. */
+    internal fun pressReaction(item: Item, screen: Snapshot, reaction: JobProgress.Reaction): Boolean = runCatching {
+        targetStillVisible(screen, item) &&
+            reactionState(item, reaction) == JobProgress.ReactionState.READY &&
+            item.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }.getOrDefault(false)
+
+    internal fun pressFeedTab(item: Item, screen: Snapshot, surface: String): Boolean = runCatching {
+        val node = item.node
+        targetStillVisible(screen, item) && node.isClickable && !node.isEditable &&
+            listOf(node.text, node.contentDescription).any {
+                JobProgress.normalize(it?.toString().orEmpty()) == surface
+            } && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }.getOrDefault(false)
+
+    internal fun scrollFeed(screen: Snapshot, byTouch: Boolean): Boolean {
+        if (!sameWindow(screen)) return false
+        if (byTouch) return gestureScroll(true)
+        val scroller = screen.items.filter { it.scrollable }
+            .maxByOrNull { it.bounds.width().toLong() * it.bounds.height() }
+        val start = scroller?.node ?: runCatching { service?.rootInActiveWindow }.getOrNull() ?: return false
+        return actUpwards(start, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, SCROLL_ANCESTORS) { it.isScrollable }
+    }
 
     fun longPress(item: Item): Boolean =
         actUpwards(item.node, AccessibilityNodeInfo.ACTION_LONG_CLICK, TAP_ANCESTORS) {
             it.isLongClickable
         } || gestureLongPress(item.bounds.centerX().toFloat(), item.bounds.centerY().toFloat())
 
-    /**
-     * Puts [text] into a field, replacing what is there. Refuses password fields outright.
-     *
-     * ACTION_SET_TEXT needs no keyboard, which is why it is used instead of typing key by
-     * key — and why a job can fill a field in an app that is not even in front yet.
-     */
-    fun type(item: Item, text: String, secret: Boolean = false): Boolean {
-        // Only the vault may fill a password field. [secret] is the one thing that says so,
-        // and it is passed by the sign-in path alone — so no prompt, however it is worded,
-        // can get a password typed by the model into a field.
-        if (item.password && !secret) return false
-        val args = Bundle().apply {
-            putCharSequence(
-                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                text
-            )
-        }
+    /** Fill a fresh, non-password field only. */
+    fun type(item: Item, text: String): Boolean {
         val node = item.node
-        if (runCatching {
-                node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-            }.getOrDefault(false)
-        ) {
-            return true
+        if (item.password || !item.editable || node.isPassword || !node.isEditable) return false
+        val args = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        // Some fields only take text once they hold focus; asking directly is the reliable
-        // second attempt and still needs no keyboard.
-        runCatching { node.performAction(AccessibilityNodeInfo.ACTION_FOCUS) }
-        runCatching { node.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
-        return runCatching {
-            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        }.getOrDefault(false)
+        return runCatching { node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) }.getOrDefault(false)
     }
 
     /**
@@ -434,6 +496,10 @@ object Screen {
             append("https://www.google.com/search?q=").append(Uri.encode(query))
             if (images) append("&tbm=isch")
         }
+        return openUrl(ctx, url)
+    }
+
+    internal fun openUrl(ctx: Context, url: String): Boolean {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         // ACTION_VIEW is what "the default browser" means: the user's choice, not one guessed

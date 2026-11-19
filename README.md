@@ -34,11 +34,9 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
 - A **Personality** screen shows the full prompt that defines him, and lets you rewrite it.
 - A **Memory** screen lists the facts he keeps between conversations, and lets you add or
   delete them.
-- A **Logins** screen holds the logins he is allowed to use: a website, a username, a
-  password. They are encrypted on the phone under a key from the Android Keystore and never
-  leave it — not in a prompt, not in the chat, not in any request. Ask him to sign in
-  somewhere he has a login for and he fills the form himself; ask him somewhere he does not
-  and he says so and opens the form with the site already in it.
+- The **Logins** screen stores entries encrypted on the phone. Pip pauses at sign-in
+  instead of autofilling a form it cannot verify. You can reveal an existing password
+  after confirming your device lock, or sign in through Android Autofill.
 - Ask him to **stand still** and he stops where he is: "stand still for two minutes" for
   that long, or just "stand still" for as long as you like — until you tell him he can move
   again. He is still there to talk to, and the hold is kept on the phone like a toy break, so
@@ -48,7 +46,7 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   switched on,   whether a keyboard is up, where he is sitting against it, how many frames a second the
   character is really drawing (and whether he is drawing at all — the screen-off pause and
   the idle rate are both visible there, measured in `PetView.onDraw` rather than assumed),
-  what is on the stage, the last phone job step by step — what was asked for, every action it tried,
+  what is on the stage, the last phone job step by step — what was asked for, its recent actions,
   whether Android took that action, and why the job stopped — and the last two failures: the
   most recent refused request and the most recent exception that was swallowed to keep the
   overlay alive. Nothing is written to disk or sent
@@ -60,21 +58,29 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   Messages and tell Mum I'm late", "search for the parcel number", "scroll down and tap the
   third one", "turn do not disturb on". He reads the app in front as a short numbered list of
   the things that can be pressed, typed into or scrolled, picks one step, does it, and looks
-  again. There is no cap on how many steps a job may take, only on its time — six minutes,
-  which is the quota fence too — and the work is visible as it happens because the app in
-  front is changing. A button that repeats down a feed — "Give Kudos" on every activity — is
-  pressed by him down the whole feed once you have tapped one: rows that already have theirs
-  are looked past rather than taken as the end, three screens in a row with nothing to press
-  is what finishing looks like, and that is normally the whole task. His answer of "finished"
-  is checked against the screen before it is believed: if the button he was pressing is still
-  repeated down it, or the request asks for something "on every" one of what the screen is
-  full of, the job goes and looks first and says what it found. If the request names an app he
-  opens it before his first step — unless you are already in it, in which case he leaves your
+  again. Each job has a six-minute time limit. A shared feed runner can apply missing
+  reactions across apps — for example, **“Please open Strava and give kudos to every
+  activity that I haven't given kudos to yet”** or **“Open Instagram and like every post I
+  haven't liked yet.”** Pip reads the reaction controls Android exposes, skips already-applied
+  reactions, and counts a press only after verifying that the control changed. Three distinct
+  screens in a row with already-applied reactions and none ready are enough to stop, not proof
+  that the entire feed was checked. He can also stop earlier if the feed won't move, a press
+  can't be verified, or the job reaches its limit.
+  For something more selective, try **“Doomscroll Instagram Reels and like any you want.”**
+  Pip may pick one like per screen or skip it. He judges only the captions and labels Android
+  exposes, not the video or audio. **“Doomscroll Instagram Reels for me”** browses without
+  reacting. These runs are capped at 12 distinct screens. If Pip can't find the requested tab,
+  open it in the app and retry. If a request names an app, Pip opens it before his first step
+  unless you're already in it, in which case he leaves your
   screen alone — so the job happens in front of you rather than somewhere behind   it, and he moves into the bottom corner so he is not covering it. He is given the list of apps really
   installed on the phone, so "open WhatsApp" reaches that WhatsApp and not a guess.
   Looking something up is one action, not a browser driven by hand: the query goes to
   whichever browser Android has been told to use — yours, wherever you set it — as a search
-  URL, and "take me to the images" is the pictures page of it. A browser's search box
+  URL, and "take me to the images" is the pictures page of it. An exact request such as
+  **“Open https://example.com”** goes directly to Android without a model call. If you also ask Pip to open
+  a result, he checks for actual page content after the accessibility click. If the same
+  title is still in the same spot on the same page, he can try one touch on that title.
+  He stops rather than keep cycling through unchanged results. A browser's search box
   cannot be typed into usefully, because submitting it needs an enter key the accessibility
   service has no way to press: the field fills, the page never changes, and the job ends
   having spent four steps to get nowhere. A `wait` step really waits, rather than re-reading
@@ -85,22 +91,12 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   Diagnostics says it was cancelled. Drag the chip anywhere you like and it stays there, for
   this job and the next one; it lifts above the keyboard when one comes up, so it is never
   behind the app. For the moment a step is actually performing, everything of his that can
-  take a finger goes inert — the chip dims, and he, the toys and the floating diagnostics
-  panel stop accepting touches — because a press aimed at a row that sits exactly where one
-  of them is would otherwise land on Pip instead of on the app. He waits until they are
-  really out of the way before he presses anything, and if they cannot be moved in time (a
-  stuck main thread) he presses nothing and the Diagnostics record marks that step **SKIP**
-  rather than blaming the app. Only a toy or panel you are actually dragging keeps its touch,
-  so the drag is never dropped out of your hand — it steps aside the instant you let go.
-  Stop is back the moment the step finishes.
-  An action already under
-  way is not un-pressed, but nothing new happens
-  after the Stop — a step the model was still deciding is thrown away instead of carried out,
-  which includes cancelling by sending him a new message. He says what he is starting,
-  then reports in his bubble. His hands go through the accessibility service: a password
-  field can only ever be filled from a login saved on the phone, never from anything the
-  model suggests, and he refuses payments, purchases and deletions he was not asked for —
-  those refusals are in the code and not only in the instructions.
+  take a finger goes inert. The Stop chip dims and other overlay windows briefly clear
+  the screen so Android doesn't block touches underneath them. If a drag or failed window
+  update prevents this, no press is made and Diagnostics marks the step **SKIP**.
+  Stop returns between actions. An action already dispatched cannot be undone, but Stop or
+  sending a newer message prevents previous model replies from starting another action.
+  Before touching a control Pip rechecks that its window and target are still current.
 - Drag it anywhere. It lives in a foreground service with a persistent notification.
 
 ## Toys
@@ -229,6 +225,18 @@ Tagged builds are also published as GitHub Releases by
    your network.
 4. Press **Start assistant**.
 
+### Testing phone jobs
+
+Run `tests/run-job-progress.sh` with `kotlinc` and `java` on your PATH. On a phone with
+Pip's accessibility service enabled, try the Strava request above from a feed with
+already-kudoed activities at the top and a missed activity below. Look for
+`route → verified feed scan` and the per-screen counts in Diagnostics. Try selective Reels
+browsing too: `route → selective feed browsing`, one choice at most per screen, and no
+likes when it can't identify the control. For a
+browser check, ask “Look up all the mods 9 in the browser and open the download page.”
+If the first accessibility click doesn't navigate, check for `touch fallback` in Diagnostics.
+“Look up pictures of cats” should still stop at Google Images.
+
 ## Signing
 
 `signing/phone-assistant.jks` is committed and public, and signs **every** build — debug
@@ -256,44 +264,18 @@ binaries never enter git history.
 
 ## Logins
 
-The **Logins** screen is where you give Pip a login he may use: a website, a username and a
-password. There is exactly one place they exist, and it is worth being precise about what
-that means:
+Saved entries stay encrypted in the **Logins** screen under a key from the Android
+Keystore. Pip no longer inserts these entries into other apps: an accessibility label
+or a site name inferred by an AI is not proof that a form belongs to the intended site.
+When a job needs a sign-in, complete it yourself or use Android Autofill, then ask Pip
+to continue. Existing entries aren't removed by the update.
 
-- They are encrypted at rest with AES-GCM under a key that lives in the Android Keystore and
-  cannot be read out of the device. The ciphertext is all that is written to storage, and no
-  screen ever shows a saved password again — not even masked.
-- They are never put in a prompt. The model learns that a login exists only when it asks for
-  one for a site it named; it never sees a username, a password, or the list of sites you
-  have saved.
-- Nothing on the sign-in path can reach the network. `Vault.kt` has no network code and
-  nothing that reads it does either: the agent's `sign_in` step reads the value, types it
-  into the field, and records only the site.
-- The chat is not a place to type a password and he will not ask for one there. If a job
-  needs a login he does not have, he says so in one line and opens the form with the site
-  filled in. Android redacts what you type into a site, which is exactly why he has to ask
-  rather than watch you do it.
-- A login page in a browser is a web page, not a form of native fields, and the fields
-  inside a web view are not editable views the accessibility service can type into. So a
-  saved login cannot be filled into one. Before he says that, he looks for the form himself:
-  he taps a visible **log in** / **sign in** link and scrolls down a couple of screens,
-  reading the screen again after each, and fills the login if it turns up — on the phone,
-  inside the same step, at no extra API cost. Only when that finds nothing does he say what
-  he actually saw: that he looked and there is no password box here, and that the login is
-  still saved. The **Logins** form then opens with the site filled in, instead of the step
-  ending on a bare error with nothing to act on — and saving a login there picks the job back
-  up as soon as you are out of that screen (within a minute of leaving it), starting the
-  request again from the top. Diagnostics records that stop as its own reason, "stopped to ask
-  for a login", rather than as a cancellation. Sign-in works in apps, and in a browser only
-  where the site puts real editable fields on screen.
-- Deleting an entry deletes it; uninstalling the app takes the whole vault with it. A vault
-  that cannot be decrypted — a restore onto a new phone, since the key stays behind — reads as
-  empty and says so in Diagnostics rather than failing silently.
-
-`sign_in` is the only thing that ever fills a password field: `Screen.type` refuses one
-unless its caller passes `secret = true`, and that call is in `Agent.signIn` alone. What a
-text field contains is never part of the screen listing that goes to the model at all — only
-whether it has something in it.
+To retrieve a saved password, tap **Reveal** and confirm your device PIN, pattern, or
+password. The reveal is not copied to the clipboard, blocks screenshots of the vault,
+and closes when you leave or after 30 seconds. The job model sees a generic password
+field marker, never the contents. The API key and vault are excluded from Android backup
+and device transfer. A vault that cannot be decrypted reads as empty and is recorded in
+Diagnostics.
 
 ## Memory
 

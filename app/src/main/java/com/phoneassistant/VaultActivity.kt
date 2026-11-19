@@ -1,12 +1,17 @@
 package com.phoneassistant
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.app.KeyguardManager
+import android.content.Intent
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -14,23 +19,11 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 
-/**
- * Where the user gives Pip a login to use, and where they can see and delete the ones he has.
- *
- * The password is never shown again once it is saved — not masked, not behind a reveal, not at
- * all — because nothing in the app ever needs to read it back except the one place that types
- * it, and a screen that can show it is a screen that can leak it.
- *
- * Pip opens this himself, with the site filled in, when a job runs into a sign-in he has no
- * login for: he cannot read a password off the screen (Android redacts them, which is the
- * whole reason he asks), so this form is the only honest way to offer to remember one.
- */
+/** Local vault management. Credentials can only be revealed after device authentication. */
 class VaultActivity : Activity() {
 
-    companion object {
-        /** The site to prefill, for the form Pip opens when a job needs a login. */
-        const val EXTRA_SITE = "site"
-    }
+    private var pendingRevealSite: String? = null
+    private var revealDialog: AlertDialog? = null
 
     private lateinit var list: LinearLayout
     private lateinit var empty: TextView
@@ -41,8 +34,9 @@ class VaultActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
 
-        siteField = field("Website — e.g. example.com", InputType.TYPE_TEXT_VARIATION_URI)
+        siteField = field("Website — e.g. example.com", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
         userField = field("Username or email", InputType.TYPE_CLASS_TEXT)
         passField = field(
             "Password",
@@ -51,6 +45,8 @@ class VaultActivity : Activity() {
         passField.imeOptions = EditorInfo.IME_ACTION_DONE
         // Their keyboard's autofill has no business keeping a copy of this.
         passField.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+        passField.isSaveEnabled = false
+        passField.imeOptions = passField.imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
         passField.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_DONE) {
                 save()
@@ -76,7 +72,7 @@ class VaultActivity : Activity() {
         }
 
         empty = TextView(this).apply {
-            text = "No logins saved yet. Pip will ask for one when a job needs it."
+            text = "No logins saved on this phone."
             textSize = 13f
             setTextColor(getColor(R.color.textDim))
             setPadding(0, dp(12f), 0, 0)
@@ -97,11 +93,9 @@ class VaultActivity : Activity() {
             )
             addView(
                 TextView(this@VaultActivity).apply {
-                    text = "The logins Pip may use, and the only place they are kept. They are " +
-                        "encrypted on this phone with a key that cannot be copied off it. They " +
-                        "are never sent to the AI, never put in the chat, and never leave the " +
-                        "phone — Pip types them into the site itself, and you can delete any " +
-                        "of them here."
+                    text = "Logins stay encrypted on this phone. Pip does not fill them into " +
+                        "other apps. Sign in yourself or use Android Autofill. To recover a stored " +
+                        "password, select Reveal and confirm your device lock."
                     textSize = 13f
                     setTextColor(getColor(R.color.textDim))
                     setPadding(0, dp(6f), 0, dp(16f))
@@ -131,12 +125,6 @@ class VaultActivity : Activity() {
             }
         )
 
-        // Prefilled by Pip when a job ran into a sign-in, so the form is one thing to fill in
-        // rather than a site to remember and type again.
-        intent.getStringExtra(EXTRA_SITE)?.takeIf { it.isNotBlank() }?.let { site ->
-            siteField.setText(site)
-            userField.requestFocus()
-        }
     }
 
     override fun onResume() {
@@ -160,8 +148,6 @@ class VaultActivity : Activity() {
         userField.setText("")
         passField.setText("")
         render()
-        // He says so in the bubble, so saving from the form he opened has an answer.
-        OverlayService.loginSaved(site)
         Toast.makeText(this, "Saved on this phone", Toast.LENGTH_SHORT).show()
     }
 
@@ -174,11 +160,11 @@ class VaultActivity : Activity() {
         val logins = Vault.all(this).sortedBy { Vault.host(it.site) }
         list.removeAllViews()
         empty.visibility = if (logins.isEmpty()) View.VISIBLE else View.GONE
-        logins.forEach { list.addView(row(it)) }
+        logins.forEach { list.addView(row(it.site, it.username)) }
         status.visibility = if (status.text.isNullOrEmpty()) View.GONE else View.VISIBLE
     }
 
-    private fun row(login: Vault.Login): View {
+    private fun row(site: String, username: String): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -189,14 +175,14 @@ class VaultActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             addView(
                 TextView(this@VaultActivity).apply {
-                    text = Vault.host(login.site)
+                    text = Vault.host(site)
                     textSize = 15f
                     setTextColor(getColor(R.color.text))
                 }
             )
             addView(
                 TextView(this@VaultActivity).apply {
-                    text = login.username
+                    text = username
                     textSize = 12f
                     setTextColor(getColor(R.color.textDim))
                 }
@@ -207,20 +193,89 @@ class VaultActivity : Activity() {
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         )
 
+        row.addView(Button(this).apply {
+            text = "Reveal"
+            isAllCaps = false
+            contentDescription = "Reveal the login for ${site}"
+            setOnClickListener { confirmReveal(site) }
+        })
         row.addView(
             TextView(this).apply {
                 text = "×"
                 textSize = 18f
                 setPadding(dp(14f), dp(2f), dp(6f), dp(2f))
                 setTextColor(getColor(R.color.textDim))
-                contentDescription = "Delete the login for " + Vault.host(login.site)
+                contentDescription = "Delete the login for " + Vault.host(site)
                 setOnClickListener {
-                    Vault.remove(this@VaultActivity, login.site)
-                    render()
+                    if (Vault.remove(this@VaultActivity, site)) render()
+                    else say("I couldn't delete that login. Try again.")
                 }
             }
         )
         return row
+    }
+
+    @Suppress("DEPRECATION") // Supported by all Android versions this app runs on.
+    private fun confirmReveal(site: String) {
+        val keyguard = getSystemService(KeyguardManager::class.java)
+        val confirmation = keyguard?.createConfirmDeviceCredentialIntent(
+            "Reveal saved login", "Confirm your device lock to continue."
+        )
+        if (confirmation == null) {
+            say("Set a PIN, pattern, or password on your phone before revealing a login.")
+            return
+        }
+        pendingRevealSite = site
+        runCatching { startActivityForResult(confirmation, REVEAL_LOGIN) }.onFailure {
+            pendingRevealSite = null
+            say("Couldn't open device authentication.")
+        }
+    }
+
+    @Deprecated("Device credential confirmation uses an activity result on older Android versions.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REVEAL_LOGIN) return
+        val site = pendingRevealSite.also { pendingRevealSite = null } ?: return
+        if (resultCode != RESULT_OK || isFinishing || isDestroyed) return
+        val login = Vault.all(this).firstOrNull { it.site == site } ?: return
+        revealDialog?.dismiss()
+        val secret = object : TextView(this) {
+            override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
+                super.onInitializeAccessibilityNodeInfo(info)
+                info.text = "Hidden password"
+                info.isPassword = true
+            }
+        }.apply {
+            text = "Password: ${login.password}"
+            textSize = 16f
+            setPadding(dp(24f), dp(16f), dp(24f), dp(12f))
+            isSaveEnabled = false
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+        }
+        revealDialog = AlertDialog.Builder(this)
+            .setTitle(Vault.host(login.site).ifBlank { login.site })
+            .setView(secret)
+            .setPositiveButton("Hide", null)
+            .create().also { dialog ->
+                dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                dialog.setOnDismissListener {
+                    secret.text = ""
+                    if (revealDialog === dialog) revealDialog = null
+                }
+                dialog.show()
+                secret.postDelayed({ if (dialog.isShowing) dialog.dismiss() }, 30_000L)
+            }
+    }
+
+    override fun onStop() {
+        revealDialog?.dismiss()
+        revealDialog = null
+        super.onStop()
+    }
+
+    private companion object {
+        const val REVEAL_LOGIN = 101
     }
 
     private fun field(hint: String, type: Int): EditText = EditText(this).apply {

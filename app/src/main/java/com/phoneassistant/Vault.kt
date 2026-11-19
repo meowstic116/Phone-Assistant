@@ -12,20 +12,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/**
- * The logins Pip is allowed to use, kept on this phone and nowhere else.
- *
- * Nothing in here is ever put in a prompt, a chat message, the diagnostics record or a
- * request of any kind: the only way a username or password leaves this object is through
- * [find], which the agent calls in order to type it into the app in front of the user. There
- * is no network code in this file, and none in anything that reads it.
- *
- * At rest it is encrypted with a key that lives in the Android Keystore, which never leaves
- * the device's secure hardware, and the ciphertext is what goes in SharedPreferences. If that
- * key is ever lost — a restore onto a new phone, say — the vault reads as empty rather than
- * handing back something it cannot vouch for, and the failure is recorded in Diagnostics
- * instead of being silent.
- */
+/** User-managed logins encrypted with Android Keystore. The phone agent cannot access them. */
 object Vault {
 
     /** One saved login, exactly as the user entered it. */
@@ -43,30 +30,11 @@ object Vault {
 
     private const val MAX_LOGINS = 60
 
-    /** Read once per process: the keystore operation is the expensive part, not the JSON. */
-    @Volatile
-    private var cache: List<Login>? = null
-
-    fun all(ctx: Context): List<Login> = cache ?: read(ctx).also { cache = it }
-
-    /**
-     * The login for a site, or null. "https://www.example.com/login" and "example.com" are the
-     * same place, and a subdomain counts as being on its own domain — sign-ins are asked for
-     * by whichever of the two the model could actually see on screen.
-     */
-    fun find(ctx: Context, site: String): Login? {
-        val wanted = host(site)
-        if (wanted.isEmpty()) return null
-        val logins = all(ctx)
-        return logins.firstOrNull { host(it.site) == wanted }
-            ?: logins.firstOrNull { other ->
-                val saved = host(other.site)
-                saved.isNotEmpty() &&
-                    (wanted.endsWith(".$saved") || saved.endsWith(".$wanted"))
-            }
-    }
+    @Synchronized
+    fun all(ctx: Context): List<Login> = read(ctx)
 
     /** Adds or replaces the login for a site: one per site, so saving again is changing it. */
+    @Synchronized
     fun save(ctx: Context, site: String, username: String, password: String): Boolean {
         val cleanSite = site.trim().take(200)
         val cleanUser = username.trim().take(120)
@@ -75,9 +43,9 @@ object Vault {
         return write(ctx, (kept + Login(cleanSite, cleanUser, password)).takeLast(MAX_LOGINS))
     }
 
-    fun remove(ctx: Context, site: String) {
+    @Synchronized
+    fun remove(ctx: Context, site: String): Boolean =
         write(ctx, all(ctx).filterNot { host(it.site) == host(site) })
-    }
 
     /**
      * The site as a host: lower case, no scheme, no "www.", no port, no path. It is only used
@@ -119,7 +87,6 @@ object Vault {
         val edit = prefs(ctx).edit()
         if (logins.isEmpty()) {
             edit.remove(KEY).apply()
-            cache = logins
             return true
         }
         val array = JSONArray()
@@ -133,7 +100,6 @@ object Vault {
         }
         return try {
             edit.putString(KEY, encrypt(array.toString().toByteArray(Charsets.UTF_8))).apply()
-            cache = logins
             true
         } catch (t: Throwable) {
             Diag.caught("vault", t)

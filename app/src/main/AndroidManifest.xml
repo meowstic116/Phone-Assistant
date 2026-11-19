@@ -28,6 +28,8 @@
 
     <application
         android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@drawable/ic_pip"
         android:label="@string/app_name"
         android:supportsRtl="true"
@@ -62,8 +64,7 @@
             android:name=".DiagnosticsActivity"
             android:exported="false" />
 
-        <!-- Where the user gives Pip a login to use. Nothing here is ever sent anywhere: the
-             vault it writes to is encrypted with a key held by the device's keystore. -->
+        <!-- Local credential storage and authenticated recovery, separate from phone jobs. -->
         <activity
             android:name=".VaultActivity"
             android:exported="false"
