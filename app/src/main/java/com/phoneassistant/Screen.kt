@@ -115,7 +115,15 @@ object Screen {
 
     fun snapshot(): Snapshot? {
         val svc = service ?: return null
-        val root = runCatching { svc.rootInActiveWindow }.getOrNull() ?: return null
+        // No window at all and a framework that refused are the same thing to a caller — both
+        // are a screen it cannot read — but only one of them is normal, and the record says
+        // which one happened.
+        val root = try {
+            svc.rootInActiveWindow
+        } catch (t: Throwable) {
+            Diag.caught("screen read", t)
+            return null
+        } ?: return null
         // Read before the walk: the walk gives its nodes back as it goes, the root included.
         val app = root.packageName?.toString().orEmpty()
         val items = ArrayList<Item>()

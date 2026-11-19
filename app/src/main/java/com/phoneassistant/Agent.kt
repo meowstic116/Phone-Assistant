@@ -56,6 +56,14 @@ object Agent {
     /** Time before the one retry of a brain call that did not come back. */
     private const val RETRY_MS = 800L
 
+    /**
+     * How long a screen that is not there yet is given to turn up, and how long apart. Three
+     * seconds in all: an app coming up from cold can be that slow, and a window that is not
+     * there yet is not a job that cannot see the screen.
+     */
+    private const val READ_TRIES = 6
+    private const val READ_WAIT_MS = 500L
+
     private val worker = Executors.newSingleThreadExecutor()
 
     /** The job being worked, or null when there is none. */
@@ -238,7 +246,7 @@ object Agent {
                 // The step before this one is done with its screen, so that read goes back
                 // before this one is taken.
                 held?.release()
-                val screen = Screen.snapshot()
+                val screen = readScreen()
                 if (screen == null) {
                     val hands = Screen.available()
                     finish(
@@ -407,6 +415,25 @@ object Agent {
             // way of the job that took its place.
             if (alive()) job = null
         }
+    }
+
+    /**
+     * Reads the screen, giving one that is not there yet a moment to arrive.
+     *
+     * An app that has just been opened from cold has no window to read while it comes up: the
+     * launcher has gone and the app has not drawn, so a read in that gap finds nothing. One
+     * read used to be the only one a step got, and a job that opened an app and looked a
+     * moment too early ended there with "I can't see the screen". A few more looks cost no API
+     * request and nothing but a second of patience.
+     */
+    private fun readScreen(): Screen.Snapshot? {
+        repeat(READ_TRIES - 1) {
+            Screen.snapshot()?.let { return it }
+            // No hands at all is not a screen that is slow to arrive.
+            if (!Screen.available()) return null
+            SystemClock.sleep(READ_WAIT_MS)
+        }
+        return Screen.snapshot()
     }
 
     /**
