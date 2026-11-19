@@ -59,12 +59,34 @@ object Agent {
      * it went quiet — otherwise a job that was talked over reads as one that simply gave up
      * after two steps.
      */
-    fun cancel() {
+    fun cancel() = stop(STOP_CANCELLED)
+
+    private fun stop(reason: String) {
         if (job == null) return
         // The number the job is working under, taken before the bump that retires it.
         val mine = ticket.getAndIncrement()
         job = null
-        Diag.jobEnded(mine, STOP_CANCELLED)
+        Diag.jobEnded(mine, reason)
+    }
+
+    /**
+     * Ends the job on its own account, because it cannot go on without a login the user has to
+     * sort out. It gets its own reason in the record: a job that stopped to ask is not one that
+     * was talked over by a new message, and from the outside the two look alike — one is the
+     * design working, the other is something to go and fix.
+     *
+     * Called from the loop, so the ticket must still be the loop's own: a job the user has
+     * already cancelled keeps the reason it was cancelled with.
+     */
+    private fun stopForLogin(mine: Int, need: NeedLogin) {
+        if (!ticket.compareAndSet(mine, mine + 1)) return
+        job = null
+        val site = need.site.takeIf { it.isNotBlank() }?.let { " for $it" }.orEmpty()
+        Diag.jobEnded(
+            mine,
+            if (need.saved) "stopped to ask for a login — no password field to fill$site"
+            else "stopped to ask for a login — none saved$site"
+        )
     }
 
     /**
@@ -219,10 +241,17 @@ object Agent {
                     Diag.jobStep(mine, decision.summary(screen), outcome, landed, skipped)
                     steps++
                     if (landed) SystemClock.sleep(SETTLE_MS)
-                    // A sign-in he could not do himself: the record is written first, then
-                    // the user is asked, so the bubble and the record tell the same story.
+                    // A sign-in he could not do himself. The job ends here, on this thread,
+                    // before the ask goes out: the form is about to be the screen in front, and
+                    // a next step would read Pip's own login form and start pressing about in
+                    // it. The record is written first, then the user is asked, so the bubble,
+                    // the record and the chip going away all say the same thing.
                     val ask = act.askLogin
-                    if (ask != null) onNeedLogin(ask)
+                    if (ask != null) {
+                        stopForLogin(mine, ask)
+                        onNeedLogin(ask)
+                        return
+                    }
                 } finally {
                     onAct(false)
                 }
@@ -367,13 +396,16 @@ object Agent {
         val password = screen.items.firstOrNull { it.password }
         // A login page in a browser is a web page, not a form of native fields: the fields
         // inside a web view are not editable views the accessibility service can type into,
-        // so there is nothing here for him to fill and no saved login that would go in. The
-        // user is told, and the caller opens the form — a bare "there is no password field"
-        // gave them nothing they could act on, and read as a fault in the app instead.
+        // so there is nothing here for him to fill. But no password field on screen is also
+        // what a form that has not loaded yet looks like, and a form further up the page, and
+        // a page that is not the login page at all — he cannot tell those apart, so the
+        // outcome says only what he saw. The user is told, and the caller opens the form: a
+        // bare "there is no password field" gave them nothing they could act on, and read as
+        // a fault in the app instead.
         if (password == null) {
             return Act(
                 if (login == null) missing
-                else "$FAILED this is a web page, so the login cannot be typed into it",
+                else "$FAILED no password field on the screen to fill the saved login into",
                 NeedLogin(site, saved = login != null)
             )
         }
@@ -395,8 +427,9 @@ object Agent {
 
     /**
      * A login the user has to sort out for him: the [site], and whether he already holds one
-     * for it. A saved login that would not go in is a page he cannot type into, which is a
-     * different thing to say than never having been given one at all.
+     * for it. A saved login with no field on screen to put it in is a different thing to say
+     * than never having been given one at all — and neither is the same as knowing why the
+     * field was missing, which he does not.
      */
     class NeedLogin(val site: String, val saved: Boolean)
 
@@ -551,9 +584,9 @@ object Agent {
           purchase or delete something the user did not name — if the task needs that, stop
           with done and say why, briefly.
         - A sign-in screen is what sign_in is for. If it answers that there is no saved login,
-          or that the page is a web page it cannot type into, stop with done and say so in one
-          line: the user will be asked instead. Do not ask for a password in the chat, do not
-          guess at one, and do not try to type it yourself.
+          or that there was no password field to fill, stop with done and say so in one line:
+          the user will be asked instead. Do not ask for a password in the chat, do not guess
+          at one, and do not try to type it yourself.
         - If the request is not a phone job at all, answer it in "say" with done.
     """.trimIndent()
 

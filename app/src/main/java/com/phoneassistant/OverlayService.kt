@@ -1634,24 +1634,30 @@ class OverlayService : Service(), PropHost {
      * form with the site already in it, because Android will not let him read a password the
      * user types into a site — asking here is the only way to remember one.
      *
-     * The job stops here rather than carrying on: the form is now the screen in front, and a
-     * next step would read Pip's own login form and start pressing about in it, which is the
-     * one screen he should never be working blind.
+     * The job has already stopped itself by the time this runs — the agent ends it the moment
+     * the step comes back with an ask — because the form is about to be the screen in front,
+     * and a next step would read Pip's own login form and start pressing about in it. All this
+     * has to do is say the line, in the words the ask actually earned.
      */
     private fun askForLogin(need: Agent.NeedLogin) {
         val host = Vault.host(need.site)
         sayAloud(
             when {
-                // A saved login that would not go in: the page is a web page, which is the one
-                // kind of form he cannot type into. Nothing has been lost, so the line says so.
+                // A saved login he could not put in because there was no password field on
+                // screen. A web page is the likeliest reason, but a form that has not loaded
+                // yet and a login link further up the page look exactly the same from here,
+                // so the line names what he saw and not what he guessed. Nothing has been
+                // lost, and he says that too — it is the part the user needs to know.
                 need.saved && host.isNotEmpty() ->
-                    "that's a web page, so I can't type your $host login in. it's still saved."
-                need.saved -> "that's a web page, so I can't type your login in. it's still saved."
+                    "I couldn't find a password box here, so your $host login didn't go in. " +
+                        "it's still saved."
+                need.saved ->
+                    "I couldn't find a password box here, so your login didn't go in. " +
+                        "it's still saved."
                 host.isEmpty() -> "I don't have a login for that. give me one and I'll use it."
                 else -> "I don't have a login for $host. give me one and I'll use it."
             }
         )
-        Agent.cancel()
         val site = need.site
         val form = Intent(this, VaultActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
