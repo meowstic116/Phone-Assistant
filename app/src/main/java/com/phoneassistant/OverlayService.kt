@@ -535,11 +535,11 @@ class OverlayService : Service(), PropHost {
         ceilingPx = keyboardCeiling().toInt(),
         keyboardUsedPx = keyboardPx(),
         keyboardTopPx = (screenH - keyboardPx()).coerceAtLeast(0),
-        windowOffsetPx = windowOffsetY().toInt(),
+        windowOffsetPx = windowOffset.toInt(),
         // In the display's own coordinates, so they can be read against the keyboard's top.
-        boxTopPx = inputParams?.y?.plus(windowOffsetY().toInt()) ?: -1,
+        boxTopPx = inputParams?.y?.plus(windowOffset.toInt()) ?: -1,
         boxBottomPx = inputParams?.y
-            ?.plus(windowOffsetY().toInt())
+            ?.plus(windowOffset.toInt())
             ?.plus(inputBar?.height ?: 0) ?: -1,
         petY = posY.toInt(),
         petHeightPx = petH,
@@ -661,7 +661,9 @@ class OverlayService : Service(), PropHost {
     private fun onImeChanged(ime: Int) {
         keyboardUp = ime > 0
         if (ime == 0) {
-            // The keyboard has gone, so the box can go back down to his feet.
+            // The keyboard has gone, so the box can go back down to his feet, and whatever had
+            // to be corrected to clear that keyboard is no longer anything to correct.
+            boxCorrection = 0
             positionInputBar()
             return
         }
@@ -669,6 +671,8 @@ class OverlayService : Service(), PropHost {
             keyboardHeightPx = ime
             Keyboard.remember(this, ime)
         }
+        // Placed again against the new height, in case he is already high enough to stay put.
+        positionInputBar()
         walkClearOfKeyboard()
     }
 
@@ -1577,9 +1581,11 @@ class OverlayService : Service(), PropHost {
      * cannot leave him avoiding a keyboard that went away long ago.
      */
     private fun watchKeyboard() {
-        // Measure it rather than re-reading the last answer. A keyboard measured while it was
-        // still rising keeps that height in the cache for good, and a height that is too
-        // small is exactly what leaves him standing in the keyboard with his box behind it.
+        // The offset first, so the walk below is worked out with the current one.
+        measureWindowOffset()
+        // Then measure the keyboard rather than re-reading the last answer. A keyboard
+        // measured while it was still rising keeps that height for good, and a height that is
+        // too small is exactly what leaves him standing in the keyboard with his box behind it.
         ImeWatch.probe()
         onImeChanged(imeHeight())
     }
@@ -1646,17 +1652,25 @@ class OverlayService : Service(), PropHost {
      *
      * A TOP-gravity overlay window is placed below the status bar unless it has been given the
      * whole display, so his "y" and the keyboard's top are not the same measurement: one
-     * starts at the status bar's lower edge and the other at the top of the screen. Measuring
-     * the difference from his own window is what makes them comparable — a fixed status-bar
-     * inset would be a guess, and wrong on any phone that reports its insets differently.
-     * This is small enough not to look like the fault, and it is exactly the height of his
-     * box, which is how "the box is just behind the keyboard" happens.
+     * starts at the status bar's lower edge and the other at the top of the screen. That gap
+     * is small enough not to look like the fault, and it is about the height of his box, which
+     * is how "the box is just behind the keyboard" happens.
      */
-    private fun windowOffsetY(): Float {
-        val view = pet ?: return 0f
+    private var windowOffset = 0f
+
+    /**
+     * Measures that gap from a window that is standing still, and keeps it.
+     *
+     * Read while he is walking, it is the difference between where he is heading and where the
+     * window still is: a different number every frame, and none of them the offset. A settled
+     * window gives the one answer, and it does not change while the phone stays upright.
+     */
+    private fun measureWindowOffset() {
+        val view = pet ?: return
+        if (walking || !view.isLaidOut) return
         val onScreen = IntArray(2)
         view.getLocationOnScreen(onScreen)
-        return (onScreen[1] - petParams.y).toFloat()
+        windowOffset = (onScreen[1] - petParams.y).toFloat()
     }
 
     /**
@@ -1672,7 +1686,7 @@ class OverlayService : Service(), PropHost {
     private fun keyboardCeiling(): Float {
         val px = keyboardPx()
         if (px <= 0) return screenH * 0.52f
-        return (screenH - px).toFloat() - windowOffsetY() - px * 0.12f
+        return (screenH - px).toFloat() - windowOffset - px * 0.12f
     }
 
     private fun positionInputBar() {
@@ -1689,12 +1703,58 @@ class OverlayService : Service(), PropHost {
         val barHeight = bar.height.toFloat().takeIf { it > 0f } ?: dp(62f)
         val atFeet = (posY + petH + dpInt(6f)).toInt()
         val aboveKeyboard = (keyboardCeiling() - barHeight - dp(4f)).toInt()
-        val wanted = if (keyboardUp) minOf(atFeet, aboveKeyboard) else atFeet
+        // Less whatever the last placement had to be corrected by: the sum is the best guess,
+        // and the screen has the last word on it.
+        val wanted = (if (keyboardUp) minOf(atFeet, aboveKeyboard) else atFeet) - boxCorrection
         // Never off the bottom of the screen either, which is what the old fixed clamp did.
         params.y = minOf(wanted, screenH - bottomInset - barHeight.toInt())
             .coerceAtLeast(topInset + dpInt(4f))
         runCatching { windowManager.updateViewLayout(bar, params) }
         keepBarClear()
+        checkBoxAboveKeyboard()
+    }
+
+    /**
+     * What the last placement was corrected by, in pixels. The placement subtracts it, so the
+     * next one starts from where the screen says the box belongs instead of from the sum
+     * alone.
+     */
+    private var boxCorrection = 0
+
+    /** One check is enough in flight; a walk would otherwise queue one for every frame. */
+    private var boxCheckQueued = false
+
+    /**
+     * Looks at where the box actually is, rather than where it was asked to go.
+     *
+     * The placement is arithmetic on a window offset and a keyboard height, and both have been
+     * wrong before, so this reads the box's real position on the screen and lifts it clear if
+     * its bottom is in the keyboard. The correction is kept and subtracted from the next
+     * placement, so the two do not disagree.
+     *
+     * Read after a short delay, not at once: a window reports the place it was last put until
+     * it has been laid out at the new one, and a reading that old would move the box by an
+     * amount it has already been moved by.
+     */
+    private fun checkBoxAboveKeyboard() {
+        if (boxCheckQueued) return
+        val bar = inputBar ?: return
+        val params = inputParams ?: return
+        boxCheckQueued = true
+        bar.postDelayed({
+            boxCheckQueued = false
+            if (inputBar !== bar || inputParams !== params) return@postDelayed
+            if (!keyboardUp || bar.height <= 0) return@postDelayed
+            val onScreen = IntArray(2)
+            bar.getLocationOnScreen(onScreen)
+            // How far its bottom is past the keyboard's top, plus a gap to sit in.
+            val past = onScreen[1] + bar.height - (screenH - keyboardPx()) + dpInt(6f)
+            if (past <= 0) return@postDelayed
+            boxCorrection += past
+            params.y -= past
+            runCatching { windowManager.updateViewLayout(bar, params) }
+            keepBarClear()
+        }, 48L)
     }
 
     /**
@@ -1748,6 +1808,9 @@ class OverlayService : Service(), PropHost {
         inputBar = null
         inputField = null
         inputParams = null
+        boxCorrection = 0
+        // A check queued for a box that no longer exists must not hold the next one back.
+        boxCheckQueued = false
     }
 
     private fun sendMessage() {
