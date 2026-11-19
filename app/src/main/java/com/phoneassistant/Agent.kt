@@ -79,15 +79,17 @@ object Agent {
      *
      * [onAct] brackets every moment the phone is being touched: true just before the action,
      * false once the gesture has finished and the screen has settled. Anything of the
-     * overlay's own that sits over the screen — the cancel chip — uses it to get out of the
-     * way, so it cannot be the thing a press lands on.
+     * overlay's own that sits over the screen — the cancel chip, the character — uses it to
+     * get out of the way, so it cannot be the thing a press lands on. It returns only once
+     * that has actually happened; false means the overlay could not get out of the way, and
+     * no press is made.
      */
     fun start(
         ctx: Context,
         request: String,
         onSay: (String) -> Unit,
         onDone: (String) -> Unit,
-        onAct: (Boolean) -> Unit
+        onAct: (Boolean) -> Boolean
     ): Boolean {
         if (job != null) return false
         if (!Screen.available()) return false
@@ -107,7 +109,7 @@ object Agent {
         mine: Int,
         onSay: (String) -> Unit,
         onDone: (String) -> Unit,
-        onAct: (Boolean) -> Unit
+        onAct: (Boolean) -> Boolean
     ) {
         // Still the job the user is waiting on? A cancelled or replaced job is silent.
         fun alive(): Boolean = ticket == mine
@@ -177,17 +179,24 @@ object Agent {
                 // a job the user has already ended. This is the last moment before the phone
                 // is touched, so this is where it has to be checked.
                 if (!alive()) return
-                // The chip gets out of the way of the press. This is the one window in which
-                // the phone is being touched, so it is the one window in which the overlay's
-                // own windows must not be touchable: a press aimed at a row that happens to
-                // sit exactly where the user left the chip would otherwise stop the job
-                // instead of pressing the row. An injected gesture keeps running after
-                // perform returns — a long press is 550ms — so it stays away through the
-                // settle too, and comes back while the model is thinking, which is most of
-                // the time a job runs.
-                onAct(true)
+                // The overlay's own windows get out of the way of the press. This is the one
+                // window in which the phone is being touched, so it is the one window in
+                // which they must not be touchable: a press aimed at a row that happens to
+                // sit exactly where the user left the chip, or under Pip himself, would
+                // otherwise stop the job or drag him instead of pressing the row. An
+                // injected gesture keeps running after perform returns — a long press is
+                // 550ms — so they stay away through the settle too, and come back while the
+                // model is thinking, which is most of the time a job runs.
+                val clear = onAct(true)
                 try {
-                    val outcome = perform(ctx, decision, screen)
+                    val outcome = if (clear) {
+                        perform(ctx, decision, screen)
+                    } else {
+                        // The overlay could not get out of the way in time. Pressing anyway
+                        // risks the press landing on it, which is the bug being fixed, so
+                        // nothing is pressed and the step says so.
+                        "$FAILED the phone was too busy to press anything safely"
+                    }
                     val landed = !outcome.startsWith(FAILED)
                     history.append(steps + 1).append(". ").append(decision.summary(screen))
                         .append(" → ").append(outcome).append('\n')

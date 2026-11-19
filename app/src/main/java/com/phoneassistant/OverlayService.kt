@@ -33,6 +33,8 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.random.Random
@@ -64,6 +66,13 @@ class OverlayService : Service(), PropHost {
 
         /** How faint the chip goes while a step is acting, so that it is plainly out of play. */
         private const val DUCK_ALPHA = 0.35f
+
+        /**
+         * How long a step waits for the main thread to move the overlay's windows aside.
+         * Bounded, because a main thread that has stopped running must not hang a job — and
+         * short, because every step pays it twice.
+         */
+        private const val DUCK_WAIT_MS = 300L
 
         /** How long a model reply keeps the floor after it lands, over any toy line. */
         private const val REPLY_HOLD_MS = 4_000L
@@ -225,6 +234,9 @@ class OverlayService : Service(), PropHost {
      * meant for the app underneath can never land on the way out of the job instead.
      */
     private var chipDucked = false
+
+    /** The same for Pip himself: he is a touchable window too, and stands in a corner. */
+    private var petDucked = false
 
     /** True while a finger is on the chip, so the ticker does not drag it back mid-drag. */
     private var chipDragging = false
@@ -1529,9 +1541,11 @@ class OverlayService : Service(), PropHost {
                     feel(PetView.Mood.HAPPY, 2500L)
                 }
             },
-            // For as long as the phone is being touched, the chip is inert and dimmed: it
-            // steps out of the way of the press instead of catching it.
-            onAct = { touching -> handler.post { setChipDucked(touching) } }
+            // For as long as the phone is being touched, his own windows are inert: they
+            // step out of the way of the press instead of catching it. This call does not
+            // return until they really are out of the way — a gesture dispatched before the
+            // window was updated is exactly the press the duck is there to protect.
+            onAct = { touching -> duckOverlay(touching) }
         )
         if (!started) {
             hideJobBar()
@@ -1628,6 +1642,59 @@ class OverlayService : Service(), PropHost {
         view.animate().cancel()
         view.alpha = if (ducked) DUCK_ALPHA else 1f
         runCatching { windowManager.updateViewLayout(view, params) }
+    }
+
+    /**
+     * Pip gets out of the way too. He is a touchable window and he stands in a corner for the
+     * whole job, so a step pressing a row that happens to be under him would drag him about
+     * instead of pressing the row. He is not dimmed — he is not a way out of anything, so
+     * there is nothing to warn the user about — he just stops taking the touch for a moment.
+     */
+    private fun setPetDucked(ducked: Boolean) {
+        if (petDucked == ducked) return
+        val view = pet ?: return
+        petDucked = ducked
+        petParams.flags = if (ducked) {
+            petParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        } else {
+            petParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        }
+        runCatching { windowManager.updateViewLayout(view, petParams) }
+    }
+
+    /**
+     * Every window of the overlay that can take a touch, aside for a step or back again.
+     *
+     * The bubble and the thinking dots are already FLAG_NOT_TOUCHABLE for their whole lives, so
+     * a job's press has always gone straight through them. These two — the chip and the
+     * character — are the ones that take fingers.
+     */
+    private fun applyDuck(ducked: Boolean) {
+        setChipDucked(ducked)
+        setPetDucked(ducked)
+    }
+
+    /**
+     * [applyDuck] on the main looper, waited for.
+     *
+     * A step calls this from the worker thread and then injects its gesture, so returning
+     * before the windows have been updated would leave the press able to land on them — the
+     * whole point is that the windows are out of play first. The wait is bounded, so a main
+     * thread that is not running cannot hang the job: the answer is then false, and a step
+     * that gets false presses nothing at all.
+     */
+    private fun duckOverlay(ducked: Boolean): Boolean {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            applyDuck(ducked)
+            return true
+        }
+        val done = CountDownLatch(1)
+        val posted = handler.post {
+            runCatching { applyDuck(ducked) }
+            done.countDown()
+        }
+        if (!posted) return false
+        return runCatching { done.await(DUCK_WAIT_MS, TimeUnit.MILLISECONDS) }.getOrDefault(false)
     }
 
     /**
@@ -1786,6 +1853,9 @@ class OverlayService : Service(), PropHost {
 
     /** Job over: he may wander again, once the line he says has had its moment. */
     private fun endJobWatch() {
+        // A job that ended in the middle of a step — cancelled, or the service going away —
+        // must not leave his windows unable to be tapped afterwards.
+        duckOverlay(false)
         // An open chat holds his attention itself and clears it when it closes.
         if (inputBar != null) return
         attentive = false
