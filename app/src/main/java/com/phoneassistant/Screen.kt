@@ -82,12 +82,6 @@ object Screen {
         }
 
         /**
-         * Hands the nodes back to the framework, once. From API 33 a node is an ordinary
-         * object and there is nothing to give back; below that they come out of a pool, and a
-         * job that reads the screen every second without returning them is how that pool runs
-         * out — the reads then start coming back short.
-         */
-        /**
          * Ends the read: after this its nodes may not be acted through.
          *
          * The nodes the read kept are deliberately not recycled. Below API 33 they come out of
