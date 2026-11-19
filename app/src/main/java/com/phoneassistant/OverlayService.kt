@@ -135,10 +135,15 @@ class OverlayService : Service(), PropHost {
          */
         fun loginSaved(site: String) {
             val service = instance ?: return
+            // Read before the resume is armed: a bubble promising to pick the job back up when
+            // there are no hands to pick it up with is a promise nothing will keep.
+            val hands = Screen.available()
+            val resume = service.armResume()
             service.sayAloud(
                 when {
-                    service.armResume() ->
+                    resume ->
                         "saved. I'll pick that job back up once you're out of this screen."
+                    !hands -> "saved. I'll use it once I can work your phone."
                     site.isBlank() -> "saved. I'll use it next time."
                     else ->
                         "saved the login for ${Vault.host(site)}. name the job and I'll sign in."
@@ -1712,11 +1717,15 @@ class OverlayService : Service(), PropHost {
      * screen — the only signal there is that they are back on the page they asked about — and
      * gives up if the minute after it passes with no job.
      *
-     * False when no job was waiting for a login, which is the ordinary case.
+     * False when no job was waiting for a login, or when there are no hands to pick one up
+     * with: a job armed without the accessibility service would be dropped by the wait a
+     * moment later, so it is dropped here instead and nothing is promised in the bubble.
      */
     private fun armResume(): Boolean {
         val task = loginJob ?: return false
+        // Either way the ask is answered, so it is not left standing for a later save.
         loginJob = null
+        if (!Screen.available()) return false
         resumeJob = task
         resumeBy = SystemClock.uptimeMillis() + RESUME_WINDOW_MS
         handler.removeCallbacks(resumeWatch)
