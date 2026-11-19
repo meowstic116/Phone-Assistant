@@ -211,6 +211,8 @@ internal object JobProgress {
         }
     }
 
+    enum class FeedCheck { READY, NO_RECOGNIZED_CONTROLS, CHECK_NEXT, COMPLETE }
+
     class FeedCoverage {
         var clean = 0
             private set
@@ -218,11 +220,18 @@ internal object JobProgress {
         private val visited = RecentVisits()
 
         // Observe before pressing, so our own changes don't count as a clean viewport.
-        fun complete(viewport: String, available: Int, given: Int): Boolean {
-            if (viewport == last) return false
+        // No controls isn't evidence of completion or a stalled scroll: long posts, ads,
+        // and sections without reactions may take up several otherwise distinct screens.
+        fun observe(viewport: String, available: Int, given: Int): FeedCheck {
+            if (viewport == last) return FeedCheck.CHECK_NEXT
             last = viewport
             clean = if (visited.add(viewport) && available == 0 && given > 0) clean + 1 else 0
-            return clean >= CLEAN_SCREENS
+            return when {
+                available > 0 -> FeedCheck.READY
+                given == 0 -> FeedCheck.NO_RECOGNIZED_CONTROLS
+                clean >= CLEAN_SCREENS -> FeedCheck.COMPLETE
+                else -> FeedCheck.CHECK_NEXT
+            }
         }
     }
 

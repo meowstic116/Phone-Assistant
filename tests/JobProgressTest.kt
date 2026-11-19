@@ -74,18 +74,24 @@ fun main() {
     check(like("Give kudos", "277 likes") == JobProgress.ReactionState.UNKNOWN)
 
     val feed = JobProgress.FeedCoverage()
-    check(!feed.complete("top", 0, 2))
-    check(!feed.complete("second", 0, 2))
-    check(!feed.complete("second", 0, 2))
+    val checkNext = JobProgress.FeedCheck.CHECK_NEXT
+    val complete = JobProgress.FeedCheck.COMPLETE
+    val blank = JobProgress.FeedCheck.NO_RECOGNIZED_CONTROLS
+    check(feed.observe("top", 0, 2) == checkNext)
+    check(feed.observe("second", 0, 2) == checkNext)
+    check(feed.observe("second", 0, 2) == checkNext)
     check(feed.clean == 2)
-    check(!feed.complete("missed activity", 1, 2))
-    check(!feed.complete("missed activity", 0, 3))
+    // Regression: advancing through three screens with no kudos controls must not stop
+    // the scan or carry over its completion streak. A later control remains eligible.
+    repeat(4) { check(feed.observe("no controls $it", 0, 0) == blank) }
     check(feed.clean == 0)
-    check(!feed.complete("controls hidden", 0, 0))
-    check(!feed.complete("clean 1", 0, 1))
-    check(!feed.complete("clean 2", 0, 2))
-    check(feed.complete("clean 3", 0, 2))
-    check(!feed.complete("clean 1", 0, 1))
+    check(feed.observe("missed activity", 1, 2) == JobProgress.FeedCheck.READY)
+    check(feed.observe("missed activity", 0, 3) == checkNext)
+    check(feed.clean == 0)
+    check(feed.observe("clean 1", 0, 1) == checkNext)
+    check(feed.observe("clean 2", 0, 2) == checkNext)
+    check(feed.observe("clean 3", 0, 2) == complete)
+    check(feed.observe("clean 1", 0, 1) == checkNext)
 
     check(JobProgress.needsWebDestination("Look up all the mods 9 in the browser and open the download page"))
     check(JobProgress.needsWebDestination("Google NASA and open the first result"))
@@ -134,16 +140,16 @@ fun main() {
     val retries = JobProgress.FailureStreak()
     repeat(500) { index ->
         check(visits.add("screen $index"))
-        check(!movingFeed.complete("screen $index", available = 1, given = 2))
+        check(movingFeed.observe("screen $index", available = 1, given = 2) == JobProgress.FeedCheck.READY)
         // A transient miss in every viewport must not accumulate into a global cap.
         check(!retries.record(false))
         check(!retries.record(true))
     }
     check(!visits.add("screen 499")) // recent loop is detected
     check(!visits.contains("screen 0")) // long runs have bounded tracking memory
-    check(!movingFeed.complete("clean A", 0, 2))
-    check(!movingFeed.complete("clean B", 0, 2))
-    check(movingFeed.complete("clean C", 0, 2))
+    check(movingFeed.observe("clean A", 0, 2) == checkNext)
+    check(movingFeed.observe("clean B", 0, 2) == checkNext)
+    check(movingFeed.observe("clean C", 0, 2) == complete)
     check(!retries.record(false))
     check(!retries.record(false))
     check(retries.record(false))

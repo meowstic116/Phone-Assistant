@@ -66,7 +66,8 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   haven't liked yet.”** Pip reads the reaction controls Android exposes, skips already-applied
   reactions, and counts a press only after verifying that the control changed. Three distinct
   screens in a row with already-applied reactions and none ready are enough to stop, not proof
-  that the entire feed was checked. A failed reaction isn't tapped again; Pip can try a
+  that the entire feed was checked. Screens with no recognizable reaction controls don't
+  count toward completion; Pip keeps scanning while new screens are visible. A failed reaction isn't tapped again; Pip can try a
   different control, but stops after several unverified reactions or scrolls that don't
   reveal new content.
   For something more selective, try **“Doomscroll Instagram Reels and like any you want.”**
