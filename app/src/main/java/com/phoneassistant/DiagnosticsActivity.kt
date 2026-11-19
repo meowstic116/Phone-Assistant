@@ -218,8 +218,9 @@ class DiagnosticsActivity : Activity() {
                 }
             )
             // The rate he aims for, so the measured number has something to be checked
-            // against rather than being taken on trust.
-            line("target", "60 walking · 40 changing mood · 33 talking · 20 idle · 0 off")
+            // against rather than being taken on trust. Read from the same gaps the view
+            // actually keeps, so this line cannot describe a rate the code does not use.
+            line("target", PetView.ratesText())
         }
 
         section("ON STAGE")

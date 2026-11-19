@@ -168,10 +168,10 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
      * less still.
      */
     private fun frameGapMs(): Long = when {
-        walking -> 0L
-        mood == Mood.TALKING -> 33L
-        mood != Mood.NEUTRAL -> 40L
-        else -> 50L
+        walking -> GAP_WALKING
+        mood == Mood.TALKING -> GAP_TALKING
+        mood != Mood.NEUTRAL -> GAP_MOOD
+        else -> GAP_IDLE
     }
 
     private fun soonToBlink(now: Long) = now >= nextBlinkAt
@@ -366,5 +366,30 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
     private fun Paint.fillOnly(): Paint = fillScratch.apply {
         set(this@fillOnly)
         style = Paint.Style.FILL
+    }
+
+    companion object {
+        /**
+         * Minimum gap between redraws, in milliseconds, by what is on the move. These are the
+         * numbers the loop keeps; anything describing a frame rate has to come from them.
+         */
+        private const val GAP_WALKING = 0L
+        private const val GAP_TALKING = 33L
+        private const val GAP_MOOD = 40L
+        private const val GAP_IDLE = 50L
+
+        /**
+         * What those gaps come to per second, for the Diagnostics readout.
+         *
+         * Worked out here rather than written out on that screen: a gap of 33 ms is thirty
+         * frames a second, not thirty-three, and a hand-written copy of these figures has
+         * already been wrong once.
+         */
+        fun ratesText(): String {
+            fun rate(gap: Long) = (1_000L / gap).toString()
+            return "about ${rate(GAP_IDLE)} a second idle, ${rate(GAP_MOOD)} changing mood, " +
+                "${rate(GAP_TALKING)} talking, every frame while walking, none with the " +
+                "screen off"
+        }
     }
 }
