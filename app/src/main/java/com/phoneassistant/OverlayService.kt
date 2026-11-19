@@ -484,6 +484,11 @@ class OverlayService : Service(), PropHost {
 
         val view = PetView(this)
         view.setOnTouchListener(touchListener)
+        // The screen may already be off when he starts — a restarted service, or a start from
+        // the notification — and no broadcast is coming to say so, so the first answer comes
+        // from the power manager rather than from the next screen event. Set before the view
+        // is attached, so there is not even one frame drawn into a dark display.
+        view.animating = !paused
         pet = view
 
         val added = runCatching { windowManager.addView(view, petParams) }.isSuccess
