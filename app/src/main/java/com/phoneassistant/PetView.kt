@@ -106,12 +106,12 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
             // has to be re-posted — and re-posting on wake could have left two running.
             if (value) {
                 lastDrawAt = 0L
+                // A fresh counting window from the first frame after waking, but the published
+                // rate is deliberately left alone: it is the last thing actually measured, and
+                // replacing it with a zero for the first second reads as if he had not started
+                // drawing again — when he plainly has.
                 drawsThisSecond = 0
                 windowStartedAt = SystemClock.uptimeMillis()
-            } else {
-                // Nothing is being drawn, so the readout must not keep showing the rate from
-                // before the screen went off.
-                drawsPerSecond = 0
             }
         }
 

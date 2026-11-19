@@ -205,12 +205,17 @@ class DiagnosticsActivity : Activity() {
 
         section("DRAWING — the character's own window")
         if (status == null) {
-            line("style", "— Pip is not running")
+            line("drawing", "— Pip is not running")
         } else {
             line(
                 "drawing",
-                if (status.drawing) "yes — about ${status.drawsPerSecond} frames a second"
-                else "paused — the screen is off, so nothing is drawn"
+                when {
+                    !status.drawing -> "paused — the screen is off, so nothing is drawn"
+                    // No measurement yet: the first second of a service, or of a fresh start.
+                    // Saying "0 a second" here would read as stopped, which is the opposite.
+                    status.drawsPerSecond <= 0 -> "yes — counting the first second"
+                    else -> "yes — about ${status.drawsPerSecond} frames a second"
+                }
             )
             // The rate he aims for, so the measured number has something to be checked
             // against rather than being taken on trust.
