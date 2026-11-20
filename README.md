@@ -73,10 +73,12 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   For something more selective, try **“Doomscroll Instagram Reels and like any you want.”**
   Pip may pick one like per screen or skip it. He judges only the captions and labels Android
   exposes, not the video or audio. **“Doomscroll Instagram Reels for me”** browses without
-  reacting. Say **“Doomscroll Instagram Reels for 2 minutes”** or **“Doomscroll 10 reels on
+  reacting. **“Open Instagram and doomscroll”** defaults to the Reels tab, not Home.
+  Say **“Doomscroll Instagram Reels for 2 minutes”** or **“Doomscroll 10 reels on
   Instagram”** to set a time or count. The timer starts when the feed opens. A count means
   distinct reel screens Android exposes, including the first one, not full videos played.
-  With neither limit specified, Pip picks a random duration from 30 seconds to 5 minutes.
+  With neither limit specified (including “for a little bit”), Pip picks a random duration
+  from 30 seconds to 5 minutes.
   He may stop sooner if the feed stalls, and **Stop** works at any time. If Pip can't find
   the requested tab, open it in the app and retry. If a request names an app, Pip opens it before his first step
   unless you're already in it, in which case he leaves your

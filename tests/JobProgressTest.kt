@@ -21,6 +21,12 @@ fun main() {
     check(JobProgress.feedRequest("Open Strava and give kudos to one activity I haven't yet") == null)
     check(JobProgress.feedRequest("Open Strava and give kudos to any activity I haven't finished yet") == null)
 
+    // Current diagnostic phrasing omits the missing-state qualifier entirely.
+    check(JobProgress.feedRequest("Please open strava and give kudos to every activity") == kudosPlan)
+    check(JobProgress.feedRequest("Give kudos to every activity in Another App") == kudosPlan.copy(app = "another app"))
+    check(JobProgress.feedRequest("Open Strava and give kudos to every activity and share it") == null)
+    check(JobProgress.feedRequest("Open Strava and give kudos to this activity") == null)
+
     val selective = JobProgress.FeedRequest("instagram", "reels", JobProgress.FeedMode.CURATE, JobProgress.Reaction.LIKE, JobProgress.BrowseLimit())
     check(JobProgress.feedRequest("Doomscroll Instagram Reels and like any you want") == selective)
     check(JobProgress.feedRequest("Browse Instagram Reels for me and like the reels you enjoy") == selective)
@@ -56,6 +62,31 @@ fun main() {
     check(plan("Doomscroll Instagram Reels for -5 minutes").browseLimit == null)
     check(plan("Doomscroll Instagram Reels for 1.5 reels").browseLimit == null)
     check(JobProgress.feedRequest("Doomscroll Instagram Reels for a minute and like every reel") == null)
+
+    // Both phrases from the Instagram diagnostics must start timed, reaction-free Reels.
+    check(plan("Open Instagram and doomscroll") == browse)
+    check(plan("Doomscroll on Instagram for a little bit") == browse)
+    check(plan("Open Instagram and then doomscroll for a short while") == browse)
+    check(plan("Doomscroll reels on Instagram") == browse)
+    check(plan("Open Instagram and doomscroll for 45 seconds") ==
+        browse.copy(browseLimit = JobProgress.BrowseLimit(durationMs = 45_000)))
+    check(plan("Open Instagram and doomscroll for 6 reels and like any you want") ==
+        selective.copy(browseLimit = JobProgress.BrowseLimit(screens = 6)))
+    check(plan("Doomscroll Instagram feed").surface == "feed")
+    check(plan("Browse Instagram").surface == null)
+    check(plan("Doomscroll Another App for a bit").surface == null)
+    check(JobProgress.feedRequest("Open Instagram and doomscroll for a bit and follow the authors") == null)
+    check(JobProgress.matchesFeedTab("Reels, Tab 2 of 5", "reels"))
+    check(JobProgress.selectedFeedTab("Reels, Tab 2 of 5, selected", "reels"))
+    check(!JobProgress.matchesFeedTab("Suggested Reels", "reels"))
+    check(!JobProgress.matchesFeedTab("Create a reel", "reels"))
+    check(JobProgress.feedSurfaceChanged(setOf("Home", "post A"), setOf("Reels", "clip B")))
+    check(!JobProgress.feedSurfaceChanged(setOf("Home", "post A"), setOf("Home", "post B")))
+    val feedRetries = JobProgress.FailureStreak(JobProgress.FEED_FAILURES_BEFORE_STOP)
+    repeat(4) { check(!feedRetries.record(false)) }
+    check(!feedRetries.record(true))
+    repeat(4) { check(!feedRetries.record(false)) }
+    check(feedRetries.record(false))
 
     val seeded = kotlin.random.Random(178)
     val durations = List(200) { JobProgress.BrowseLimit().session(1000, seeded).durationMs }
