@@ -36,7 +36,9 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   delete them.
 - The **Logins** screen stores entries encrypted on the phone. Pip pauses at sign-in
   instead of autofilling a form it cannot verify. You can reveal an existing password
-  after confirming your device lock, or sign in through Android Autofill.
+  after confirming your device lock, or sign in through Android Autofill. If the vault
+  can't be opened, Pip leaves it untouched. At capacity, adding a new site requires
+  deleting an entry first; older entries aren't automatically removed.
 - Ask him to **stand still** and he stops where he is: "stand still for two minutes" for
   that long, or just "stand still" for as long as you like — until you tell him he can move
   again. He is still there to talk to, and the hold is kept on the phone like a toy break, so
@@ -88,7 +90,10 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   With neither limit specified (including “for a little bit”), Pip picks a random duration
   from 30 seconds to 5 minutes. Pip waits for an exposed playback end or loop before
   deciding whether to like and swipe; if playback isn't exposed, he pauses for about 18
-  seconds instead. The session timer and Stop take priority over finishing a reel.
+  seconds instead. Missing or conflicting playback readings aren't treated as a loop.
+  Changing captions or counters alone don't prove that the next reel
+  opened. If the reel is hard to identify but the viewer is still readable, Pip can finish
+  the pause and swipe without liking it. The session timer and Stop take priority.
   He may stop sooner if the feed stalls, and **Stop** works at any time. If Pip can't find
   the requested tab, open it in the app and retry. If a request names an app, Pip opens it before his first step
   unless you're already in it, in which case he leaves your

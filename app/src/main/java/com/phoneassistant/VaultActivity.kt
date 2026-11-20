@@ -140,10 +140,17 @@ class VaultActivity : Activity() {
             say("A website, a username and a password — all three.")
             return
         }
-        if (!Vault.save(this, site, user, password)) {
-            say("That would not save. Try again.")
+        val error = when (Vault.save(this, site, user, password)) {
+            Vault.SaveResult.SAVED -> null
+            Vault.SaveResult.INVALID -> "Check the website and username. Neither can be blank or too long."
+            Vault.SaveResult.FULL -> "The vault is full. Delete a login before adding a new site."
+            Vault.SaveResult.UNAVAILABLE -> "I couldn't update the vault. Its existing contents weren't replaced."
+        }
+        if (error != null) {
+            say(error)
             return
         }
+        status.text = ""
         siteField.setText("")
         userField.setText("")
         passField.setText("")
@@ -157,10 +164,12 @@ class VaultActivity : Activity() {
     }
 
     private fun render() {
-        val logins = Vault.all(this).sortedBy { Vault.host(it.site) }
+        val logins = Vault.all(this)?.sortedBy { Vault.host(it.site) }
         list.removeAllViews()
-        empty.visibility = if (logins.isEmpty()) View.VISIBLE else View.GONE
-        logins.forEach { list.addView(row(it.site, it.username)) }
+        empty.text = if (logins == null) "Couldn't open the saved vault. No logins were erased."
+            else "No logins saved on this phone."
+        empty.visibility = if (logins.isNullOrEmpty()) View.VISIBLE else View.GONE
+        logins.orEmpty().forEach { list.addView(row(it.site, it.username)) }
         status.visibility = if (status.text.isNullOrEmpty()) View.GONE else View.VISIBLE
     }
 
@@ -238,7 +247,7 @@ class VaultActivity : Activity() {
         if (requestCode != REVEAL_LOGIN) return
         val site = pendingRevealSite.also { pendingRevealSite = null } ?: return
         if (resultCode != RESULT_OK || isFinishing || isDestroyed) return
-        val login = Vault.all(this).firstOrNull { it.site == site } ?: return
+        val login = Vault.all(this)?.firstOrNull { it.site == site } ?: return
         revealDialog?.dismiss()
         val secret = object : TextView(this) {
             override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {

@@ -26,6 +26,7 @@ object Memory {
         }
     }
 
+    @Synchronized
     fun append(ctx: Context, role: String, content: String) {
         val messages = history(ctx).toMutableList()
         messages.add(Msg(role, content))
@@ -38,6 +39,7 @@ object Memory {
         prefs(ctx).edit().putString(KEY, array.toString()).apply()
     }
 
+    @Synchronized
     fun clear(ctx: Context) {
         prefs(ctx).edit().remove(KEY).apply()
     }
