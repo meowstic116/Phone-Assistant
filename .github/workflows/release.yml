@@ -26,6 +26,11 @@ jobs:
       - name: Build APK
         run: |
           set -euo pipefail
+          version=$(sed -n 's/^ *versionName = "\([0-9.]*\)"$/\1/p' app/build.gradle.kts)
+          if [[ -z "$version" || "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Release tag must match app versionName (v$version)." >&2
+            exit 1
+          fi
           ./gradlew assembleRelease --no-daemon
           mv app/build/outputs/apk/release/app-release.apk "phone-assistant-${GITHUB_REF_NAME}.apk"
 

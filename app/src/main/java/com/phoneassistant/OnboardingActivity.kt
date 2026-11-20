@@ -174,6 +174,7 @@ class OnboardingActivity : Activity() {
             val issue = when {
                 input.apiKey.isBlank() || input.model.isBlank() || input.baseUrl.isBlank() -> Check.MISSING
                 !SetupPolicy.validUrl(input.baseUrl) -> Check.URL
+                !SetupPolicy.validApiKey(input.apiKey) -> Check.KEY
                 else -> null
             }
             if (issue != null) {

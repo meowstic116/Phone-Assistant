@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <exclude domain="sharedpref" path="brain.xml" />
+    <exclude domain="sharedpref" path="memory.xml" />
+    <exclude domain="sharedpref" path="facts.xml" />
+    <exclude domain="sharedpref" path="persona.xml" />
     <exclude domain="sharedpref" path="pip_voice.xml" />
     <exclude domain="sharedpref" path="vault.xml" />
     <exclude domain="sharedpref" path="startup.xml" />

@@ -31,7 +31,7 @@ object UpdateChecker {
         executor.execute {
             val result = try {
                 fetch(current)
-            } catch (t: Throwable) {
+            } catch (_: Exception) {
                 null
             }
             onDone(result)
@@ -41,6 +41,7 @@ object UpdateChecker {
     private fun fetch(current: String): Result? {
         val connection = (URL(LATEST_RELEASE_URL).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
+            instanceFollowRedirects = false
             connectTimeout = 15_000
             readTimeout = 15_000
             setRequestProperty("Accept", "application/vnd.github+json")
@@ -56,31 +57,29 @@ object UpdateChecker {
             }
             if (code !in 200..299) return null
 
-            val raw = connection.inputStream.bufferedReader().use { it.readText() }
+            val raw = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded(256 * 1024) }
             val json = JSONObject(raw)
             val tag = json.optString("tag_name")
-            if (tag.isBlank()) return null
+            val pageUrl = UpdatePolicy.releasePage(tag) ?: return null
 
             var apkUrl: String? = null
             val assets = json.optJSONArray("assets")
             if (assets != null) {
                 for (index in 0 until assets.length()) {
-                    val asset = assets.getJSONObject(index)
+                    val asset = assets.optJSONObject(index) ?: continue
                     val name = asset.optString("name")
                     val url = asset.optString("browser_download_url")
-                    if (name.endsWith(".apk", ignoreCase = true) && url.startsWith("https://")) {
-                        apkUrl = url
-                        break
-                    }
+                    apkUrl = UpdatePolicy.apkUrl(tag, name, url)
+                    if (apkUrl != null) break
                 }
             }
 
             return Result(
-                newer = isNewer(tag, current),
+                newer = UpdatePolicy.isNewer(tag, current),
                 version = tag,
                 currentVersion = current,
                 downloadUrl = apkUrl,
-                pageUrl = json.optString("html_url")
+                pageUrl = pageUrl
             )
         } finally {
             connection.disconnect()
@@ -91,25 +90,5 @@ object UpdateChecker {
         ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "?"
     } catch (t: Throwable) {
         "?"
-    }
-
-    private fun isNewer(tag: String, current: String): Boolean {
-        val remote = numbers(tag)
-        val local = numbers(current)
-        if (remote.isEmpty() || local.isEmpty()) return false
-        for (index in 0 until maxOf(remote.size, local.size)) {
-            val r = remote.getOrElse(index) { 0 }
-            val l = local.getOrElse(index) { 0 }
-            if (r != l) return r > l
-        }
-        return false
-    }
-
-    private fun numbers(version: String): List<Int> {
-        val cleaned = version.trim().removePrefix("v").removePrefix("V")
-        val parts = cleaned.split('.').map { part -> part.takeWhile { it.isDigit() }.toIntOrNull() }
-        // A leading non-numeric segment means this is not a version we can compare.
-        if (parts.firstOrNull() == null) return emptyList()
-        return parts.mapNotNull { it }
     }
 }

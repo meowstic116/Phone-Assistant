@@ -38,6 +38,7 @@
         android:layout_marginTop="8dp"
         android:hint="@string/settings_api_key"
         android:importantForAutofill="no"
+        android:imeOptions="flagNoPersonalizedLearning"
         android:inputType="textPassword"
         android:saveEnabled="false" />
 

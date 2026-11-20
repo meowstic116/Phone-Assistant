@@ -12,6 +12,10 @@ object Memory {
     private const val PREFS = "memory"
     private const val KEY = "history"
     private const val MAX_MESSAGES = 24
+    internal const val MAX_MESSAGE_CHARS = 4096
+
+    private fun bounded(content: String) =
+        if (content.length <= MAX_MESSAGE_CHARS) content else content.take(MAX_MESSAGE_CHARS).trimEnd { it.isHighSurrogate() }
 
     fun history(ctx: Context): List<Msg> {
         val raw = prefs(ctx).getString(KEY, "[]") ?: "[]"
@@ -19,7 +23,7 @@ object Memory {
             val array = JSONArray(raw)
             (0 until array.length()).map { index ->
                 val item = array.getJSONObject(index)
-                Msg(item.getString("role"), item.getString("content"))
+                Msg(item.getString("role"), bounded(item.getString("content")))
             }
         } catch (t: Throwable) {
             emptyList()
@@ -29,7 +33,7 @@ object Memory {
     @Synchronized
     fun append(ctx: Context, role: String, content: String) {
         val messages = history(ctx).toMutableList()
-        messages.add(Msg(role, content))
+        messages.add(Msg(role, bounded(content)))
         while (messages.size > MAX_MESSAGES) messages.removeAt(0)
 
         val array = JSONArray()

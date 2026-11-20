@@ -1,7 +1,10 @@
 package com.phoneassistant
 
 import android.app.Activity
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.view.ViewGroup
 import android.widget.Button
@@ -30,6 +33,7 @@ class DiagnosticsActivity : Activity() {
 
     private lateinit var readout: TextView
     private lateinit var floatButton: Button
+    private var lastProcessFailure: String? = null
 
     /** Keeps the numbers live while the screen is open, and stops when it is not. */
     private val ticker = object : Runnable {
@@ -119,6 +123,7 @@ class DiagnosticsActivity : Activity() {
         // Came back from a trip to another app: he may have been stopped, and the panel with
         // him, while this screen was hidden.
         if (::floatButton.isInitialized) floatButton.text = floatLabel()
+        lastProcessFailure = previousProcessFailure()
         readout.post(ticker)
     }
 
@@ -129,6 +134,27 @@ class DiagnosticsActivity : Activity() {
     override fun onPause() {
         readout.removeCallbacks(ticker)
         super.onPause()
+    }
+
+    private fun previousProcessFailure(): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        return runCatching {
+            val manager = getSystemService(ActivityManager::class.java) ?: return@runCatching null
+            val exits = manager.getHistoricalProcessExitReasons(packageName, 0, 16)
+            exits.firstNotNullOfOrNull { exit ->
+                if (exit.processName != packageName) return@firstNotNullOfOrNull null
+                val reason = when (exit.reason) {
+                    ApplicationExitInfo.REASON_CRASH -> "Java/Kotlin crash"
+                    ApplicationExitInfo.REASON_CRASH_NATIVE -> "native crash"
+                    ApplicationExitInfo.REASON_ANR -> "not responding"
+                    ApplicationExitInfo.REASON_LOW_MEMORY -> "low memory"
+                    ApplicationExitInfo.REASON_SIGNALED -> "terminated by signal ${exit.status}"
+                    else -> return@firstNotNullOfOrNull null
+                }
+                // Never include Android's free-form description or trace, which may contain data.
+                "$reason · ${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(exit.timestamp))}"
+            }
+        }.getOrNull()
     }
 
     // ------------------------------------------------------------------ the report
@@ -152,8 +178,10 @@ class DiagnosticsActivity : Activity() {
             out.append("    ").append(text).append('\n')
         }
 
-        section("VOICE")
-        val voice = PipVoice.config(this)
+        section("CHAT & VOICE")
+        line("last process exit", lastProcessFailure ?: "no unexpected exit reported")
+        Diag.lastChatFailure?.let { line("last chat issue", it.text) }
+        val voice = VoiceSettings.config(this)
         line("voice source", voice.source.label)
         line("spoken replies", if (voice.enabled) "on" else "off")
         if (voice.source == VoiceSource.KOKORO) {

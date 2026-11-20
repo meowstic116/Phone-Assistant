@@ -240,15 +240,12 @@ by default. **Choose Pip’s voice** also offers Michael and Bella. Kokoro is En
 it runs on your phone after setup, with no speech API key, server, or per-use cost. You
 can remove the download from Voice settings. An existing explicit voice choice stays selected.
 
-[Hosted VoxCPM2 on Wiro](https://wiro.ai/models/openbmb/voxcpm2) is still optional and
-requires a Wiro project key and balance, including for previews. If you run a [VoxCPM2
-server](voice-server/README.md), select **Custom VoxCPM2 server** and enter its HTTPS
-`/v1/audio/speech` URL and token. Both VoxCPM2 choices support voice style instructions.
-**Offline Android voice** still uses an installed system voice and is never a fallback.
-Remote speech providers receive ordinary reply text only, not private phone results.
+**Offline Android voice** uses an installed system voice and is never a fallback.
+Pip doesn't send reply text to a speech provider. The separate chat API still generates
+chat replies when needed, whether or not speech is enabled.
 
 The floating bubble reveals words during playback without resizing. Android engines may
-report word ranges; Kokoro and VoxCPM2 use estimated timing. If audio is unavailable,
+report word ranges; Kokoro uses estimated timing. If audio is unavailable,
 the full reply is still shown. Kokoro runs in a separate app process so a voice-engine
 failure doesn’t restart the overlay. If that process stops, Pip pauses automatic Kokoro
 speech for the session; a successful **Preview Pip’s voice** resumes it. The last voice
@@ -290,7 +287,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.173-debug.apk`](dist/phone-assistant-0.173-debug.apk).
+[`phone-assistant-0.175-debug.apk`](dist/phone-assistant-0.175-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by
@@ -385,7 +382,10 @@ git push origin v0.3
 ```
 
 `.github/workflows/release.yml` builds the APK and publishes it on a GitHub Release, so
-binaries never enter git history.
+the GitHub Release is the source the in-app updater trusts, separate from any manually
+checked-in sideload APKs in `dist/`. The updater only opens the official repository’s
+release page or APK asset links. Only install APKs from a source you trust: the personal
+signing key is public.
 
 ## Logins
 
@@ -399,8 +399,9 @@ To retrieve a saved password, tap **Reveal** and confirm your device PIN, patter
 password. The reveal is not copied to the clipboard, blocks screenshots of the vault,
 and closes when you leave or after 30 seconds. The job model sees a generic password
 field marker, never the contents. The API key and vault are excluded from Android backup
-and device transfer. A vault that cannot be decrypted reads as empty and is recorded in
-Diagnostics.
+and device transfer. Chat history, saved memory, and custom personality are also
+excluded. If the vault can’t be read, Pip reports it in Diagnostics without logging
+credential contents and won’t overwrite the stored vault.
 
 ## Memory
 
@@ -413,7 +414,8 @@ note, such as a preference, hobby, or goal. The app checks that the suggestion u
 words from the latest message and skips obvious sensitive details and requests not to save.
 It does not make a second API request. Turning **Learn from chat** off leaves saved notes
 and direct “remember” requests available. Use **Memory** to review or delete anything that
-came out wrong. Chat history is separate and is still capped at the last 24 messages.
+came out wrong. Chat history is separate and is capped at the last 24 messages. Individual messages are
+limited to 4,096 characters.
 
 ## Changing the character
 

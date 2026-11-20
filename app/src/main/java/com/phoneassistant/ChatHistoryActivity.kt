@@ -50,6 +50,7 @@ class ChatHistoryActivity : Activity() {
             addBubble("Clean slate.", false)
         }
 
+        input.filters = arrayOf(android.text.InputFilter.LengthFilter(Memory.MAX_MESSAGE_CHARS))
         sendButton.setOnClickListener { send() }
         input.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) {
@@ -82,20 +83,28 @@ class ChatHistoryActivity : Activity() {
         addBubble(text, true)
         if (NowPlaying.requested(text)) {
             Agent.cancel()
-            val reply = PipMediaAccess.answer(this)
+            val reply = ChatRecovery.attempt(ChatRecovery.REPLY_FAILED, { Diag.chatFailure("now playing reply", it) }) {
+                PipMediaAccess.answer(this)
+            }
             addBubble(reply, false)
-            OverlayService.speak(this, reply, allowRemote = false)
+            OverlayService.speak(this, reply)
             return
         }
-        Memory.append(this, "user", text)
+        ChatRecovery.attempt(Unit, { Diag.chatFailure("chat history", it) }) {
+            Memory.append(this, "user", text)
+        }
 
         sendButton.isEnabled = false
         Agent.cancel()
-        Facts.saveNameRequest(this, text)?.let { reply ->
-            Memory.append(this, "assistant", reply)
+        ChatRecovery.attempt<String?>(null, { Diag.chatFailure("chat preferred name", it) }) {
+            Facts.saveNameRequest(this, text)
+        }?.let { reply ->
+            ChatRecovery.attempt(Unit, { Diag.chatFailure("chat history", it) }) {
+                Memory.append(this, "assistant", reply)
+            }
             addBubble(reply, false)
             sendButton.isEnabled = true
-            OverlayService.speak(this, reply, allowRemote = false)
+            OverlayService.speak(this, reply)
             return
         }
         OverlayService.beginThinking()
@@ -103,7 +112,9 @@ class ChatHistoryActivity : Activity() {
             showJobStarted(OverlayService.runPhoneJob(text, text, turn))
             return
         }
-        val event = OverlayService.reactTo(text)
+        val event = ChatRecovery.attempt<String?>(null, { Diag.chatFailure("chat toy reaction", it) }) {
+            OverlayService.reactTo(text)
+        }
         val placeholder = addBubble("…", false)
 
         AssistantBrain.reply(
@@ -129,9 +140,11 @@ class ChatHistoryActivity : Activity() {
                     return@runOnUiThread
                 }
                 addBubble(reply, false)
-                if (ok) Memory.append(this, "assistant", reply)
+                if (ok) ChatRecovery.attempt(Unit, { Diag.chatFailure("chat history", it) }) {
+                    Memory.append(this, "assistant", reply)
+                }
                 sendButton.isEnabled = true
-                OverlayService.speak(this, reply, allowRemote = ok)
+                OverlayService.speak(this, reply)
             }
         }
     }
@@ -168,7 +181,9 @@ class ChatHistoryActivity : Activity() {
         params.topMargin = dp(8)
 
         messageList.addView(bubble, params)
-        scroller.post { scroller.fullScroll(View.FOCUS_DOWN) }
+        // Scroll without trying to focus a child; fullScroll(FOCUS_DOWN) can steal the
+        // editor's focus and dismiss the keyboard as a reply arrives.
+        scroller.post { scroller.smoothScrollTo(0, messageList.height) }
         return bubble
     }
 

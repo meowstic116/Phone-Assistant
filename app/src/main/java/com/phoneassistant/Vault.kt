@@ -85,8 +85,8 @@ object Vault {
                 check(site.isNotEmpty() && username.isNotEmpty() && password.isNotEmpty())
                 Login(site, username, password)
             }
-        } catch (t: Throwable) {
-            Diag.caught("vault", t)
+        } catch (e: Exception) {
+            Diag.vaultFailure(e)
             null
         }
     }
@@ -109,8 +109,8 @@ object Vault {
         return try {
             edit.putString(KEY, encrypt(array.toString().toByteArray(Charsets.UTF_8))).apply()
             true
-        } catch (t: Throwable) {
-            Diag.caught("vault", t)
+        } catch (e: Exception) {
+            Diag.vaultFailure(e)
             false
         }
     }

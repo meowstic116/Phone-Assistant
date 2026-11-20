@@ -24,6 +24,8 @@ internal object SetupPolicy {
         return "$trimmed/chat/completions"
     }
 
+    fun validApiKey(key: String): Boolean = key.length in 1..4096 && key.none { it.isWhitespace() || it.isISOControl() }
+
     fun validUrl(baseUrl: String): Boolean = runCatching {
         val uri = URI(baseUrl)
         uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank() &&
