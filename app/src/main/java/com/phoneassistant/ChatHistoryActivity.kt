@@ -84,7 +84,7 @@ class ChatHistoryActivity : Activity() {
         sendButton.isEnabled = false
         Agent.cancel()
         OverlayService.beginThinking()
-        if (JobProgress.routeFeedLocally(text) || JobProgress.explicitUrl(text) != null) {
+        if (JobProgress.routeFeedLocally(text) || JobProgress.communicationRequest(text) != null || JobProgress.explicitUrl(text) != null) {
             showJobStarted(OverlayService.runPhoneJob(text, text, turn))
             return
         }

@@ -14,6 +14,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Telephony
+import android.telecom.TelecomManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -176,7 +178,8 @@ object Screen {
         val id = node.viewIdResourceName?.substringAfterLast('/')
         val feedViewer = feed && (JobProgress.matchesFeedViewer(id, "reels", node.packageName?.toString()) ||
             JobProgress.matchesFeedViewer(id, "shorts"))
-        if (!editable && !node.isClickable && !node.isCheckable && !scrollable && label.isEmpty() && !feedViewer) {
+        if (!editable && !node.isClickable && !node.isCheckable && !scrollable && label.isEmpty() && !feedViewer &&
+            !(feed && node.rangeInfo != null)) {
             return false
         }
         val bounds = Rect()
@@ -345,6 +348,21 @@ object Screen {
         targetStillVisible(screen, item) && item.node.isClickable && isFeedTab(item, surface) &&
             item.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }.getOrDefault(false)
+
+    internal fun playback(item: Item): JobProgress.Playback? {
+        if (item.editable || item.password) return null
+        val id = item.id.orEmpty()
+        val relevantId = id.contains("progress") && (id.contains("playback") || id.contains("video") || id.contains("reel"))
+        val timeline = item.role == "SeekBar" || relevantId
+        val labels = listOf(item.node.contentDescription, item.node.text)
+        labels.firstNotNullOfOrNull { JobProgress.playbackLabel(it?.toString().orEmpty(), timeline) }?.let { return it }
+        val described = labels.any { JobProgress.normalize(it?.toString().orEmpty()) in
+            setOf("reel progress", "video progress", "playback progress", "playback position") }
+        if (!relevantId && !described) return null
+        val range = item.node.rangeInfo ?: return null
+        if (!range.current.isFinite() || !range.min.isFinite() || !range.max.isFinite() || range.max <= range.min) return null
+        return JobProgress.Playback(((range.current - range.min) / (range.max - range.min)).coerceIn(0f, 1f))
+    }
 
     internal fun feedScroller(screen: Snapshot): Item? = screen.items.filter { it.scrollable }
         .maxByOrNull { it.bounds.width().toLong() * it.bounds.height() }
@@ -522,6 +540,23 @@ object Screen {
      */
     fun appInRequest(apps: List<AppRef>, request: String): AppRef? =
         appsInRequest(apps, request).singleOrNull()
+
+    internal fun defaultCommunicationPackage(ctx: Context, kind: JobProgress.CommunicationKind): String? = runCatching {
+        when (kind) {
+            JobProgress.CommunicationKind.MESSAGE -> Telephony.Sms.getDefaultSmsPackage(ctx)
+            JobProgress.CommunicationKind.CALL -> ctx.getSystemService(TelecomManager::class.java)?.defaultDialerPackage
+        }?.takeIf { it.isNotBlank() && it != ctx.packageName }
+    }.getOrNull()
+
+    internal fun openCommunication(ctx: Context, pkg: String, kind: JobProgress.CommunicationKind, app: AppRef?): Boolean {
+        if (app != null) return open(ctx, app)
+        // A role holder without a launcher icon can still expose the standard entry point.
+        val entry = when (kind) {
+            JobProgress.CommunicationKind.MESSAGE -> Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:"))
+            JobProgress.CommunicationKind.CALL -> Intent(Intent.ACTION_DIAL, Uri.parse("tel:"))
+        }.setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { ctx.startActivity(entry); true }.getOrDefault(false)
+    }
 
     /** Launches an app, straight to the activity that owns its icon. */
     fun open(ctx: Context, app: AppRef): Boolean {

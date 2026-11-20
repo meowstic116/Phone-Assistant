@@ -32,6 +32,7 @@ internal object FeedRunner {
     private const val TAB_READS = 12
     private const val TAB_READ_MS = 350L
     private const val LIKE_CHOICE_MS = 8_000L
+    private const val REEL_SAMPLE_MS = 750L
     // A slow or abandoned request can't hold up Stop or the browse deadline. Don't queue
     // more work behind an HTTP call that hasn't responded to interruption yet.
     private val likePicker = ThreadPoolExecutor(0, 1, 15, TimeUnit.SECONDS, SynchronousQueue<Runnable>())
@@ -107,6 +108,7 @@ internal object FeedRunner {
         fun contentItems(screen: Screen.Snapshot) = screen.items.asSequence().filter { item ->
             !item.editable && item.label.isNotBlank() && state(item) == ReactionState.UNKNOWN &&
                 !JobProgress.reactionSummary(reaction, item.label) &&
+                (!singleItemSurface || Screen.playback(item) == null) &&
                 (bulk || Screen.reactionState(item, JobProgress.Reaction.LIKE) == ReactionState.UNKNOWN)
         }
         fun content(screen: Screen.Snapshot) = contentItems(screen).map { it.label }.sorted().toList()
@@ -370,8 +372,56 @@ internal object FeedRunner {
             Diag.jobStep(mine, if (counted) "check feed screen $screens" else "check unidentifiable reel",
                 "${eligible.size} ready, $alreadyApplied already applied$scanNote", true)
 
-            var selected = if (counted && !bulk && reaction != null && eligible.isNotEmpty() && choicesAvailable) {
-                val choice = pickLike(ctx, screen, eligible, ::active)
+            if (singleItemSurface) {
+                val watch = JobProgress.ReelWatch(SystemClock.elapsedRealtime())
+                val change = JobProgress.StableFeedRead()
+                val expectedWindow = screen.windowId
+                fun playback(view: Screen.Snapshot): JobProgress.Playback? {
+                    val samples = view.items.mapNotNull(Screen::playback).distinct()
+                    return samples.firstOrNull { it.ended } ?: samples.singleOrNull()
+                }
+                val initialTime = SystemClock.elapsedRealtime()
+                var lastReadable = initialTime
+                var result = watch.observe(initialTime, playback(screen))
+                while (result == JobProgress.ReelWatchResult.WAITING && active()) {
+                    pause(REEL_SAMPLE_MS)
+                    if (!active()) return stopped()
+                    val now = SystemClock.elapsedRealtime()
+                    val fresh = look()?.takeIf { it.windowId == expectedWindow && it.items.isNotEmpty() }
+                    if (fresh == null) {
+                        if (Screen.inFront() != app.packageName) return report("I lost the reel while watching it.", "reel left foreground")
+                        change.observe(null, 2)
+                    } else {
+                        val nextId = fingerprint(fresh)
+                        val newReel = traversal.movement(viewport, nextId) == FeedMovement.NEW_VIEWPORT
+                        if (change.observe(nextId.takeIf { newReel }, 2)) {
+                            Diag.jobStep(mine, "watch reel", "feed advanced on its own; no extra swipe", true)
+                            if (session?.reachedCount(screens) == true) return report(
+                                "I reached your browsing count.", "browse count reached"
+                            )
+                            screen = fresh
+                            continue@feedLoop
+                        }
+                        if (nextId == viewport) {
+                            lastReadable = now
+                            screen = fresh
+                            result = watch.observe(now, playback(fresh))
+                        }
+                    }
+                    if (now - lastReadable >= 6_000L) return report(
+                        "I couldn't identify the reel after the screen changed.", "reel no longer readable while watching"
+                    )
+                }
+                if (!active()) return stopped()
+                Diag.jobStep(mine, "watch reel", if (result == JobProgress.ReelWatchResult.FINISHED) {
+                    "playback end or loop observed"
+                } else "playback end not exposed; used a viewing pause", result == JobProgress.ReelWatchResult.FINISHED)
+            }
+
+            val choiceEligible = if (singleItemSurface) screen.items.filter { state(it) == ReactionState.READY }
+                .distinctBy { it.bounds } else eligible
+            var selected = if (counted && !bulk && reaction != null && choiceEligible.isNotEmpty() && choicesAvailable) {
+                val choice = pickLike(ctx, screen, choiceEligible, ::active)
                 if (!active()) return stopped()
                 if (choice == null) {
                     choicesAvailable = false
@@ -382,7 +432,7 @@ internal object FeedRunner {
                     choice == 0 -> "skipped this screen"
                     else -> "chose one visible control"
                 }, choice != null, turn = true)
-                eligible.firstOrNull { it.index == choice }
+                choiceEligible.firstOrNull { it.index == choice }
             } else null
             if (!active()) return stopped()
             if (selected != null) {
