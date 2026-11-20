@@ -11,7 +11,7 @@ PATH = "/v1/audio/speech"
 MAX_TEXT = 420
 MAX_BODY = 4096
 MAX_WAV = 2_000_000
-DEFAULT_STYLE = "A bright, warm, lightly playful voice with dry comic timing and clear diction"
+DEFAULT_STYLE = "An adult male text-to-speech voice, crisp and lightly robotic, with an even pace and clear diction"
 
 
 def make_handler(token, synthesize):
@@ -58,6 +58,10 @@ def make_handler(token, synthesize):
                 text = data.get("input")
                 if not isinstance(text, str) or not 0 < len(text.strip()) <= MAX_TEXT:
                     return self.error(400, "Expected a short reply")
+                style = data.get("instructions")
+                if style is not None and (not isinstance(style, str) or not 0 < len(style.strip()) <= 120
+                                          or any(c in "()" or ord(c) < 32 for c in style)):
+                    return self.error(400, "Invalid voice description")
                 if (data.get("model", MODEL) != MODEL or data.get("voice", "default") != "default"
                         or data.get("response_format", "wav") != "wav"):
                     return self.error(400, "Only VoxCPM2 with the default voice and WAV output is supported")
@@ -66,7 +70,7 @@ def make_handler(token, synthesize):
             if not inference.acquire(blocking=False):
                 return self.error(503, "Voice is busy")
             try:
-                wav = synthesize(text.strip())
+                wav = synthesize(text.strip(), style.strip() if style else None)
                 if len(wav) > MAX_WAV:
                     return self.error(500, "Audio too long")
             except Exception:
@@ -91,8 +95,8 @@ def main():
 
     model = VoxCPM.from_pretrained(os.environ.get("PIP_VOICE_MODEL", MODEL), load_denoiser=False)
 
-    def synthesize(text):
-        audio = model.generate(text=f"({style}){text}", cfg_value=2.0, inference_timesteps=10,
+    def synthesize(text, instructions):
+        audio = model.generate(text=f"({instructions or style}){text}", cfg_value=2.0, inference_timesteps=10,
                                retry_badcase=False)
         out = io.BytesIO()
         sf.write(out, audio, model.tts_model.sample_rate, format="WAV", subtype="PCM_16")

@@ -1,18 +1,76 @@
+import java.net.URI
+import java.security.DigestInputStream
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
+// Use the matching sherpa-onnx 2.0.1 JNI and Kotlin bindings from a pinned
+// Android prebuild. No React Native code or model weights are included.
+val kokoroRuntime = layout.buildDirectory.dir("generated/kokoroRuntime")
+val kokoroPrebuild = "https://registry.npmjs.org/@siteed/sherpa-onnx.rn/-/sherpa-onnx.rn-2.0.1.tgz"
+val kokoroPrebuildSha = "ff4f84512559173e6c61bce1c5723028774ba5040a0fa0a2ab5d9909b834693f"
+val prepareKokoroRuntime by tasks.registering {
+    inputs.property("url", kokoroPrebuild)
+    inputs.property("sha256", kokoroPrebuildSha)
+    outputs.dir(kokoroRuntime)
+    doLast {
+        val bundle = File(temporaryDir, "sherpa.tgz")
+        val connection = URI(kokoroPrebuild).toURL().openConnection().apply {
+            connectTimeout = 20_000
+            readTimeout = 30_000
+        }
+        try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            DigestInputStream(connection.getInputStream(), digest).use { input ->
+                bundle.outputStream().use { input.copyTo(it) }
+            }
+            check(digest.digest().joinToString("") { "%02x".format(it) } == kokoroPrebuildSha) {
+                "Kokoro runtime checksum mismatch"
+            }
+            val prefix = "package/android/src/main/"
+            val bindings = "kotlin/com/k2fsa/sherpa/onnx/Tts.kt"
+            project.sync {
+                from(project.tarTree(project.resources.gzip(bundle))) {
+                    include("$prefix$bindings", "${prefix}jniLibs/*/libonnxruntime.so",
+                        "${prefix}jniLibs/*/libsherpa-onnx-jni.so")
+                    eachFile { path = path.removePrefix(prefix) }
+                    includeEmptyDirs = false
+                }
+                into(kokoroRuntime)
+            }
+            val output = kokoroRuntime.get().asFile
+            check(output.resolve(bindings).isFile)
+            for (abi in listOf("arm64-v8a", "armeabi-v7a", "x86_64")) {
+                check(output.resolve("jniLibs/$abi/libsherpa-onnx-jni.so").isFile)
+                check(output.resolve("jniLibs/$abi/libonnxruntime.so").isFile)
+            }
+        } finally {
+            bundle.delete()
+        }
+    }
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(prepareKokoroRuntime) }
+
 android {
     namespace = "com.phoneassistant"
     compileSdk = 34
+
+    sourceSets.getByName("main") {
+        java.srcDir(kokoroRuntime.map { it.dir("kotlin") })
+        jniLibs.srcDir(kokoroRuntime.map { it.dir("jniLibs") })
+    }
+    packaging.jniLibs.useLegacyPackaging = true
 
     defaultConfig {
         applicationId = "com.phoneassistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 170
-        versionName = "0.170"
+        versionCode = 173
+        versionName = "0.173"
     }
 
     // One committed, self-signed key signs every build, debug and release alike, so the
@@ -52,7 +110,9 @@ android {
     }
 }
 
-// Deliberately no runtime dependencies: the overlay, chat UI and HTTP client all
-// use platform APIs so the app stays small and builds without a dependency graph.
 dependencies {
+    // Hosted VoxCPM2 sends its PCM frames over a TLS WebSocket.
+    implementation("org.java-websocket:Java-WebSocket:1.6.0")
+    implementation("org.slf4j:slf4j-api:2.0.17")
+    implementation("org.apache.ant:ant:1.10.15") { isTransitive = false }
 }

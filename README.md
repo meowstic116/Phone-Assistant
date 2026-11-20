@@ -233,19 +233,29 @@ is disabled stays in the catalog, with a note explaining why it can’t be launc
 
 ## Pip’s voice
 
-Turn on **Pip settings → Voice → Read Pip’s replies aloud**. **Preview Pip’s voice**
-plays a sample. With no speech server configured, Pip uses an installed offline Android
-text-to-speech voice. Install an offline voice in Android’s text-to-speech settings if
-none is available. The floating bubble reveals words during playback without resizing;
-Android voices can report spoken word ranges, while VoxCPM WAV responses use estimated
-timing. If speech is off or unavailable, the complete written reply still appears.
+In **Pip settings → Voice**, **Kokoro** is the default for new voice setups, with the
+male **Adam** preset. Tap **Download Kokoro** (about 110 MB from GitHub), then **Preview
+Pip’s voice**. Turn on **Read Pip’s replies aloud** if you want spoken replies; it’s off
+by default. **Choose Pip’s voice** also offers Michael and Bella. Kokoro is English-only:
+it runs on your phone after setup, with no speech API key, server, or per-use cost. You
+can remove the download from Voice settings. An existing explicit voice choice stays selected.
 
-For [OpenBMB VoxCPM2](https://github.com/OpenBMB/VoxCPM), set up the [optional voice
-server](voice-server/README.md) and enter its HTTPS `/v1/audio/speech` URL and token in
-**Configure VoxCPM server**. No model weights are bundled in the APK. Only ordinary
-assistant reply text is sent to that speech endpoint, not prompts, screen snapshots,
-chat history, or local results like track titles. If that endpoint is unavailable, Pip
-falls back to the offline Android voice. Speech is off until you enable it.
+[Hosted VoxCPM2 on Wiro](https://wiro.ai/models/openbmb/voxcpm2) is still optional and
+requires a Wiro project key and balance, including for previews. If you run a [VoxCPM2
+server](voice-server/README.md), select **Custom VoxCPM2 server** and enter its HTTPS
+`/v1/audio/speech` URL and token. Both VoxCPM2 choices support voice style instructions.
+**Offline Android voice** still uses an installed system voice and is never a fallback.
+Remote speech providers receive ordinary reply text only, not private phone results.
+
+The floating bubble reveals words during playback without resizing. Android engines may
+report word ranges; Kokoro and VoxCPM2 use estimated timing. If audio is unavailable,
+the full reply is still shown. Kokoro runs in a separate app process so a voice-engine
+failure doesn’t restart the overlay. If that process stops, Pip pauses automatic Kokoro
+speech for the session; a successful **Preview Pip’s voice** resumes it. The last voice
+issue appears in **Debug options → Diagnostics**, without recording any spoken text.
+Kokoro’s runtime is bundled for arm64-v8a, armeabi-v7a and
+x86_64. Its weights are not bundled with the APK or committed to Git. See
+[third-party notices](app/src/main/assets/voice-licenses/README.txt) for source and licenses.
 
 ## Personality
 
@@ -280,13 +290,15 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.170-debug.apk`](dist/phone-assistant-0.170-debug.apk).
+[`phone-assistant-0.173-debug.apk`](dist/phone-assistant-0.173-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by
 `.github/workflows/release.yml`, which is what the in-app update check looks at.
 
 1. Build and install: `./gradlew installDebug` (or open in Android Studio and Run).
+   The first build fetches the pinned, checksum-verified Kokoro runtime from npm;
+   the phone downloads the voice model separately only if requested.
 2. On first launch, **Meet Pip** guides you into **Connect Pip**. Paste an API key and
    tap **Verify & continue**. Pip sends a short test prompt (no chat or screen data) to
    the configured HTTPS provider and model. You can’t continue until the model replies.

@@ -22,11 +22,17 @@ import java.util.concurrent.Future
 
 /** Final replies only. Toy banter and agent progress stay silent, and private phone results stay local. */
 internal object PipVoice {
-    data class Config(val enabled: Boolean, val endpoint: String, val token: String)
+    data class Config(val enabled: Boolean, val source: VoiceSource, val endpoint: String, val token: String,
+                      val wiroKey: String, val style: PipVoiceStyle, val custom: String, val kokoro: KokoroPreset) {
+        val description: String get() = style.instruction(custom)
+    }
     private fun prefs(context: Context) = context.getSharedPreferences("pip_voice", Context.MODE_PRIVATE)
     fun config(context: Context) = prefs(context).let {
-        Config(it.getBoolean("enabled", false), it.getString("endpoint", "").orEmpty(),
-            it.getString("token", "").orEmpty())
+        val endpoint = it.getString("endpoint", "").orEmpty()
+        Config(it.getBoolean("enabled", false), VoiceSource.restore(it.getString("source", null), endpoint), endpoint,
+            it.getString("token", "").orEmpty(), it.getString("wiro_key", "").orEmpty(),
+            PipVoiceStyle.restore(it.getString("style", null)), it.getString("custom", "").orEmpty(),
+            KokoroPreset.restore(it.getString("kokoro_preset", null)))
     }
 
     fun setEnabled(context: Context, enabled: Boolean) {
@@ -34,9 +40,12 @@ internal object PipVoice {
         if (!enabled) stop()
     }
 
-    fun setServer(context: Context, endpoint: String, token: String) {
+    fun save(context: Context, config: Config) {
         stop()
-        prefs(context).edit().putString("endpoint", endpoint).putString("token", token).apply()
+        prefs(context).edit().putString("source", config.source.name).putString("endpoint", config.endpoint)
+            .putString("token", config.token).putString("wiro_key", config.wiroKey)
+            .putString("style", config.style.name).putString("custom", config.custom)
+            .putString("kokoro_preset", config.kokoro.name).apply()
     }
 
     // Calls from the app's UI thread. The worker only fetches; audio resources belong to main.
@@ -46,6 +55,7 @@ internal object PipVoice {
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
     private var sequence = 0L
     private var work: Future<*>? = null
+    private var kokoroRequest: KokoroIpc.Request? = null
     private var player: MediaPlayer? = null
     private var engine: TextToSpeech? = null
     private var engineStatus: Int? = null
@@ -99,16 +109,18 @@ internal object PipVoice {
         sequence++
         work?.cancel(true)
         work = null
+        kokoroRequest?.cancel()
+        kokoroRequest = null
         localPending = null
-        engine?.stop()
+        runCatching { engine?.stop() }
         releaseAudio()
         finishCaptions()
     }
 
     private fun releaseAudio() {
-        player?.release()
+        runCatching { player?.release() }
         player = null
-        focus?.let { (manager, request) -> manager.abandonAudioFocusRequest(request) }
+        focus?.let { (manager, request) -> runCatching { manager.abandonAudioFocusRequest(request) } }
         focus = null
     }
 
@@ -124,7 +136,7 @@ internal object PipVoice {
             .build()
         // Recent Android versions may decline focus while an overlay's app is in the background.
         // In that case don't interrupt the app currently playing audio.
-        if (manager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return false
+        if (runCatching { manager.requestAudioFocus(request) }.getOrNull() != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return false
         focus = manager to request
         return true
     }
@@ -140,26 +152,88 @@ internal object PipVoice {
 
     private fun speak(ctx: Context, value: String, config: Config, allowRemote: Boolean, report: ((String) -> Unit)?,
                       captions: ((Int?) -> Unit)?) {
-        val line = SpeechCaption.from(value, VoiceProtocol.MAX_TEXT) ?: run { captions?.invoke(null); return }
+        val hosted = config.source == VoiceSource.WIRO
+        val limit = if (hosted) minOf(VoiceProtocol.MAX_TEXT, WiroSpeechProtocol.MAX_PROMPT - config.description.length - 2)
+            else VoiceProtocol.MAX_TEXT
+        val line = SpeechCaption.from(value, limit) ?: run { captions?.invoke(null); return }
         stop()
         val id = sequence
         captionUpdate = captions
         lastCaptionEnd = 0
         if (!mayPlay(ctx, id)) { finishCaptions(); return }
-        timeLimit(id, 16_000L)
-        if (!allowRemote || VoiceProtocol.endpoint(config.endpoint) == null) {
+        if (config.source == VoiceSource.ANDROID) {
+            timeLimit(id, 16_000L)
             local(ctx, id, line, report, "Playing Android voice.")
             return
         }
+        if (config.source == VoiceSource.KOKORO) {
+            if (!KokoroVoice.supported() || !KokoroVoice.ready(ctx)) {
+                finishCaptions()
+                report?.invoke(KokoroVoice.status(ctx))
+                return
+            }
+            if (report == null && !KokoroIpc.automaticAllowed) {
+                finishCaptions()
+                return
+            }
+            val request = KokoroIpc.Request(ctx, line.text, config.kokoro) complete@{ clip, problem ->
+                if (id != sequence) return@complete
+                kokoroRequest = null
+                if (!mayPlay(ctx, id)) { stop(); return@complete }
+                fun unavailable(message: String) {
+                    finishCaptions()
+                    report?.invoke(message)
+                }
+                if (clip == null) {
+                    unavailable(problem?.message ?: "Kokoro couldn’t play this preview on your phone.")
+                    return@complete
+                }
+                timeLimit(id, 8_000L)
+                val failed = { unavailable("Kokoro generated audio, but Android couldn’t play it.") }
+                if (!play(ctx, id, line, report, "Playing Kokoro offline.", failed) { media ->
+                    media.setDataSource(clip.fileDescriptor, 0L, clip.statSize)
+                }) failed()
+            }
+            kokoroRequest = request
+            request.begin()
+            return
+        }
+        // In remote modes, local phone results stay text-only and never reach a speech provider.
+        if (!allowRemote) { finishCaptions(); return }
+        val configured = if (hosted) config.wiroKey.isNotBlank() else VoiceProtocol.endpoint(config.endpoint) != null
+        if (!configured) {
+            finishCaptions()
+            report?.invoke(if (hosted) "Add a Wiro API key in Voice settings first." else "Add a custom VoxCPM2 server URL first.")
+            return
+        }
+        timeLimit(id, if (hosted) 32_000L else 16_000L)
         work = worker.submit {
-            val wav = runCatching { fetch(config, line.text) }.getOrNull()
+            val wav = try {
+                if (hosted) WiroSpeech.synthesize(config.wiroKey, WiroSpeechProtocol.prompt(config.description, line.text))
+                else fetch(config, line.text)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return@submit
+            } catch (_: Exception) { null }
             if (Thread.currentThread().isInterrupted) return@submit
             main.post {
                 if (id != sequence) return@post
                 if (!mayPlay(ctx, id)) { stop(); return@post }
                 work = null
-                fun fallback() = local(ctx, id, line, report, "VoxCPM unavailable; playing Android voice.")
-                if (wav == null || !play(ctx, id, line, wav, report, ::fallback)) fallback()
+                fun unavailable() {
+                    finishCaptions()
+                    report?.invoke(if (hosted) "Wiro couldn’t play this preview. Check your key, balance, and connection."
+                        else "Couldn’t play the preview from your VoxCPM2 server.")
+                }
+                if (wav == null || !play(ctx, id, line, report, "Playing VoxCPM voice.", ::unavailable) { media ->
+                    val clip = File.createTempFile("pip-voice-", ".wav", ctx.cacheDir)
+                    try {
+                        clip.writeBytes(wav)
+                        clip.inputStream().use { media.setDataSource(it.fd) }
+                    } finally {
+                        clip.delete()
+                    }
+                }) unavailable()
             }
         }
     }
@@ -175,7 +249,8 @@ internal object PipVoice {
             val voices = if (status == TextToSpeech.SUCCESS) tts?.voices.orEmpty() else emptySet()
             val offline = voices.filter { !it.isNetworkConnectionRequired &&
                 TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in it.features.orEmpty() }
-            val selected = offline.firstOrNull { it.locale == Locale.getDefault() }
+            val selected = tts?.defaultVoice?.takeIf { default -> offline.any { it.name == default.name } }
+                ?: offline.firstOrNull { it.locale == Locale.getDefault() }
                 ?: offline.firstOrNull { it.locale.language == language }
                 ?: offline.firstOrNull { it.locale.language == "en" }
             if (tts == null || selected == null || tts.setVoice(selected) != TextToSpeech.SUCCESS) {
@@ -248,17 +323,12 @@ internal object PipVoice {
         }
     }
 
-    private fun play(ctx: Context, id: Long, line: SpeechCaption, wav: ByteArray, report: ((String) -> Unit)?, fallback: () -> Unit): Boolean {
-        val media = MediaPlayer()
-        player = media
+    private fun play(ctx: Context, id: Long, line: SpeechCaption, report: ((String) -> Unit)?, success: String,
+                     failure: () -> Unit, dataSource: (MediaPlayer) -> Unit): Boolean {
         return runCatching {
-            val clip = File.createTempFile("pip-voice-", ".wav", ctx.cacheDir)
-            try {
-                clip.writeBytes(wav)
-                clip.inputStream().use { media.setDataSource(it.fd) }
-            } finally {
-                clip.delete()
-            }
+            val media = MediaPlayer()
+            player = media
+            dataSource(media)
             media.setAudioAttributes(attrs)
             media.setOnPreparedListener {
                 if (player === media && mayPlay(ctx, id) && takeFocus(ctx, id)) {
@@ -269,8 +339,8 @@ internal object PipVoice {
                                 media.currentPosition / media.duration.coerceAtLeast(1).toFloat()
                             }.getOrNull()
                         }
-                        report?.invoke("Playing VoxCPM voice.")
-                    }.onFailure { releaseAudio(); fallback() }
+                        report?.invoke(success)
+                    }.onFailure { releaseAudio(); failure() }
                 } else if (player === media) {
                     releaseAudio()
                     finishCaptions()
@@ -283,8 +353,7 @@ internal object PipVoice {
             media.setOnErrorListener { _, _, _ ->
                 if (player === media) {
                     releaseAudio()
-                    // Avoid re-reading the same words if playback already got underway.
-                    if (lastCaptionEnd > 0) finishCaptions() else fallback()
+                    failure()
                 }
                 true
             }
@@ -305,8 +374,10 @@ internal object PipVoice {
             connection.setRequestProperty("Accept", "audio/wav")
             if (config.token.isNotEmpty()) connection.setRequestProperty("Authorization", "Bearer ${config.token}")
             val json = JSONObject().put("model", VoiceProtocol.MODEL).put("input", text)
-                .put("voice", "default").put("response_format", "wav").toString()
-            connection.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                .put("voice", "default").put("response_format", "wav").put("instructions", config.description).toString()
+            val body = json.toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(body.size)
+            connection.outputStream.use { it.write(body) }
             if (connection.responseCode != 200 || connection.contentLength > VoiceProtocol.MAX_WAV ||
                 connection.contentType?.substringBefore(';')?.trim()?.lowercase() !in setOf("audio/wav", "audio/x-wav")) return null
             return connection.inputStream.use { input ->
