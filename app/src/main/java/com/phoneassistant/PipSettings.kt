@@ -5,7 +5,8 @@ import android.content.Context
 /** User choices for Pip, separate from Android permissions and temporary toy breaks. */
 internal object PipSettings {
     enum class Option(val key: String) {
-        ACCESSIBILITY("accessibility"), WANDER("wander"), TOYS("toys"), SPONTANEOUS("spontaneous_toys")
+        ACCESSIBILITY("accessibility"), WANDER("wander"), TOYS("toys"), SPONTANEOUS("spontaneous_toys"),
+        LEARN_FROM_CHAT("learn_from_chat")
     }
 
     fun enabled(ctx: Context, option: Option): Boolean = prefs(ctx).getBoolean(option.key, true)

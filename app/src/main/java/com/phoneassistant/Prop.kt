@@ -66,8 +66,8 @@ interface PropHost {
     /** Leap toward a toy's target, with his feet landing at the given screen point. */
     fun petHopOn(owner: Prop, x: Float, y: Float, landed: () -> Unit): Boolean
 
-    /** Approach a plant and animate a pour. A null progress means the pose has ended. */
-    fun petWaterPlant(owner: Prop, x: Float, feetY: Float, facesRight: Boolean,
+    /** Approach the can's grip in screen pixels. A null progress means the pour has ended. */
+    fun petWaterPlant(owner: Prop, gripX: Float, gripY: Float, facesRight: Boolean,
                       progress: (Float?) -> Unit, watered: () -> Unit): Boolean
 
     /** Pip walks until his centre sits on (x, y), then runs [done]. */
@@ -305,9 +305,9 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
         animate().cancel()
         animate()
             .alpha(1f)
-            .scaleX(if (held) 1.045f else 1f)
-            .scaleY(if (held) 1.045f else 1f)
-            .setDuration(if (held) 90L else 130L)
+            .scaleX(if (held) PickupMotion.SCALE else 1f)
+            .scaleY(if (held) PickupMotion.SCALE else 1f)
+            .setDuration(if (held) PickupMotion.LIFT_MS else PickupMotion.RELEASE_MS)
             .start()
     }
 

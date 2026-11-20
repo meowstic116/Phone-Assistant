@@ -399,6 +399,8 @@ class OverlayService : Service(), PropHost {
 
     /** True during a walk a toy sent him on, which a spoken line must not cancel. */
     private var toyWalk = false
+    private data class JobWalk(val turn: Long, val gate: JobApproachGate, var path: JobApproach? = null)
+    private var jobWalk: JobWalk? = null
     private var relocating = false
     private var idleUntil = 0L
     private var attentive = false
@@ -694,6 +696,7 @@ class OverlayService : Service(), PropHost {
         onPowerStateChanged?.invoke()
         // Work stops immediately, not after the decorative exit has finished.
         Agent.cancel()
+        finishJobWalk(false)
         ChatTurns.begin()
         petDrag?.cancel()
         cancelToyHop()
@@ -768,6 +771,7 @@ class OverlayService : Service(), PropHost {
         // A job outlives no service: its next step would be acting on a screen nothing is
         // watching any more.
         Agent.cancel()
+        finishJobWalk(false)
         ChatTurns.begin()
         ImeWatch.onChange = null
         keyboardUp = false
@@ -924,23 +928,25 @@ class OverlayService : Service(), PropHost {
     private data class GardenVisit(
         val owner: Prop, val ownerX: Float, val ownerY: Float, val started: Long, val travelMs: Long,
         val fromX: Float, val fromY: Float, val toX: Float, val toY: Float, val facesRight: Boolean,
-        val progress: (Float?) -> Unit, val watered: () -> Unit
+        val grip: DragMotion.Point, val progress: (Float?) -> Unit, val watered: () -> Unit
     )
     private var gardenVisit: GardenVisit? = null
 
     private fun toyActionBlocked(owner: Prop): Boolean = owner.movingByUser || owner !in props || petDrag?.moving == true || attentive ||
         relocating || post != null || inputBar != null || keyboardUp || overlayDucked || Agent.running() || standingStill()
 
-    override fun petWaterPlant(owner: Prop, x: Float, feetY: Float, facesRight: Boolean,
+    override fun petWaterPlant(owner: Prop, gripX: Float, gripY: Float, facesRight: Boolean,
                                progress: (Float?) -> Unit, watered: () -> Unit): Boolean {
         if (pet == null || gardenVisit != null || toyHop != null || toyWalk || toyActionBlocked(owner) || !screenUsable()) return false
-        val tx = (x - petW / 2f).coerceIn(0f, (screenW - petW).coerceAtLeast(0).toFloat())
+        val grip = DragMotion.Point(gripX, gripY)
+        val stance = WateringPose.stance(grip, facesRight, dp(1f))
+        val tx = (stance.x - petW / 2f).coerceIn(0f, (screenW - petW).coerceAtLeast(0).toFloat())
         val minY = topInset.toFloat()
-        val ty = (feetY - petH + dp(2f)).coerceIn(minY, (screenH - petH - bottomInset).toFloat().coerceAtLeast(minY))
+        val ty = (stance.y - petH + dp(2f)).coerceIn(minY, (screenH - petH - bottomInset).toFloat().coerceAtLeast(minY))
         val distanceDp = hypot(tx - posX, ty - posY) / dp(1f)
         val travel = if (distanceDp < 3f) 0L else (distanceDp * 5.4f).toLong().coerceIn(190L, 2_100L)
         gardenVisit = GardenVisit(owner, owner.posX, owner.posY, SystemClock.uptimeMillis(), travel,
-            posX, posY, tx, ty, facesRight, progress, watered)
+            posX, posY, tx, ty, facesRight, grip, progress, watered)
         standStillNow()
         return true
     }
@@ -948,7 +954,7 @@ class OverlayService : Service(), PropHost {
     private fun cancelGardenVisit() {
         val old = gardenVisit ?: return
         gardenVisit = null
-        pet?.apply { gardenLean = 0f; walking = false }
+        pet?.apply { gardenLean = 0f; gardenGrip = null; walking = false }
         old.progress(null)
     }
 
@@ -968,8 +974,11 @@ class OverlayService : Service(), PropHost {
         view.facingRight = if (travel < 1f && abs(visit.toX - visit.fromX) > dp(2f)) visit.toX > visit.fromX else visit.facesRight
         applyPetPosition()
         if (travel == 1f) {
-            val pour = ((elapsed - visit.travelMs) / 570f).coerceIn(0f, 1f)
+            val pour = ((elapsed - visit.travelMs) / PlantGrowth.PIP_POUR_DURATION_MS.toFloat()).coerceIn(0f, 1f)
             view.gardenLean = kotlin.math.sin(pour * Math.PI).toFloat()
+            // Layout params are rounded to whole pixels; use the same origin as the window.
+            view.gardenGrip = DragMotion.Point(visit.grip.x + (visit.owner.posX - visit.ownerX) - petParams.x,
+                visit.grip.y + (visit.owner.posY - visit.ownerY) - petParams.y)
             visit.progress(pour)
             if (pour >= 1f) {
                 cancelGardenVisit()
@@ -1285,6 +1294,8 @@ class OverlayService : Service(), PropHost {
             return
         }
 
+        if (advanceJobWalk(view)) return
+
         // Toys animate and run their own physics whether or not he is paying attention.
         if (props.isNotEmpty()) {
             // Caught rather than left to crash the tick, but recorded: a toy throwing every
@@ -1494,13 +1505,20 @@ class OverlayService : Service(), PropHost {
         position = { DragMotion.Point(posX, posY) },
         moveTo = { x, y ->
             val minY = topInset.toFloat()
+            val oldX = posX
             posX = x.coerceIn(0f, (screenW - petW).coerceAtLeast(0).toFloat())
             posY = y.coerceIn(minY, (screenH - petH - bottomInset).toFloat().coerceAtLeast(minY))
+            view.pullPickup((posX - oldX) / dp(16f))
             if (petParams.x != posX.toInt() || petParams.y != posY.toInt()) applyPetPosition()
         },
         allowed = ::userDragAllowed,
         grip = { holding ->
             if (holding) {
+                if (jobWalk != null) {
+                    Agent.cancel()
+                    hideJobBar()
+                    endJobWatch()
+                }
                 cancelToyHop()
                 cancelGardenVisit()
                 walking = false
@@ -1509,7 +1527,9 @@ class OverlayService : Service(), PropHost {
                 arrive = null
                 view.walking = false
             }
+            view.setGrip(holding)
         },
+        dragStarted = view::startCarry,
         dragFinished = {
             if (!toyWalk) {
                 targetX = posX
@@ -2066,8 +2086,24 @@ class OverlayService : Service(), PropHost {
         relocating = false
 
         val turn = ChatTurns.begin()
+        if (NowPlaying.requested(text)) {
+            Agent.cancel()
+            modelSays(PipMediaAccess.answer(this))
+            handler.postDelayed({
+                if (ChatTurns.isCurrent(turn) && inputBar == null && !Agent.running()) closeChat()
+            }, 4000L)
+            return
+        }
         Memory.append(this, "user", text)
         Agent.cancel()
+        Facts.saveNameRequest(this, text)?.let { reply ->
+            Memory.append(this, "assistant", reply)
+            modelSays(reply)
+            handler.postDelayed({
+                if (ChatTurns.isCurrent(turn) && inputBar == null && !Agent.running()) closeChat()
+            }, 4000L)
+            return
+        }
         // His answer takes priority from this moment on, so the toys' own lines stay quiet.
         beginReply()
         // Thinking comes before the toys act. The other way round, thinking cancelled the
@@ -2144,6 +2180,7 @@ class OverlayService : Service(), PropHost {
         // The chat model has answered, so nothing is waiting on it any more: the toys may
         // talk again while the job runs.
         awaitingReply = false
+        val approach = JobApproachGate()
         val started = Agent.start(
             this,
             job,
@@ -2175,6 +2212,7 @@ class OverlayService : Service(), PropHost {
             // return until they really are out of the way — a gesture dispatched before the
             // window was updated is exactly the press the duck is there to protect.
             onGesture = { footprint -> duckOverlay(footprint) },
+            approach = approach,
             onFeedMotion = { id, cue ->
                 handler.post {
                     if (instance === this && !ending && !paused && ChatTurns.isCurrent(turn) &&
@@ -2205,7 +2243,7 @@ class OverlayService : Service(), PropHost {
         doomscrollJob = doomscroll
         automaticDoomscrollJob = fromClearHome
         pet?.showDoomscrollCue(DoomscrollMotion.Cue.CLEAR)
-        beginJobWatch()
+        beginJobWatch(turn, approach)
         showJobBar()
         return true
     }
@@ -2500,26 +2538,56 @@ class OverlayService : Service(), PropHost {
      * header, a list and most keyboards keep clear. He stays there until the job is over
      * instead of wandering across the screen being watched.
      */
-    private fun beginJobWatch() {
+    private fun beginJobWatch(turn: Long, approach: JobApproachGate) {
+        finishJobWalk(false)
         petDrag?.cancel()
+        cancelToyHop()
+        cancelGardenVisit()
         attentive = true
         toyWalk = false
         relocating = false
         arrive = null
-        targetX = (screenW - petW - dpInt(10f)).toFloat().coerceAtLeast(0f)
-        targetY = (screenH - bottomInset - petH - dpInt(10f)).toFloat()
-            .coerceAtLeast(topInset.toFloat())
-        // Park immediately; an in-flight walk could cross a prepared gesture path.
-        posX = targetX
-        posY = minOf(targetY, if (keyboardUp) keyboardCeiling() - petH else targetY)
-            .coerceAtLeast(topInset.toFloat())
         walking = false
-        pet?.walking = false
+        jobWalk = JobWalk(turn, approach)
+    }
+
+    private fun advanceJobWalk(view: PetView): Boolean {
+        val walk = jobWalk ?: return false
+        if (!Agent.running() || !ChatTurns.isCurrent(walk.turn) || !screenUsable() || !view.isAttachedToWindow) {
+            finishJobWalk(false)
+            return false
+        }
+        val cornerX = (screenW - petW - dpInt(10f)).coerceAtLeast(0).toFloat()
+        val cornerY = (screenH - bottomInset - petH - dpInt(10f)).toFloat()
+        val floor = if (keyboardShowing()) keyboardCeiling() - keyboardAbove() - petH - dp(6f) else cornerY
+        val destination = DragMotion.Point(cornerX, minOf(cornerY, floor).coerceAtLeast(topInset.toFloat()))
+        // Replan from the current position if a keyboard or rotation moves the parking spot.
+        val path = walk.path?.takeIf { it.destination == destination }
+            ?: JobApproach(DragMotion.Point(posX, posY), destination, dp(1f)).also { walk.path = it }
+        val next = path.advance(frameMs)
+        if (abs(destination.x - posX) > 1f) view.facingRight = destination.x > posX
+        posX = next.x
+        posY = next.y
         applyPetPosition()
+        view.walking = !path.arrived
+        if (path.arrived) finishJobWalk(true)
+        return true
+    }
+
+    private fun finishJobWalk(arrived: Boolean) {
+        val walk = jobWalk ?: return
+        jobWalk = null
+        walking = false
+        relocating = false
+        targetX = posX
+        targetY = posY
+        pet?.walking = false
+        walk.gate.finish(arrived)
     }
 
     /** Job over: he may wander again, once the line he says has had its moment. */
     private fun endJobWatch() {
+        finishJobWalk(false)
         doomscrollJob = false
         automaticDoomscrollJob = false
         pet?.showDoomscrollCue(DoomscrollMotion.Cue.CLEAR)
@@ -2586,7 +2654,7 @@ class OverlayService : Service(), PropHost {
                     cancelToyHop()
                     cancelGardenVisit()
                     paused = true
-                    if (doomscrollJob) {
+                    if (doomscrollJob || jobWalk != null) {
                         Agent.cancel()
                         hideJobBar()
                         endJobWatch()

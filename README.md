@@ -219,15 +219,16 @@ is disabled stays in the catalog, with a note explaining why it can’t be launc
   he walks over and kicks it back at yours. First to three or ninety seconds, and he
   announces the result either way. The goals are draggable, which he notices: he calls it
   cheating (cheerfully), and three goalpost moves and he calls the game off.
-- **Bubble wrap** — Pop Club is a compact sheet of 20 candy-colored bubbles with a pop
-  counter and confetti. Tap any bubble, or watch Pip hop across the sheet, popping the
-  remaining bubbles when he lands. He has his own milestone lines and clears the sheet
+- **Bubble wrap** — A compact sheet of 20 candy-colored bubbles with confetti. Tap any
+  bubble, or watch Pip hop onto a random unpopped bubble, pausing briefly between hops.
+  He has his own milestone lines and clears the sheet
   after the last pop. An active round can finish even if the normal toy timer runs out.
-- **Plant** — Pip walks up to the pot, tips his little watering can, and waters it until
-  it flowers. You can help by tapping; fast taps still get a warning. Each plant can be
-  a Pocket Cosmos, Lemon Star, or Blueberry Bell. It bounces as it grows, and a ladybug
-  visits the finished bloom. Pip pauses watering while you're dragging the plant or
-  using chat, and stops when the flower is fully grown.
+- **Plant** — Grow a flower together. Pip spaces out his pours, and you need to tap the
+  pot to water it at least once before it can bloom. Fast taps still get a warning. A finished bloom gets a shimmering nameplate beneath
+  its pot and a ladybug visit. **Plant Collection**, at the top of **Toys**, tracks ten
+  regular varieties and how many times each has reached full bloom. First blooms get a
+  special color and animation. Once all ten are discovered, each new pot has a 1 in 10
+  chance of growing the rare **Golden Bloom**. Existing bloom counts carry over.
 
 ## Personality
 
@@ -262,7 +263,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.153-debug.apk`](dist/phone-assistant-0.153-debug.apk).
+[`phone-assistant-0.165-debug.apk`](dist/phone-assistant-0.165-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by
@@ -290,22 +291,35 @@ Tagged builds are also published as GitHub Releases by
 4. Press **Start assistant**. Open **Pip settings** below that button to change what Pip
    does. Changes are saved and apply without restarting the overlay.
 
-   - **Permissions:** Manage overlay, Android accessibility, usage access, and notifications.
-     To turn off notifications while Pip keeps running, open **Manage notifications** and
-     turn them off in Android. Android may still list Pip among active apps. The separate
-     **Let Pip use accessibility** switch stops phone actions and other apps’ keyboard
-     tracking without changing Android’s grant. Chat and explicit links don’t need it.
-   - **Personality & data:** Edit Pip’s personality, review his memory, or open his login vault.
-   - **API & model:** Configure the API key, base URL, and model in their own section.
    - **Movement & startup:** Turn off wandering to keep Pip in place between tasks.
      You can still drag him, and he can move for his chat box, keyboard, and toys.
      **Start Pip when the phone starts** is off by default. With **Display over other
      apps** permission, it starts the overlay after the first unlock, not old jobs.
-   - **Toys:** Turn off **Allow toys** for no toys, or select individual toys. Turning
-     off **Bring out toys on his own** leaves enabled toys available by request only.
+   - **Phone access:** **Let Pip use accessibility** controls phone actions and other apps’
+     keyboard tracking without changing Android’s grant. Chat and explicit links don’t need it.
+   - **Toys:** Turn off **Allow toys** for no toys, or select individual toys. Turning off
+     **Bring out toys on his own** leaves enabled toys available by request only. Open the
+     **Painting gallery** directly below the toy switches.
+   - **Personality & data:** Edit Pip’s personality, review his memory, or open his login vault.
+   - **Permissions:** Manage overlay, Android accessibility, usage access, and notifications.
+     To turn off notifications while Pip keeps running, open **Manage notifications** and
+     turn them off in Android. Android may still list Pip among active apps.
+   - **API & model:** Configure the API key, base URL, and model in their own section.
    - **Debug options:** Open **Diagnostics** or choose **Run setup again** to revisit the
      welcome, API verification, and permissions screens. Your data stays in place; changes
      to the API connection are saved only if you finish the walkthrough.
+
+### Questions about your phone
+
+- **“What song am I listening to right now?”** checks Android’s active media controls.
+  Enable **Now playing access** under **Pip settings → Permissions** (Android calls it
+  **Notification access**). Pip reads the active player’s title and artist on-device;
+  he doesn’t read notification messages, send the media metadata to the API, or change
+  playback. Paused tracks aren’t reported as playing. Some players don’t share a title.
+- **“What’s the price shown on this screen?”** can trigger a one-time, read-only screen
+  check when Pip’s accessibility access is enabled. Visible app text may go to your
+  configured API to answer the question. Pip doesn’t tap, scroll, launch an app, or read
+  the notification shade for this kind of check.
 
 ### Testing phone jobs
 
@@ -361,11 +375,16 @@ Diagnostics.
 
 ## Memory
 
-Pip keeps short notes about you between conversations. They are pulled out locally by
-pattern matching — "my name is …", "I'm working on …", "I like …", "I live in …", and
-anything said after "remember" — so remembering costs no extra API calls. The notes are
-appended to the prompt, and the **Memory** screen shows every one of them so you can
-delete a bad capture. The conversation itself is still capped at the last 24 messages.
+Say **“Refer to me as Nova”** or **“Call me Nova”** in either chat. Pip saves one
+**Preferred name** entry in **Pip settings → Personality & data → Memory** and confirms
+it without an API call. Asking for a new name replaces that entry.
+
+With **Learn from chat** on, Pip’s normal chat reply can also suggest one useful, lasting
+note, such as a preference, hobby, or goal. The app checks that the suggestion uses your
+words from the latest message and skips obvious sensitive details and requests not to save.
+It does not make a second API request. Turning **Learn from chat** off leaves saved notes
+and direct “remember” requests available. Use **Memory** to review or delete anything that
+came out wrong. Chat history is separate and is still capped at the last 24 messages.
 
 ## Changing the character
 

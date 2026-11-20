@@ -79,10 +79,24 @@ class ChatHistoryActivity : Activity() {
         pendingTurn = turn
         input.setText("")
         addBubble(text, true)
+        if (NowPlaying.requested(text)) {
+            Agent.cancel()
+            val reply = PipMediaAccess.answer(this)
+            addBubble(reply, false)
+            OverlayService.speak(reply)
+            return
+        }
         Memory.append(this, "user", text)
 
         sendButton.isEnabled = false
         Agent.cancel()
+        Facts.saveNameRequest(this, text)?.let { reply ->
+            Memory.append(this, "assistant", reply)
+            addBubble(reply, false)
+            sendButton.isEnabled = true
+            OverlayService.speak(reply)
+            return
+        }
         OverlayService.beginThinking()
         if (JobProgress.routePhoneLocally(text)) {
             showJobStarted(OverlayService.runPhoneJob(text, text, turn))

@@ -419,14 +419,19 @@ fun main() {
     check(playedToy.expired(123_999L, held = false))
 
     val bubbles = PopSheet()
-    check(bubbles.total == 20 && bubbles.nextBubble() == 16)
+    check(bubbles.total == 20 && bubbles.nextBubble { 16 } == 16)
+    check((0 until bubbles.total).map { rank -> bubbles.nextBubble { rank } } == (0 until bubbles.total).toList())
     check(bubbles.pop(16, byPip = false) == PopSheet.Milestone.FIRST)
     check(bubbles.pop(16, byPip = true) == null && bubbles.pipCount == 0)
+    check((0 until bubbles.total - 1).map { rank -> bubbles.nextBubble { rank } } ==
+        (0 until bubbles.total).filterNot { it == 16 })
     val pipMilestones = mutableListOf<PopSheet.Milestone>()
+    val bubbleRandom = kotlin.random.Random(7)
     while (true) {
-        val index = bubbles.nextBubble() ?: break
+        val index = bubbles.nextBubble(bubbleRandom::nextInt) ?: break
         pipMilestones += checkNotNull(bubbles.pop(index, byPip = true))
     }
+    check(bubbles.nextBubble { error("No roll for an empty sheet") } == null)
     check(bubbles.count == 20 && bubbles.pipCount == 19)
     check(pipMilestones.filter { it != PopSheet.Milestone.NONE } == listOf(
         PopSheet.Milestone.FIRST, PopSheet.Milestone.FIVE, PopSheet.Milestone.TEN,
@@ -434,17 +439,37 @@ fun main() {
     ))
     check(hopLift(0f) == 0f && hopLift(0.5f) == 1f && hopLift(1f) == 0f)
 
+    val byPip = PlantGrowth.Waterer.PIP
+    val byUser = PlantGrowth.Waterer.USER
     val garden = PlantGrowth()
     repeat(PlantGrowth.MAX_STAGE) { stage ->
         val now = stage * 2_000L
         check(garden.thirsty && garden.stage == stage && garden.water == 0)
-        repeat(PlantGrowth.WATER_PER_STAGE) { check(garden.water(now + it)) }
-        check(garden.growing && !garden.thirsty && garden.water == PlantGrowth.WATER_PER_STAGE)
-        check(!garden.water(now + 3)) // A tap or another pour can't stack water while growing.
+        repeat(PlantGrowth.WATER_PER_STAGE) { drop ->
+            check(garden.water(now + drop, if (stage == 0 && drop == 0) byUser else byPip))
+        }
+        check(garden.wateredByUser && garden.growing && !garden.thirsty && garden.water == PlantGrowth.WATER_PER_STAGE)
+        check(!garden.water(now + 3, byUser) && !garden.water(now + 3, byPip))
         check(!garden.advance(now + 621))
         check(garden.advance(now + 622) && !garden.advance(now + 622))
     }
-    check(garden.blooming && !garden.water(10_000L) && !garden.advance(10_000L))
+    check(garden.blooming && !garden.water(10_000L, byUser) && !garden.advance(10_000L))
+
+    val unattended = PlantGrowth()
+    check(!unattended.blooming && !unattended.waitingForUser)
+    repeat(PlantGrowth.MAX_STAGE - 1) { stage ->
+        val now = stage * 2_000L
+        repeat(PlantGrowth.WATER_PER_STAGE) { check(unattended.water(now + it, byPip)) }
+        check(!unattended.water(now + 50L, byUser) && !unattended.wateredByUser) // A tap during growth adds no water.
+        check(unattended.advance(now + 622L))
+    }
+    repeat(PlantGrowth.WATER_PER_STAGE - 1) { check(unattended.water(8_000L + it, byPip)) }
+    check(unattended.waitingForUser && !unattended.pipMayWater && unattended.thirsty)
+    repeat(5) { check(!unattended.water(9_000L + it, byPip) && !unattended.advance(10_000L + it)) }
+    check(!unattended.blooming && unattended.water(11_000L, byUser))
+    check(!unattended.waitingForUser && !unattended.blooming)
+    check(unattended.advance(11_620L) && unattended.blooming && unattended.wateredByUser)
+    check(PlantGrowth.FIRST_POUR_DELAY_MS >= 2_000L && PlantGrowth.PIP_POUR_PAUSE_MS >= 3_000L)
 
     val drag = DragMotion(density = 2f)
     drag.begin(200f, 400f, 180f, 370f, 1000L)
@@ -582,6 +607,146 @@ fun main() {
     check(setup.response(429, null, false) == SetupPolicy.Check.LIMIT)
     check(setup.response(502, null, false) == SetupPolicy.Check.PROVIDER)
     check(setup.response(302, null, false) == SetupPolicy.Check.URL)
+
+    val potX = 180f
+    val potTop = 240f
+    val leftHand = WateringPose.grip(potX, potTop, true, 1f)
+    val rightHand = WateringPose.grip(potX, potTop, false, 1f)
+    check(leftHand.y == rightHand.y && leftHand.x + rightHand.x == 2 * potX)
+    val leftStance = WateringPose.stance(leftHand, true, 1f)
+    val rightStance = WateringPose.stance(rightHand, false, 1f)
+    check(leftHand.x - leftStance.x == 27f && rightStance.x - rightHand.x == 27f)
+    check(leftStance.y == rightStance.y && leftStance.y == potTop + 5f)
+    val tilted = WateringPose.tilt(0.5f)
+    val leftSpout = WateringPose.spout(leftHand, true, 1f, tilted)
+    val rightSpout = WateringPose.spout(rightHand, false, 1f, tilted)
+    check(kotlin.math.abs(leftSpout.x + rightSpout.x - 2 * potX) < 0.01f)
+    check(leftSpout.y == rightSpout.y && leftSpout.y in leftHand.y..potTop)
+    check(WateringPose.spout(leftHand, true, 1f, 0f).y < leftSpout.y)
+    check(WateringPose.grip(potX * 2, potTop * 2, true, 2f).x == leftHand.x * 2)
+
+    check(PreferredName.parse("Can you please refer to me as ‘Ren’?") == "Ren")
+    check(PreferredName.parse("Pip, please address me as Ana María from now on.") == "Ana María")
+    check(PreferredName.parse("Call me Nova") == "Nova")
+    check(PreferredName.parse("Remember my name is D’Angelo.") == "D’Angelo")
+    check(PreferredName.parse("I prefer to be called ‘J. K.’ instead.") == "J. K.")
+    check(PreferredName.parse("Going forward, call me 李雷.") == "李雷")
+    for (notAName in listOf("Call me back later", "Call me at 555-0100", "Call me when you get home",
+        "Call me a cab", "Text Sam and say call me Nova", "Don't call me Nova", "My friend's name is Nova",
+        "Call me Nova and help with the weather", "Refer to me as Nova. Send a message")) {
+        check(PreferredName.parse(notAName) == null) { notAName }
+    }
+    check(JobProgress.communicationRequest("Call Sam") != null)
+    val namedNotes = PreferredName.save(listOf("My name is Sam.", "Preferred name: Ren", "I like music."), "Nova", 40)
+    check(namedNotes == listOf("My name is Sam.", "I like music.", "Preferred name: Nova"))
+    check(PreferredName.save(namedNotes, "Nova", 40) == namedNotes)
+
+    val suggestions = MemorySuggestion
+    val nickname = "Everybody knows me as Roo"
+    val learnedName = checkNotNull(suggestions.accept("Nice to meet you. $nickname!", "preferred_name", nickname, "Roo"))
+    check(learnedName.text == "Roo" && learnedName.preferredName)
+    check(suggestions.accept(nickname, "preferred_name", nickname, "Robin") == null)
+    check(suggestions.merge(listOf("Preferred name: Nova"), learnedName, 40) == listOf("Preferred name: Nova"))
+    check(suggestions.merge(emptyList(), learnedName, 40) == listOf("Preferred name: Roo"))
+    val reading = "I’d pick paper books over an ebook any day."
+    val learnedFact = checkNotNull(suggestions.accept(reading, "preference", reading))
+    check(learnedFact.text == reading)
+    check(suggestions.merge(listOf(reading.trimEnd('.')), learnedFact, 40) == listOf(reading.trimEnd('.')))
+    check(suggestions.accept("I used to like paper books but not anymore.", "preference", "I like paper books") == null)
+    check(suggestions.accept("Should I pick paper books?", "preference", "Should I pick paper books") == null)
+    check(suggestions.accept("I save my password in a notebook.", "routine", "I save my password in a notebook.") == null)
+    check(!suggestions.maySuggest("Please don’t remember this. $reading"))
+    check(!suggestions.maySuggest("Send it to me at test@example.com"))
+    check(suggestions.explicitNote("Remember that I prefer vinyl.") == "I prefer vinyl.")
+    check(suggestions.explicitNote("Remember to buy milk") == null)
+    check(suggestions.explicitNote("Remember that my password is orange") == null)
+    check(suggestions.splitReply("Fair enough.\nPIP_MEMORY: {\"kind\":\"preference\"}") ==
+        MemorySuggestion.Reply("Fair enough.", "{\"kind\":\"preference\"}"))
+    check(suggestions.splitReply("{\"action\":\"delegate\",\"task\":\"Open Maps\"}").payload == null)
+    check(suggestions.splitReply("Fair enough.\nPIP_MEMORY: x").payload == null)
+
+    check(NowPlaying.requested("What song am I listening to right now?"))
+    check(NowPlaying.requested("Hey Pip, what’s playing?"))
+    check(NowPlaying.requested("Could you tell me what song is playing now?"))
+    check(!NowPlaying.requested("What music should I play?"))
+    check(!NowPlaying.requested("What’s playing and skip it"))
+    val pausedSong = NowPlaying.Track(false, "Old song", "Old artist")
+    val currentSong = NowPlaying.Track(true, "Current song", "Current artist")
+    check(NowPlaying.answer(listOf(pausedSong, currentSong)) == "Now playing: “Current song” by Current artist.")
+    check(NowPlaying.answer(listOf(pausedSong)).contains("isn’t reporting any media"))
+    check(NowPlaying.answer(listOf(NowPlaying.Track(true, null, null))).contains("sharing its title"))
+    check(NowPlaying.answer(listOf(currentSong, currentSong.copy(title = "Other song"))).contains("more than one"))
+    check(PhoneContext.mayInspect("What’s the date shown on this screen?"))
+    check(PhoneContext.mayInspect("Can you check the price on this page?"))
+    check(!PhoneContext.mayInspect("I saw the price on this page"))
+    check(!PhoneContext.mayInspect("What is the capital of Colorado?"))
+    check(!PhoneContext.permitsWindow("com.android.systemui"))
+
+    val watchFrom = DragMotion.Point(30f, 40f)
+    val watchSpot = DragMotion.Point(410f, 810f)
+    val walk = JobApproach(watchFrom, watchSpot, 1f)
+    check(!walk.arrived && walk.durationMs in 130..620)
+    val firstStep = walk.advance(33L)
+    check(firstStep.x in watchFrom.x..watchSpot.x && firstStep.y in watchFrom.y..watchSpot.y)
+    check(firstStep != watchFrom && firstStep != watchSpot)
+    var lastStep = firstStep
+    repeat(20) { lastStep = walk.advance(33L) }
+    check(walk.arrived && lastStep == watchSpot)
+    check(JobApproach(watchSpot, watchSpot, 1f).arrived)
+    val arrives = JobApproachGate()
+    arrives.finish(true)
+    check(arrives.await { true } && !arrives.await { false })
+    val stopped = JobApproachGate()
+    stopped.finish(false)
+    stopped.finish(true)
+    check(!stopped.await { true })
+
+    val pickedUp = PickupMotion.pose(1f, 0f, 0L, 0f, true)
+    check(pickedUp.scale == PickupMotion.SCALE && pickedUp.carry == 0f && pickedUp.tilt == 0f)
+    val draggedRight = PickupMotion.pose(1f, 1f, 0L, 1f, true)
+    val draggedLeft = PickupMotion.pose(1f, 1f, 0L, -1f, true)
+    check(draggedRight.tilt > 0f && draggedLeft.tilt < 0f)
+    check(draggedRight.leftFoot != PickupMotion.pose(1f, 1f, 100L, 1f, true).leftFoot)
+    val release = PickupMotion.blend(1f, 0f, 65L, PickupMotion.RELEASE_MS)
+    check(release in 0.01f..0.99f)
+    check(PickupMotion.blend(release, 1f, 0L, PickupMotion.LIFT_MS) == release)
+    check(PickupMotion.blend(1f, 0f, PickupMotion.RELEASE_MS, PickupMotion.RELEASE_MS) == 0f)
+    check(PickupMotion.pose(0f, 0f, 500L, 1f, true).scale == 1f)
+    check(PickupMotion.pose(1f, 1f, 100L, 1f, false) == PickupMotion.pose(1f, 1f, 0L, -1f, false))
+
+    val varieties = PlantSpecies.values()
+    check(varieties.size == 11 && varieties.map { it.id }.toSet().size == varieties.size)
+    check(varieties.map { it.discoveryColor }.toSet().size == varieties.size)
+    val firstBloom = PlantDiscovery.record(0)
+    check(firstBloom == PlantDiscovery.Bloom(1, true))
+    check(PlantDiscovery.record(firstBloom.count) == PlantDiscovery.Bloom(2, false))
+    check(PlantDiscovery.record(Long.MAX_VALUE) == PlantDiscovery.Bloom(Long.MAX_VALUE, false))
+    check(PlantDiscovery.shimmer(625L) == 0.5f && PlantDiscovery.shimmer(1_500L) == null)
+    check(PlantDiscovery.shimmer(2_700L) == 0f)
+    val blooms = mutableMapOf<PlantSpecies, Long>()
+    for (variety in listOf(PlantSpecies.STAR, PlantSpecies.COSMOS, PlantSpecies.STAR)) {
+        blooms[variety] = PlantDiscovery.record(blooms[variety] ?: 0).count
+    }
+    check(blooms[PlantSpecies.STAR] == 2L && blooms[PlantSpecies.COSMOS] == 1L && PlantSpecies.BLUEBELL !in blooms)
+
+    val regularPlants = PlantSelection.regular
+    check(regularPlants.size == 10 && PlantSpecies.GOLDEN !in regularPlants)
+    check(PlantSpecies.COSMOS.id == "pocket_cosmos" && PlantSpecies.STAR.id == "lemon_star" &&
+        PlantSpecies.BLUEBELL.id == "blueberry_bell")
+    val completeCollection = regularPlants.associateWith { 1L }
+    check(!PlantSelection.goldenEligible(blooms))
+    // Even a deliberately favorable roll cannot yield gold if any one variety is missing.
+    for (missing in regularPlants) {
+        val incomplete = completeCollection - missing
+        check(!PlantSelection.goldenEligible(incomplete))
+        check(PlantSelection.pick(incomplete) { 0 } in regularPlants)
+        check(!PlantSelection.goldenEligible(incomplete + (PlantSpecies.GOLDEN to 7L)))
+    }
+    check(PlantSelection.goldenEligible(completeCollection))
+    check(PlantSelection.pick(completeCollection) { 0 } == PlantSpecies.GOLDEN)
+    val outcomes = (0 until PlantSelection.GOLDEN_ROLLS).map { roll -> PlantSelection.pick(completeCollection) { roll } }
+    check(outcomes.count { it == PlantSpecies.GOLDEN } == 1)
+    check(regularPlants.indices.map { index -> PlantSelection.pick(emptyMap()) { index } } == regularPlants)
 
     println("Job progress tests passed.")
 }
