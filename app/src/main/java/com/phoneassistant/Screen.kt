@@ -350,16 +350,20 @@ object Screen {
             item.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }.getOrDefault(false)
 
-    internal fun playback(item: Item): JobProgress.Playback? {
+    internal fun reelAd(item: Item): Boolean = !item.editable && !item.password &&
+        (JobProgress.reelAdDisclosure(item.id, item.node.text?.toString().orEmpty(), description = false) ||
+            JobProgress.reelAdDisclosure(item.id, item.node.contentDescription?.toString().orEmpty(), description = true))
+
+    internal fun playback(item: Item, inlineTimeline: Boolean = false): JobProgress.Playback? {
         if (item.editable || item.password) return null
         val id = item.id.orEmpty().lowercase()
         val relevantId = id.contains("progress") && (id.contains("playback") || id.contains("video") || id.contains("reel"))
-        val timeline = item.role == "SeekBar" || relevantId
+        val timeline = item.role == "SeekBar" || relevantId || inlineTimeline
         val labels = listOf(item.node.contentDescription, item.node.text)
         labels.firstNotNullOfOrNull { JobProgress.playbackLabel(it?.toString().orEmpty(), timeline, item.node.isClickable) }?.let { return it }
         val described = labels.any { JobProgress.normalize(it?.toString().orEmpty()) in
             setOf("reel progress", "video progress", "playback progress", "playback position") }
-        if (!relevantId && !described) return null
+        if (!relevantId && !described && !inlineTimeline) return null
         val range = item.node.rangeInfo ?: return null
         return JobProgress.playbackRange(range.current, range.min, range.max)
     }

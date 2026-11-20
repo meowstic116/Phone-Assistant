@@ -34,7 +34,6 @@ internal object FeedRunner {
     private const val TAB_READS = 12
     private const val TAB_READ_MS = 350L
     private const val LIKE_CHOICE_MS = 8_000L
-    private const val REEL_SAMPLE_MS = 750L
     // A slow or abandoned request can't hold up Stop or the browse deadline. Don't queue
     // more work behind an HTTP call that hasn't responded to interruption yet.
     private val likePicker = ThreadPoolExecutor(0, 1, 15, TimeUnit.SECONDS, SynchronousQueue<Runnable>())
@@ -103,11 +102,17 @@ internal object FeedRunner {
         }
         fun state(item: Screen.Item) = if (reaction == null) ReactionState.UNKNOWN else
             states.getOrPut(item) { Screen.reactionState(item, reaction) }
+        val metrics = ctx.resources.displayMetrics
+        fun inlineTimeline(item: Screen.Item) = JobProgress.inlineReelTimeline(item.id, item.role,
+            wide = item.bounds.width() >= metrics.widthPixels * 0.50f,
+            nearBottom = item.bounds.centerY() >= metrics.heightPixels * 0.70f &&
+                item.bounds.height() <= metrics.heightPixels * 0.12f)
         fun itemPlayback(item: Screen.Item): JobProgress.Playback? {
             if (playbacks.containsKey(item)) return playbacks[item]
-            return Screen.playback(item).also { playbacks[item] = it }
+            return Screen.playback(item, inlineTimeline(item)).also { playbacks[item] = it }
         }
-        val metrics = ctx.resources.displayMetrics
+        fun reelAd(view: Screen.Snapshot) = singleItemSurface && plan.surface == "reels" &&
+            view.app == "com.instagram.android" && view.items.any(Screen::reelAd)
         fun hasVideoViewer(view: Screen.Snapshot, surface: String) = view.items.any { item ->
             !item.editable && !item.password && JobProgress.matchesFeedViewer(item.id, surface, view.app) &&
                 item.bounds.width() >= metrics.widthPixels * 0.60f &&
@@ -123,7 +128,7 @@ internal object FeedRunner {
         fun contentItems(screen: Screen.Snapshot) = screen.items.asSequence().filter { item ->
             !item.editable && item.label.isNotBlank() && state(item) == ReactionState.UNKNOWN &&
                 !JobProgress.reactionSummary(reaction, item.label) &&
-                (!singleItemSurface || itemPlayback(item) == null) &&
+                (!singleItemSurface || !inlineTimeline(item) && itemPlayback(item) == null) &&
                 (bulk || Screen.reactionState(item, JobProgress.Reaction.LIKE) == ReactionState.UNKNOWN)
         }
         fun content(screen: Screen.Snapshot) = contentItems(screen).map { it.label }.sorted().toList()
@@ -371,18 +376,22 @@ internal object FeedRunner {
             val alreadyApplied = screen.items.filter { state(it) == ReactionState.APPLIED }.distinctBy { it.bounds }.size
             // An empty accessibility read can't prove how many reels actually passed.
             val counted = identifiable && (!singleItemSurface || viewport.isNotBlank())
-            if (counted) screens++
+            var reelIsAd = reelAd(screen)
+            if (counted && !singleItemSurface) screens++
             sawControls = sawControls || eligible.isNotEmpty() || alreadyApplied > 0
             val scanNote = when {
                 !bulk || eligible.isNotEmpty() -> ""
                 alreadyApplied == 0 -> "; no recognizable controls, looking farther down the feed"
                 else -> "; already applied here, looking farther down the feed"
             }
-            Diag.jobStep(mine, if (counted) "check feed screen $screens" else "check unidentifiable reel",
-                "${eligible.size} ready, $alreadyApplied already applied$scanNote", true)
+            if (!reelIsAd) Diag.jobStep(mine, when {
+                !counted -> "check unidentifiable reel"
+                singleItemSurface -> "check reel candidate"
+                else -> "check feed screen $screens"
+            }, "${eligible.size} ready, $alreadyApplied already applied$scanNote", true)
 
             var reelCanBeLiked = true
-            if (singleItemSurface) {
+            if (singleItemSurface && !reelIsAd) {
                 val started = SystemClock.elapsedRealtime()
                 val watch = JobProgress.ReelWatch(started)
                 val observer = JobProgress.ReelObservation(viewport, started)
@@ -394,10 +403,11 @@ internal object FeedRunner {
                 }
                 try {
                     var identity = observer.observe(started, viewport, false, SwipeEvidence.NONE)
-                    var result = watch.observe(started, screen.takeIf { identity == ReelIdentity.SAME }?.let(::playback))
+                    var sample = playback(screen)
+                    var result = watch.observe(started, sample.takeIf { identity == ReelIdentity.SAME })
                     var latestReadable = true
                     while (active() && (result == ReelWatchResult.WAITING || !latestReadable)) {
-                        pause(REEL_SAMPLE_MS)
+                        pause(JobProgress.reelPollMs(sample != null))
                         if (!active()) return stopped()
                         val now = SystemClock.elapsedRealtime()
                         val fresh = look()?.takeIf { it.windowId == expectedWindow && it.items.isNotEmpty() }
@@ -416,6 +426,7 @@ internal object FeedRunner {
                         when (identity) {
                             ReelIdentity.ADVANCED -> if (fresh != null) {
                                 Diag.jobStep(mine, "watch reel", "downward movement and a new reel observed; no extra swipe", true)
+                                if (counted) screens++
                                 if (session?.reachedCount(screens) == true) return report(
                                     "I reached your browsing count.", "browse count reached"
                                 )
@@ -427,10 +438,17 @@ internal object FeedRunner {
                             )
                             else -> Unit
                         }
-                        if (fresh != null) screen = fresh
+                        if (fresh != null) {
+                            screen = fresh
+                            if (reelAd(fresh)) {
+                                reelIsAd = true
+                                break
+                            }
+                        }
                         // Label drift is not a lost window. Let the viewing pause finish,
                         // and don't act on playback or like controls from an uncertain reel.
-                        result = watch.observe(now, fresh?.takeIf { identity == ReelIdentity.SAME }?.let(::playback))
+                        sample = fresh?.let(::playback)
+                        result = watch.observe(now, sample.takeIf { identity == ReelIdentity.SAME })
                     }
                     if (!active()) return stopped()
                     reelCanBeLiked = identity == ReelIdentity.SAME
@@ -439,15 +457,18 @@ internal object FeedRunner {
                         !reelCanBeLiked -> "reel labels changed; used viewing pause without liking"
                         else -> "playback end not exposed; used a viewing pause"
                     }
-                    Diag.jobStep(mine, "watch reel", note, result == ReelWatchResult.FINISHED)
+                    if (!reelIsAd) Diag.jobStep(mine, "watch reel", note, result == ReelWatchResult.FINISHED)
                 } finally {
                     Screen.endFeedScrollProbe(probe)
                 }
             }
 
+            if (reelIsAd) Diag.jobStep(mine, "skip ad", "Instagram exposed an ad disclosure; no watch or like", true)
+            else if (counted && singleItemSurface) screens++
+
             val choiceEligible = if (singleItemSurface) screen.items.filter { state(it) == ReactionState.READY }
                 .distinctBy { it.bounds } else eligible
-            var selected = if (counted && reelCanBeLiked && !bulk && reaction != null && choiceEligible.isNotEmpty() && choicesAvailable) {
+            var selected = if (counted && !reelIsAd && reelCanBeLiked && !bulk && reaction != null && choiceEligible.isNotEmpty() && choicesAvailable) {
                 val choice = pickLike(ctx, screen, choiceEligible, ::active)
                 if (!active()) return stopped()
                 if (choice == null) {
@@ -467,7 +488,7 @@ internal object FeedRunner {
                 // and the selected control before acting on its answer.
                 val original = selected
                 val fresh = look()?.takeIf {
-                    viewport.isNotBlank() && it.windowId == screen.windowId && fingerprint(it) == viewport
+                    viewport.isNotBlank() && it.windowId == screen.windowId && !reelAd(it) && fingerprint(it) == viewport
                 }
                 selected = fresh?.items?.singleOrNull {
                     it.node == original.node && it.bounds == original.bounds && state(it) == ReactionState.READY
@@ -489,7 +510,7 @@ internal object FeedRunner {
                     // No tap was sent. After settling, allow one fresh attempt at the same
                     // still-ready control. Never retry a dispatched (even declined) click.
                     val stable = settledWithRetry(window)
-                    val fresh = stable?.takeIf { expected.isNotEmpty() && content(it) == expected }
+                    val fresh = stable?.takeIf { expected.isNotEmpty() && !reelAd(it) && content(it) == expected }
                         ?.items?.singleOrNull { state(it) == ReactionState.READY && sameControl(target, it) }
                     if (stable != null && fresh != null) {
                         screen = stable
@@ -589,7 +610,7 @@ internal object FeedRunner {
                     }
                     fun direction() = probe.motion.evidence(minDown, minSide)
                     fun unlabelledAdvance(movement: FeedMovement, evidence: SwipeEvidence) =
-                        JobProgress.anonymousReelAdvance(singleItemSurface && session?.screens == null, sent, movement, evidence)
+                        JobProgress.anonymousReelAdvance(singleItemSurface && (session?.screens == null || reelIsAd), sent, movement, evidence)
                     val below = settledWithRetry(screen.windowId, wait) {
                         val movement = traversal.movement(before, fingerprint(it))
                         val evidence = direction()

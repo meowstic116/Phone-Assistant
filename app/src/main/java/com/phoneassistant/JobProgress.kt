@@ -350,6 +350,26 @@ internal object JobProgress {
             .removePrefix("can you ").removePrefix("could you ").removePrefix("would you ")
             .removePrefix("please ").removeSuffix(", please").removeSuffix(" please")
 
+    private val reelAdBadge = setOf("sponsored", "sponsored ad", "ad", "advertisement", "paid advertisement")
+    private val adBadgeIds = setOf("ad_label", "ad_badge", "ad_disclosure", "sponsored_label", "sponsored_badge")
+
+    /** Recognize app disclosures, not sponsorship language embedded in a caption. */
+    fun reelAdDisclosure(id: String?, raw: String, description: Boolean): Boolean {
+        val key = id.orEmpty().lowercase()
+        if (listOf("caption", "comment", "username", "body").any { it in key }) return false
+        val label = normalize(raw).trimEnd('.', '!', ':')
+        if (key in adBadgeIds) return label.isNotBlank()
+        return label in reelAdBadge && (description || key.isNotEmpty() || label == "sponsored")
+    }
+
+    fun reelPollMs(hasTimeline: Boolean): Long = if (hasTimeline) 250L else 750L
+
+    fun inlineReelTimeline(id: String?, role: String, wide: Boolean, nearBottom: Boolean): Boolean {
+        val key = id.orEmpty().lowercase()
+        if (!wide || !nearBottom || listOf("load", "buffer", "volume", "brightness", "download").any { it in key }) return false
+        return role == "SeekBar" || role == "ProgressBar" || key in setOf("progress_bar", "progressbar", "seek_bar")
+    }
+
     private val playbackPrefix = Regex("^(?:reel|video|playback) (?:progress|position|time)(?::|,)? ?")
     private val playbackClock = Regex("([0-9]{1,3}):([0-5][0-9]) (?:/|of) ([0-9]{1,3}):([0-5][0-9])")
     private val playbackEnded = setOf("reel ended", "video ended", "playback ended", "replay reel", "replay video")
@@ -408,8 +428,8 @@ internal object JobProgress {
             val prior = previous?.takeIf { it.durationSeconds == sample?.durationSeconds }
             previous = sample // Never infer a loop across an unreadable or uncertain sample.
             if (sample != null) {
-                if (prior != null && prior.fraction >= 0.65f && sample.fraction <= 0.20f &&
-                    prior.fraction - sample.fraction >= 0.50f) return ReelWatchResult.FINISHED
+                if (prior != null && prior.fraction >= 0.60f && sample.fraction <= 0.30f &&
+                    prior.fraction - sample.fraction >= 0.45f) return ReelWatchResult.FINISHED
                 if (prior != null && sample.fraction > prior.fraction) lastProgressAt = now
             }
             return if (now - start >= estimatedMs && now - lastProgressAt >= 8_000L) {
