@@ -26,6 +26,9 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.text.InputType
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -124,8 +127,10 @@ class OverlayService : Service(), PropHost {
         }
 
         /** Say something in the overlay bubble, for replies sent from the history screen. */
-        fun speak(text: String) {
-            instance?.modelSays(text)
+        fun speak(context: Context, text: String, allowRemote: Boolean) {
+            val overlay = instance?.takeUnless { it.ending }
+            if (overlay != null) overlay.modelSays(text, allowRemote)
+            else PipVoice.reply(context, text, allowRemote)
         }
 
         /** Main-screen buttons: put one of Pip's toys on the screen. */
@@ -166,6 +171,7 @@ class OverlayService : Service(), PropHost {
                 it.hideBubble()
                 it.leaveAttention()
             }
+            PipVoice.stop()
         }
 
         /** How often the floating readout repaints. Fast enough to watch a keyboard arrive. */
@@ -257,6 +263,8 @@ class OverlayService : Service(), PropHost {
     private lateinit var petParams: WindowManager.LayoutParams
     private var pet: PetView? = null
 
+    private class VoicedReply(val text: String, var lastEnd: Int = -1)
+    private var voicedReply: VoicedReply? = null
     private var bubble: TextView? = null
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var bubbleHideAt = 0L
@@ -695,6 +703,7 @@ class OverlayService : Service(), PropHost {
         ending = true
         onPowerStateChanged?.invoke()
         // Work stops immediately, not after the decorative exit has finished.
+        PipVoice.stop()
         Agent.cancel()
         finishJobWalk(false)
         ChatTurns.begin()
@@ -745,6 +754,7 @@ class OverlayService : Service(), PropHost {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        PipVoice.stop()
         cancelPowerAnimation()
         cancelToyReach()
         petDrag?.cancel()
@@ -824,19 +834,20 @@ class OverlayService : Service(), PropHost {
     private fun replyHasFloor(): Boolean {
         val now = SystemClock.uptimeMillis()
         // The wait has a ceiling: a request that never answers must not mute the toys all day.
-        return (awaitingReply && now - replyAskedAt < 15_000L) || now < replyUntil
+        return voicedReply != null || (awaitingReply && now - replyAskedAt < 15_000L) || now < replyUntil
     }
 
     /** From here until the reply lands, only the model speaks. */
     private fun beginReply() {
+        hideBubble()
         awaitingReply = true
         replyAskedAt = SystemClock.uptimeMillis()
     }
 
-    private fun modelSays(text: String) {
+    private fun modelSays(text: String, allowRemote: Boolean) {
         awaitingReply = false
         replyUntil = SystemClock.uptimeMillis() + REPLY_HOLD_MS
-        sayAloud(text)
+        sayAloud(text, speechRemote = allowRemote)
     }
 
     override fun feel(mood: PetView.Mood, ms: Long) {
@@ -1207,15 +1218,6 @@ class OverlayService : Service(), PropHost {
         }
     }
 
-    /** Remove a speech bubble after its fade. */
-    private fun fadeOut(view: View) {
-        fading += view
-        handler.postDelayed({
-            fading -= view
-            runCatching { windowManager.removeView(view) }
-        }, FADE_MS)
-    }
-
     // --------------------------------------------------------------- toy break
 
     /** Fires once, at the deadline of the break that was running when it was posted. */
@@ -1580,76 +1582,118 @@ class OverlayService : Service(), PropHost {
     private fun bubbleLifetime(text: String): Long =
         (2200L + text.length * 55L).coerceIn(3_000L, 14_000L)
 
-    private fun showBubble(text: String) {
-        hideBubble()
+    private fun bubbleLine(text: String, end: Int): CharSequence {
+        if (end >= text.length) return text
+        // Keep the complete layout so line breaks, width and the tail never jump mid-sentence.
+        return SpannableString(text).apply {
+            setSpan(ForegroundColorSpan(Color.TRANSPARENT), end.coerceAtLeast(0), length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+    }
 
+    private fun openBubble(text: String, end: Int = text.length) {
+        val maxWidth = (screenW - dpInt(12f)).coerceIn(1, dpInt(232f))
         val view = TextView(this).apply {
             this.text = text
             textSize = 14f
             setTextColor(0xFFE8ECF4.toInt())
             setLineSpacing(dp(2f), 1f)
             setPadding(dpInt(12f), dpInt(9f), dpInt(12f), dpInt(9f))
-            maxWidth = dpInt(232f)
+            this.maxWidth = maxWidth
             setBackgroundResource(R.drawable.overlay_panel)
         }
 
-        view.measure(
-            View.MeasureSpec.makeMeasureSpec(dpInt(240f), View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        )
-        val width = view.measuredWidth.coerceAtLeast(dpInt(48f))
+        view.measure(View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        val width = view.measuredWidth.coerceIn(dpInt(48f).coerceAtMost(maxWidth), maxWidth)
         val height = view.measuredHeight.coerceAtLeast(dpInt(26f))
+        view.text = bubbleLine(text, end)
 
         val params = WindowManager.LayoutParams(
-            width,
-            height,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            width, height, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-        }
+        ).apply { gravity = Gravity.TOP or Gravity.START }
         placePanel(width, height, params)
-
         if (overlayDucked) params.alpha = 0f
-        if (runCatching { windowManager.addView(view, params) }.isSuccess) {
-            bubble = view
-            bubbleParams = params
-            bubbleHideAt = SystemClock.uptimeMillis() + bubbleLifetime(text)
-            // It grows into place rather than appearing, which is most of what makes a line
-            // feel spoken instead of printed.
+
+        val animate = ValueAnimator.areAnimatorsEnabled()
+        val above = params.y + height <= posY
+        view.pivotX = (posX + petW / 2f - params.x).coerceIn(0f, width.toFloat())
+        view.pivotY = if (above) height.toFloat() else 0f
+        if (animate) {
             view.alpha = 0f
-            view.scaleX = 0.9f
-            view.scaleY = 0.9f
-            view.animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .setDuration(150L)
-                .setInterpolator(DecelerateInterpolator(1.8f))
-                .start()
+            view.scaleX = 0.96f
+            view.scaleY = 0.96f
+            view.translationY = dp(if (above) 6f else -6f)
+        }
+        if (runCatching { windowManager.addView(view, params) }.isFailure) return
+        bubble = view
+        bubbleParams = params
+        bubbleHideAt = SystemClock.uptimeMillis() + bubbleLifetime(text)
+        if (animate) view.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
+            .setDuration(185L).setInterpolator(DecelerateInterpolator(1.65f)).start()
+    }
+
+    private fun captionReply(text: String, allowRemote: Boolean) {
+        // Wait for playback rather than running a typewriter timer from the arrival of the text.
+        val reply = VoicedReply(text)
+        voicedReply = reply
+        showThinking()
+        PipVoice.reply(this, text, allowRemote) caption@{ end ->
+            if (voicedReply !== reply || ending) return@caption
+            val previouslyVisible = reply.lastEnd.coerceAtLeast(0)
+            val revealTo = end ?: reply.text.length
+            if (revealTo > reply.lastEnd || bubble == null) {
+                hideThinking()
+                if (bubble == null) openBubble(reply.text, revealTo)
+                else bubble?.text = bubbleLine(reply.text, revealTo)
+                reply.lastEnd = revealTo
+            }
+            if (end == null) {
+                voicedReply = null
+                // Keep the completed line readable if the player was unavailable or interrupted.
+                val unseen = (text.length - previouslyVisible).coerceAtLeast(0)
+                val hold = if (unseen <= 16 && previouslyVisible > 0) 3_000L
+                    else bubbleLifetime(text.substring(previouslyVisible.coerceAtMost(text.length)))
+                bubbleHideAt = SystemClock.uptimeMillis() + hold
+                replyUntil = bubbleHideAt
+            } else {
+                bubbleHideAt = Long.MAX_VALUE
+                idleUntil = SystemClock.uptimeMillis() + SPEAKING_PAUSE_MS
+                if (pet?.mood == PetView.Mood.TALKING || pet?.mood == PetView.Mood.NEUTRAL) {
+                    feel(PetView.Mood.TALKING, 950L)
+                }
+            }
         }
     }
 
-    /** The bubble has had its time: it leaves the way it arrived, only quicker. */
     private fun fadeBubble() {
         val view = bubble ?: return
+        val above = (bubbleParams?.y ?: 0) + view.height <= posY
         bubble = null
         bubbleParams = null
         bubbleHideAt = 0L
-        view.animate()
-            .alpha(0f)
-            .scaleX(0.96f)
-            .scaleY(0.96f)
-            .setDuration(130L)
+        view.animate().cancel()
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            runCatching { windowManager.removeView(view) }
+            return
+        }
+        fading += view
+        view.animate().alpha(0f).scaleX(0.97f).scaleY(0.97f)
+            .translationY(dp(if (above) 4f else -4f))
+            .setDuration(135L).setInterpolator(LinearInterpolator())
+            .withEndAction { if (fading.remove(view)) runCatching { windowManager.removeView(view) } }
             .start()
-        fadeOut(view)
     }
 
     private fun hideBubble() {
-        bubble?.let { view -> runCatching { windowManager.removeView(view) } }
+        voicedReply = null
+        bubble?.let { view ->
+            view.animate().cancel()
+            runCatching { windowManager.removeView(view) }
+        }
         bubble = null
         bubbleParams = null
         bubbleHideAt = 0L
@@ -1739,7 +1783,7 @@ class OverlayService : Service(), PropHost {
         idleUntil = SystemClock.uptimeMillis() + 1500L
     }
 
-    private fun sayAloud(text: String) {
+    private fun sayAloud(text: String, speechRemote: Boolean? = null) {
         // A reply can land after the overlay has been stopped, and a bubble added to a dead
         // service is a window nothing will ever take down again.
         if (ending || !running) return
@@ -1755,7 +1799,9 @@ class OverlayService : Service(), PropHost {
             pet?.walking = false
         }
         idleUntil = SystemClock.uptimeMillis() + SPEAKING_PAUSE_MS
-        showBubble(text)
+        hideBubble()
+        if (speechRemote != null && PipVoice.config(this).enabled) captionReply(text, speechRemote)
+        else openBubble(text)
         // Being smug or annoyed outranks talking: he wants you to see his face.
         val mood = pet?.mood
         if (mood != PetView.Mood.ANNOYED && mood != PetView.Mood.SMUG) {
@@ -2085,10 +2131,16 @@ class OverlayService : Service(), PropHost {
         removeInputBar()
         relocating = false
 
+        if (voicedReply != null) {
+            hideBubble()
+            hideThinking()
+        }
+        PipVoice.stop()
         val turn = ChatTurns.begin()
         if (NowPlaying.requested(text)) {
             Agent.cancel()
-            modelSays(PipMediaAccess.answer(this))
+            val reply = PipMediaAccess.answer(this)
+            modelSays(reply, allowRemote = false)
             handler.postDelayed({
                 if (ChatTurns.isCurrent(turn) && inputBar == null && !Agent.running()) closeChat()
             }, 4000L)
@@ -2098,7 +2150,7 @@ class OverlayService : Service(), PropHost {
         Agent.cancel()
         Facts.saveNameRequest(this, text)?.let { reply ->
             Memory.append(this, "assistant", reply)
-            modelSays(reply)
+            modelSays(reply, allowRemote = false)
             handler.postDelayed({
                 if (ChatTurns.isCurrent(turn) && inputBar == null && !Agent.running()) closeChat()
             }, 4000L)
@@ -2128,7 +2180,7 @@ class OverlayService : Service(), PropHost {
                     return@post
                 }
                 if (ok) Memory.append(this, "assistant", reply)
-                modelSays(reply)
+                modelSays(reply, allowRemote = ok)
                 handler.postDelayed({
                     if (ChatTurns.isCurrent(turn) && inputBar == null && !Agent.running()) closeChat()
                 }, 4000L)
@@ -2201,8 +2253,10 @@ class OverlayService : Service(), PropHost {
                         endJobWatch()
                     }
                     if (line.isNotBlank()) {
-                        if (!fromClearHome) Memory.append(this, "assistant", line)
-                        sayAloud(line)
+                        if (!fromClearHome) {
+                            Memory.append(this, "assistant", line)
+                        }
+                        sayAloud(line, speechRemote = if (fromClearHome) null else false)
                         feel(PetView.Mood.HAPPY, 2500L)
                     }
                 }
@@ -2644,6 +2698,11 @@ class OverlayService : Service(), PropHost {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
+                    if (voicedReply != null) {
+                        hideBubble()
+                        hideThinking()
+                    }
+                    PipVoice.stop()
                     if (ending) {
                         finishExit()
                         return

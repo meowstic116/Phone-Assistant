@@ -21,6 +21,9 @@
 
     <!-- Needed on Android 11+ to resolve the label of whatever app is in front. -->
     <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
         <package android:name="com.sec.android.daemonapp" />
         <package android:name="com.google.android.apps.weather" />
         <package android:name="com.instagram.android" />

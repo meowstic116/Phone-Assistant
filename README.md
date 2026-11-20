@@ -231,6 +231,22 @@ is disabled stays in the catalog, with a note explaining why it can’t be launc
   chance of growing the rare **Golden Bloom**, which only then appears in the collection.
   Existing bloom counts carry over.
 
+## Pip’s voice
+
+Turn on **Pip settings → Voice → Read Pip’s replies aloud**. **Preview Pip’s voice**
+plays a sample. With no speech server configured, Pip uses an installed offline Android
+text-to-speech voice. Install an offline voice in Android’s text-to-speech settings if
+none is available. The floating bubble reveals words during playback without resizing;
+Android voices can report spoken word ranges, while VoxCPM WAV responses use estimated
+timing. If speech is off or unavailable, the complete written reply still appears.
+
+For [OpenBMB VoxCPM2](https://github.com/OpenBMB/VoxCPM), set up the [optional voice
+server](voice-server/README.md) and enter its HTTPS `/v1/audio/speech` URL and token in
+**Configure VoxCPM server**. No model weights are bundled in the APK. Only ordinary
+assistant reply text is sent to that speech endpoint, not prompts, screen snapshots,
+chat history, or local results like track titles. If that endpoint is unavailable, Pip
+falls back to the offline Android voice. Speech is off until you enable it.
+
 ## Personality
 
 He is a jokester, but an understated one: dry, specific, quietly pleased with himself — a
@@ -264,7 +280,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.168-debug.apk`](dist/phone-assistant-0.168-debug.apk).
+[`phone-assistant-0.170-debug.apk`](dist/phone-assistant-0.170-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by

@@ -1,12 +1,14 @@
 package com.phoneassistant
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.InputType
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -61,6 +63,16 @@ class PipSettingsActivity : Activity() {
         option("Learn from chat", Option.LEARN_FROM_CHAT)
         text("Let Pip save useful details from your conversations. Turning this off leaves existing notes and direct requests to remember something unchanged.")
 
+        heading("Voice")
+        toggle("Read Pip’s replies aloud", PipVoice.config(this).enabled) { PipVoice.setEnabled(this, it) }
+        text("Uses an installed Android voice unless you connect a VoxCPM server. With VoxCPM, the text of ordinary replies is sent to your configured server. On-device phone results use the Android voice only.")
+        button("Configure VoxCPM server") { configureVoiceServer() }
+        button("Preview Pip’s voice") {
+            PipVoice.preview(this) { result ->
+                if (!isFinishing && !isDestroyed) Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+            }
+        }
+
         val toyHeading = addToySettings()
         addPersonalityAndData()
         addPermissions()
@@ -70,6 +82,43 @@ class PipSettingsActivity : Activity() {
         if (savedInstanceState == null && intent.getBooleanExtra(EXTRA_SHOW_TOYS, false)) {
             scroll.post { scroll.scrollTo(0, toyHeading.top) }
         }
+    }
+
+    private fun configureVoiceServer() {
+        val saved = PipVoice.config(this)
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(8))
+        }
+        val endpoint = EditText(this).apply {
+            hint = "https://your-server.example/v1/audio/speech"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine(true)
+            setText(saved.endpoint)
+        }
+        val token = EditText(this).apply {
+            hint = "Voice server token (if required)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+            setText(saved.token)
+        }
+        fields.addView(endpoint)
+        fields.addView(token)
+        val dialog = AlertDialog.Builder(this).setTitle("VoxCPM server")
+            .setMessage("Enter the full HTTPS speech URL. Leave it blank to use only the Android voice. This is separate from the chat API.")
+            .setView(fields).setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val address = endpoint.text.toString().trim()
+                if (address.isNotEmpty() && VoiceProtocol.endpoint(address) == null) {
+                    endpoint.error = "Use an HTTPS URL ending in /v1/audio/speech."
+                } else {
+                    PipVoice.setServer(this, address, if (address.isEmpty()) "" else token.text.toString().trim())
+                    dialog.dismiss()
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun addToySettings(): TextView {

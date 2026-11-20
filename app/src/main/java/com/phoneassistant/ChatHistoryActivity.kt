@@ -75,6 +75,7 @@ class ChatHistoryActivity : Activity() {
         val text = input.text.toString().trim()
         if (text.isEmpty()) return
 
+        PipVoice.stop()
         val turn = ChatTurns.begin()
         pendingTurn = turn
         input.setText("")
@@ -83,7 +84,7 @@ class ChatHistoryActivity : Activity() {
             Agent.cancel()
             val reply = PipMediaAccess.answer(this)
             addBubble(reply, false)
-            OverlayService.speak(reply)
+            OverlayService.speak(this, reply, allowRemote = false)
             return
         }
         Memory.append(this, "user", text)
@@ -94,7 +95,7 @@ class ChatHistoryActivity : Activity() {
             Memory.append(this, "assistant", reply)
             addBubble(reply, false)
             sendButton.isEnabled = true
-            OverlayService.speak(reply)
+            OverlayService.speak(this, reply, allowRemote = false)
             return
         }
         OverlayService.beginThinking()
@@ -130,7 +131,7 @@ class ChatHistoryActivity : Activity() {
                 addBubble(reply, false)
                 if (ok) Memory.append(this, "assistant", reply)
                 sendButton.isEnabled = true
-                OverlayService.speak(reply)
+                OverlayService.speak(this, reply, allowRemote = ok)
             }
         }
     }
