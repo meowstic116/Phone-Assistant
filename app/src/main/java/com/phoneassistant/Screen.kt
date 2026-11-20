@@ -13,6 +13,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import java.util.ArrayDeque
@@ -347,12 +349,42 @@ object Screen {
     internal fun feedScroller(screen: Snapshot): Item? = screen.items.filter { it.scrollable }
         .maxByOrNull { it.bounds.width().toLong() * it.bounds.height() }
 
-    internal fun scrollFeed(screen: Snapshot, byTouch: Boolean, active: () -> Boolean): Boolean {
-        if (!sameWindow(screen) || !active()) return false
-        val scroller = feedScroller(screen)
-        if (byTouch) return gestureScroll(true, active, feed = true, container = scroller?.bounds)
-        val start = scroller?.node ?: runCatching { service?.rootInActiveWindow }.getOrNull() ?: return false
-        return active() && actUpwards(start, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, SCROLL_ANCESTORS) { it.isScrollable }
+    internal class FeedScrollProbe(val app: String, val windowId: Int) {
+        val motion = JobProgress.FeedMotion()
+        val started = SystemClock.uptimeMillis()
+    }
+
+    @Volatile private var feedProbe: FeedScrollProbe? = null
+
+    internal fun startFeedScrollProbe(screen: Snapshot) = FeedScrollProbe(screen.app, screen.windowId)
+        .also { feedProbe = it }
+
+    internal fun endFeedScrollProbe(probe: FeedScrollProbe) {
+        if (feedProbe === probe) feedProbe = null
+    }
+
+    internal fun recordFeedScroll(event: AccessibilityEvent) {
+        val probe = feedProbe ?: return
+        if (Build.VERSION.SDK_INT < 28 || event.eventTime < probe.started ||
+            event.windowId != probe.windowId || event.packageName?.toString() != probe.app) return
+        probe.motion.observe(event.scrollDeltaX, event.scrollDeltaY)
+    }
+
+    internal fun swipeFeed(screen: Snapshot, shortVideo: Boolean, retry: Int, active: () -> Boolean): Boolean {
+        if (!active()) return false
+        val svc = service ?: return false
+        val root = runCatching { svc.rootInActiveWindow }.getOrNull() ?: return false
+        if (root.windowId != screen.windowId || root.packageName?.toString() != screen.app) return false
+        val metrics = svc.resources.displayMetrics
+        val area = Rect().also(root::getBoundsInScreen)
+        if (!area.intersect(0, 0, metrics.widthPixels, metrics.heightPixels) ||
+            area.width() < metrics.widthPixels * 0.45f || area.height() < metrics.heightPixels * 0.45f) return false
+        val swipe = JobProgress.feedSwipe(shortVideo, retry)
+        val x = area.left + area.width() * swipe.x
+        val from = area.top + area.height() * swipe.fromY
+        val to = area.top + area.height() * swipe.toY
+        val path = Path().apply { moveTo(x, from); lineTo(x, to) }
+        return dispatch(path, swipe.durationMs, x, from, to, active, expected = screen)
     }
 
     fun longPress(item: Item): Boolean =
@@ -623,28 +655,20 @@ object Screen {
         return dispatch(path, 550L, x, y, y)
     }
 
-    private fun gestureScroll(
-        forward: Boolean, active: () -> Boolean = { true }, feed: Boolean = false, container: Rect? = null
-    ): Boolean {
+    private fun gestureScroll(forward: Boolean): Boolean {
         val metrics = service?.resources?.displayMetrics ?: return false
-        val area = Rect(0, 0, metrics.widthPixels, metrics.heightPixels)
-        if (container != null && !area.intersect(container)) return false
-        // Feed fallback leaves more of the current card in view and releases at a lower
-        // speed. Generic scrolling retains the original stroke.
-        val x = area.exactCenterX()
-        val middle = area.exactCenterY()
-        val travel = area.height() * if (feed) 0.18f else 0.26f
+        val x = metrics.widthPixels * 0.5f
+        val middle = metrics.heightPixels * 0.5f
+        val travel = metrics.heightPixels * 0.26f
         val from = if (forward) middle + travel else middle - travel
         val to = if (forward) middle - travel else middle + travel
-        val path = Path().apply {
-            moveTo(x, from)
-            lineTo(x, to)
-        }
-        return dispatch(path, if (feed) 650L else 300L, x, from, to, active)
+        val path = Path().apply { moveTo(x, from); lineTo(x, to) }
+        return dispatch(path, 300L, x, from, to)
     }
 
     private fun dispatch(
-        path: Path, durationMs: Long, x: Float, from: Float, to: Float, active: () -> Boolean = { true }
+        path: Path, durationMs: Long, x: Float, from: Float, to: Float,
+        active: () -> Boolean = { true }, expected: Snapshot? = null
     ): Boolean {
         val svc = service ?: return false
         val guard = gestureGuard.get() ?: return false
@@ -652,6 +676,7 @@ object Screen {
         val root = runCatching { svc.rootInActiveWindow }.getOrNull() ?: return false
         val app = root.packageName?.toString()
         val window = root.windowId
+        if (expected != null && (window != expected.windowId || app != expected.app)) return false
         // Include a small margin around both the contact point and the entire swipe path.
         val footprint = Rect(
             floor(x).toInt() - 4, floor(minOf(from, to)).toInt() - 4,

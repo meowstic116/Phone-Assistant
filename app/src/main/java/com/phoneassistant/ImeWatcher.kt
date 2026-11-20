@@ -41,6 +41,10 @@ class ImeWatcher : AccessibilityService() {
      */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val type = event?.eventType ?: return
+        if (type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
+            Screen.recordFeedScroll(event)
+            return
+        }
         if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
             type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         ) {

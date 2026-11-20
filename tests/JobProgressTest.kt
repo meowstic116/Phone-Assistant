@@ -65,6 +65,7 @@ fun main() {
 
     // Both phrases from the Instagram diagnostics must start timed, reaction-free Reels.
     check(plan("Open Instagram and doomscroll") == browse)
+    check(plan("Doomscroll on Insta") == browse)
     check(plan("Doomscroll on Instagram for a little bit") == browse)
     check(plan("Open Instagram and then doomscroll for a short while") == browse)
     check(plan("Doomscroll reels on Instagram") == browse)
@@ -169,8 +170,8 @@ fun main() {
     check(!JobProgress.verifiedReaction(true, listOf(ready, applied)))
     check(!JobProgress.verifiedReaction(false, listOf(applied)))
     val landmarks = setOf("activity A", "activity B", "activity C", "activity D", "old counter")
-    check(JobProgress.similarFeedContent(landmarks, landmarks - "old counter" + "new counter"))
-    check(!JobProgress.similarFeedContent(landmarks, setOf("activity A", "activity details", "comments")))
+    check(JobProgress.sameReactionFeed(landmarks, landmarks - "old counter" + "new counter"))
+    check(!JobProgress.sameReactionFeed(landmarks, setOf("activity A", "activity details", "comments")))
 
     val settling = JobProgress.StableFeedRead()
     check(!settling.observe("card y=500", 2))
@@ -199,12 +200,31 @@ fun main() {
     check(!moving.observe("in motion", 250, verified = true))
     check(!moving.observe("landed", 400, verified = true))
     check(moving.observe("landed", 550, verified = true))
-    val strategy = JobProgress.FeedScrollStrategy()
-    check(!strategy.byTouch(0) && strategy.byTouch(1))
-    strategy.advanced(byTouch = true)
-    check(strategy.byTouch(0) && !strategy.byTouch(1))
-    strategy.advanced(byTouch = false)
-    check(!strategy.byTouch(0))
+    // The shared runner uses only vertical strokes; retries change the lane, not the axis.
+    for (shortVideo in listOf(false, true)) {
+        val strokes = (0..4).map { JobProgress.feedSwipe(shortVideo, it) }
+        check(strokes.map { it.x }.distinct().size == 3)
+        check(strokes.all { it.x in 0.30f..0.70f && it.fromY > it.toY })
+        if (!shortVideo) check(strokes.all { it.fromY - it.toY < 0.5f })
+    }
+    val swipe = JobProgress.FeedMotion()
+    swipe.observe(120, 0)
+    check(swipe.evidence(100, 16) == JobProgress.SwipeEvidence.SIDEWAYS)
+    swipe.observe(-1, 80)
+    swipe.observe(0, 50)
+    check(swipe.evidence(100, 16) == JobProgress.SwipeEvidence.DOWN_FEED)
+    swipe.observe(0, -130)
+    check(swipe.evidence(100, 16) == JobProgress.SwipeEvidence.SIDEWAYS)
+    val sameView = JobProgress.FeedMovement.UNCHANGED
+    val down = JobProgress.SwipeEvidence.DOWN_FEED
+    check(JobProgress.anonymousReelAdvance(true, true, sameView, down))
+    check(!JobProgress.anonymousReelAdvance(false, true, sameView, down)) // count-based run
+    check(!JobProgress.anonymousReelAdvance(true, true, sameView, JobProgress.SwipeEvidence.SIDEWAYS))
+    check(!JobProgress.anonymousReelAdvance(true, false, sameView, down))
+    val card = JobProgress.reactionCardKey(setOf("Run A", "3.14 mi", "Yesterday"))
+    check(card != null && JobProgress.sameReactionCard(card, JobProgress.reactionCardKey(setOf("Yesterday", "Run A", "3.14 mi"))))
+    check(!JobProgress.sameReactionCard(card, JobProgress.reactionCardKey(setOf("Run B", "3.14 mi", "Yesterday"))))
+    check(!JobProgress.sameReactionCard(null, null))
 
     // A run with blank or already-reacted screens can still reach a later eligible card.
     val feed = JobProgress.FeedTraversal()
