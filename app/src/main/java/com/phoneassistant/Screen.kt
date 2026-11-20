@@ -97,7 +97,7 @@ object Screen {
         val items = ArrayList<Item>()
         val localFeed = feed
         val limit = if (web || localFeed) MAX_NODES else MAX_ITEMS
-        collect(svc.packageName?.toString(), root, items, limit)
+        collect(svc.packageName?.toString(), root, items, limit, localFeed)
         val visible = if (web) {
             // Reserve space for labelled controls nested below the shallow browser chrome.
             val topFirst = compareBy<Item>({ it.bounds.top }, { it.bounds.left })
@@ -116,7 +116,7 @@ object Screen {
      * his panel are not things he should be pressing.
      */
     private fun collect(
-        ownPackage: String?, root: AccessibilityNodeInfo, out: MutableList<Item>, limit: Int
+        ownPackage: String?, root: AccessibilityNodeInfo, out: MutableList<Item>, limit: Int, feed: Boolean
     ) {
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
@@ -129,7 +129,7 @@ object Screen {
                 if (node !== root) hand(node)
                 continue
             }
-            val kept = node.isVisibleToUser && consider(node, out)
+            val kept = node.isVisibleToUser && consider(node, out, feed)
             // The children are read before the node goes back: a child is its own instance, so
             // giving the parent back now cannot take one of them with it.
             // Cap queued descendants as well as processed nodes; a large tree must not
@@ -160,7 +160,7 @@ object Screen {
     }
 
     /** Whether this node became an item. One that did is kept until its snapshot is released. */
-    private fun consider(node: AccessibilityNodeInfo, out: MutableList<Item>): Boolean {
+    private fun consider(node: AccessibilityNodeInfo, out: MutableList<Item>, feed: Boolean): Boolean {
         val editable = node.isEditable
         // What a field contains is never put in the listing, and the listing is the one thing
         // that leaves the phone: a username, a search for something private, or a password in
@@ -171,7 +171,10 @@ object Screen {
         val scrollable = node.isScrollable
         // Everything that can be pressed, typed into or scrolled, plus plain text: the text
         // is how the model knows it is looking at the right conversation or message.
-        if (!editable && !node.isClickable && !node.isCheckable && !scrollable && label.isEmpty()) {
+        val id = node.viewIdResourceName?.substringAfterLast('/')
+        val feedViewer = feed && (JobProgress.matchesFeedViewer(id, "reels", node.packageName?.toString()) ||
+            JobProgress.matchesFeedViewer(id, "shorts"))
+        if (!editable && !node.isClickable && !node.isCheckable && !scrollable && label.isEmpty() && !feedViewer) {
             return false
         }
         val bounds = Rect()
@@ -188,7 +191,7 @@ object Screen {
             password = node.isPassword,
             filled = filled,
             scrollable = scrollable,
-            id = node.viewIdResourceName?.substringAfterLast('/'),
+            id = id,
             bounds = bounds,
             node = node
         )

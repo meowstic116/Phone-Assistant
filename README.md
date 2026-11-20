@@ -68,12 +68,17 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   with no recognizable controls or only already-applied reactions don't end the scan:
   Pip keeps going while he can reach new screens. He waits for the feed to settle and
   uses a shorter, slower swipe when the app's accessibility scroll doesn't move it.
+  Bulk scans move on as soon as two fresh reads verify a stable result and wait longer
+  only when the result is uncertain. Diagnostics shows how long scroll and tap checks took.
   An unverified tap isn't sent again; Pip can try a different control, but stops after several unverified reactions or scrolls
   that don't reveal new content. Use **Stop** if you don't want to keep scanning a long feed.
   For something more selective, try **“Doomscroll Instagram Reels and like any you want.”**
   Pip may pick one like per screen or skip it. He judges only the captions and labels Android
   exposes, not the video or audio. **“Doomscroll Instagram Reels for me”** browses without
-  reacting. **“Open Instagram and doomscroll”** defaults to the Reels tab, not Home.
+  reacting. Optional likes can be a separate sentence: **“Open Instagram and doomscroll for
+  1 minute. You may like reels you like.”** Instagram doomscrolling defaults to Reels,
+  not Home; Pip waits for evidence that the requested tab or player opened. If he can't
+  read a doomscroll instruction, he asks you to rephrase instead of trying a different job.
   Say **“Doomscroll Instagram Reels for 2 minutes”** or **“Doomscroll 10 reels on
   Instagram”** to set a time or count. The timer starts when the feed opens. A count means
   distinct reel screens Android exposes, including the first one, not full videos played.

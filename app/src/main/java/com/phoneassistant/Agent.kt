@@ -131,6 +131,11 @@ object Agent {
                 finish(result.first, result.second)
                 return
             }
+            if (JobProgress.isDoomscrollRequest(originalRequest)) {
+                finish("I couldn't read that doomscroll request. Try ‘Open Instagram and doomscroll for 1 minute.’",
+                    "unsupported doomscroll wording; no actions taken")
+                return
+            }
             // The apps on this phone, read once: searched so a job that names an app starts
             // in that app, and named in every step so the model can only ask for something
             // that is really installed.
