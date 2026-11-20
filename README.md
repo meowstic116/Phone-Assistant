@@ -62,7 +62,8 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   verify progress and stops after repeated failures or when the task is complete.
   A shared feed runner can apply missing
   reactions across apps — for example, **“Please open Strava and give kudos to every
-  activity that I haven't given kudos to yet”** or **“Open Instagram and like every post I
+  activity that I haven't given kudos to yet,”** **“Give kudos on any Strava activity I haven't
+  yet,”** or **“Open Instagram and like every post I
   haven't liked yet.”** Pip reads the reaction controls Android exposes, skips already-applied
   reactions, and counts a press only after verifying that the control changed. Screens
   with no recognizable controls or only already-applied reactions don't end the scan:
@@ -77,7 +78,10 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   reacting. Optional likes can be a separate sentence: **“Open Instagram and doomscroll for
   1 minute. You may like reels you like.”** Instagram doomscrolling defaults to Reels,
   not Home; Pip waits for evidence that the requested tab or player opened. If he can't
-  read a doomscroll instruction, he asks you to rephrase instead of trying a different job.
+  read a doomscroll or bulk kudos instruction, he can ask the configured API for a suggested
+  rephrasing. He waits for you to send it before acting. If a tab is slow to confirm, the API
+  may suggest one extra read, not another tap. These requests send the original feed command
+  for clarification or the app/tab and obstacle for recovery, not the screen tree or chat history.
   Say **“Doomscroll Instagram Reels for 2 minutes”** or **“Doomscroll 10 reels on
   Instagram”** to set a time or count. The timer starts when the feed opens. A count means
   distinct reel screens Android exposes, including the first one, not full videos played.

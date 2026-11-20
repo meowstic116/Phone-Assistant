@@ -55,6 +55,19 @@ internal object FeedRunner {
         fun active() = jobActive() && remaining() != 0L
         fun pause(ms: Long) = SystemClock.sleep(minOf(ms, remaining() ?: ms))
         val traversal = JobProgress.FeedTraversal()
+        val helpBudget = JobProgress.FeedHelpBudget()
+        fun wantsExtraRead(obstacle: String): Boolean {
+            if (!active() || !helpBudget.take() || AssistantBrain.config(ctx).apiKey.isBlank()) return false
+            val choice = FeedHelp.recovery(ctx, app.label, plan.surface, obstacle, ::active)
+            if (!active()) return false
+            val extra = choice == JobProgress.FeedRecovery.WAIT_THEN_READ
+            Diag.jobStep(mine, "ask API for recovery", when (choice) {
+                JobProgress.FeedRecovery.WAIT_THEN_READ -> "one more read; no tap or swipe"
+                JobProgress.FeedRecovery.ASK_USER -> "ask the user instead of taking another action"
+                null -> "no usable recovery instruction"
+            }, choice != null, turn = true)
+            return extra
+        }
         val attemptedCards = JobProgress.RecentVisits()
         var unverified = 0
         var anonymousAdvance = false
@@ -275,6 +288,31 @@ internal object FeedRunner {
                 if (latest == null || (!opened && !watch.canRetryTap)) break
                 screen = latest
             }
+            if (!opened && wantsExtraRead("requested tab not yet confirmed")) {
+                val watch = JobProgress.SurfaceWatch(screen.windowId)
+                for (attempt in 1..4) {
+                    pause(TAB_READ_MS)
+                    if (!active()) return stopped()
+                    val fresh = look()?.takeIf { it.items.isNotEmpty() }
+                    // No new press. Only independent evidence that the tab actually opened.
+                    val proof = fresh?.let {
+                        val reading = readSurface(it)
+                        when {
+                            reading.selected -> JobProgress.SurfaceProof.SELECTED
+                            reading.viewer -> JobProgress.SurfaceProof.VIEWER
+                            reading.heading && reading.title && candidates(it).isEmpty() -> JobProgress.SurfaceProof.TITLE
+                            else -> null
+                        }
+                    }
+                    if (watch.observe(fresh?.windowId, proof, sameTab = false) && fresh != null) {
+                        opened = true
+                        screen = fresh
+                        Diag.jobStep(mine, "recheck $surface", "requested surface confirmed without another tap", true)
+                        break
+                    }
+                }
+            }
+            if (!active()) return stopped()
             if (!opened) return report("I couldn't confirm $surface. Open it in ${app.label} and try again.",
                 "requested feed surface not confirmed")
         }

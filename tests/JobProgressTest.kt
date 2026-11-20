@@ -27,6 +27,19 @@ fun main() {
     check(JobProgress.feedRequest("Open Strava and give kudos to every activity and share it") == null)
     check(JobProgress.feedRequest("Open Strava and give kudos to this activity") == null)
 
+    val inlineKudos = "Give kudos on any strava activity I haven't yet"
+    check(JobProgress.feedRequest(inlineKudos) == kudosPlan)
+    check(JobProgress.feedRequest("Give kudos for every Another App activity I haven’t given kudos on yet") ==
+        kudosPlan.copy(app = "another app"))
+    check(JobProgress.feedRequest("In Strava, give kudos on any activity I haven't yet") == kudosPlan)
+    check(JobProgress.feedRequest("Give kudos on any activity I haven't yet on Strava") == kudosPlan)
+    check(JobProgress.routeFeedLocally(inlineKudos))
+    check(JobProgress.feedRequest("$inlineKudos and message Alex") == null)
+    check(JobProgress.routeFeedLocally("$inlineKudos and message Alex")) // rephrase; don't hand to the model
+    check(JobProgress.feedRequest("Don't $inlineKudos") == null)
+    check(!JobProgress.routeFeedLocally("Don't $inlineKudos"))
+    check(!JobProgress.routeFeedLocally("Give kudos on this Strava activity"))
+
     val selective = JobProgress.FeedRequest("instagram", "reels", JobProgress.FeedMode.CURATE, JobProgress.Reaction.LIKE, JobProgress.BrowseLimit())
     check(JobProgress.feedRequest("Doomscroll Instagram Reels and like any you want") == selective)
     check(JobProgress.feedRequest("Browse Instagram Reels for me and like the reels you enjoy") == selective)
@@ -125,6 +138,23 @@ fun main() {
     check(JobProgress.feedRequest("Open Instagram and doomscroll. You may like every reel") == null)
     check(JobProgress.isDoomscrollRequest("Pip, please doomscroll Instagram then send a message"))
     check(!JobProgress.isDoomscrollRequest("Tell me why I doomscroll on Instagram"))
+
+    // A rewrite is a supported suggestion only and cannot introduce a different app or action.
+    val difficultBrowse = "Open Instagram and doomscroll until the tea is ready"
+    val proposedBrowse = "Open Instagram and doomscroll for 1 minute"
+    check(JobProgress.feedSuggestion(difficultBrowse, proposedBrowse) == proposedBrowse)
+    check(JobProgress.feedSuggestion("Doomscroll on Insta for a jiffy", proposedBrowse) == proposedBrowse)
+    check(JobProgress.feedSuggestion(difficultBrowse, "$proposedBrowse and like any reels you want") == null)
+    check(JobProgress.feedSuggestion(difficultBrowse, "Open TikTok and doomscroll for 1 minute") == null)
+    check(JobProgress.feedSuggestion(difficultBrowse, "Open Instagram and doomscroll for 0 minutes") == null)
+    check(JobProgress.feedSuggestion(difficultBrowse, "Open Instagram and delete my account") == null)
+    check(JobProgress.feedSuggestion("Give kudos on every Strava thing I missed", inlineKudos) == inlineKudos)
+    check(JobProgress.feedSuggestion("Tell me about doomscrolling on Instagram", proposedBrowse) == null)
+    val helpBudget = JobProgress.FeedHelpBudget()
+    check(helpBudget.take() && !helpBudget.take())
+    check(JobProgress.feedRecovery("wait_then_read") == JobProgress.FeedRecovery.WAIT_THEN_READ)
+    check(JobProgress.feedRecovery("ask_user") == JobProgress.FeedRecovery.ASK_USER)
+    check(JobProgress.feedRecovery("tap anywhere") == null)
 
     val feedRetries = JobProgress.FailureStreak(JobProgress.FEED_FAILURES_BEFORE_STOP)
     repeat(4) { check(!feedRetries.record(false)) }
