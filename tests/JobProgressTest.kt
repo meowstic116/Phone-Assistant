@@ -760,5 +760,31 @@ fun main() {
     check(wideScore == DragMotion.Point(10f, 34f) && wideScore.x + 124f + 8f <= 169f)
     check(SoccerLayout.scoreboard(426f, 44f, 142f, 98f, 124f, 10f, 8f) == DragMotion.Point(10f, 54f))
 
+    check(VoiceProtocol.endpoint(" https://voice.example/v1/audio/speech ")?.host == "voice.example")
+    check(VoiceProtocol.endpoint("http://voice.example/v1/audio/speech") == null)
+    check(VoiceProtocol.endpoint("https://user@voice.example/v1/audio/speech") == null)
+    check(VoiceProtocol.endpoint("https://voice.example/v1/audio/speech?token=x") == null)
+    check(VoiceProtocol.endpoint("https://voice.example/chat/completions") == null)
+    check(VoiceProtocol.spokenText("*adjusts antenna* Hello,   world.") == "Hello, world.")
+    check(VoiceProtocol.spokenText("{\"action\":\"delegate\"}") == null)
+    check(VoiceProtocol.spokenText("*flops over*") == null)
+    check(VoiceProtocol.spokenText("a".repeat(440))?.length == VoiceProtocol.MAX_TEXT)
+    check(VoiceProtocol.isWav("RIFF....WAVE".toByteArray()))
+    check(!VoiceProtocol.isWav("RIFF....WEBP".toByteArray()))
+
+    val captionSource = "  *waves* Hello,   world! *smiles*"
+    val captions = checkNotNull(SpeechCaption.from(captionSource, 420))
+    check(captions.text == "Hello, world!")
+    check(captionSource.take(captions.displayEndForRange(0, 5)) == "  *waves* Hello,")
+    check(captionSource.take(captions.displayEndForRange(7, 12)) == "  *waves* Hello,   world!")
+    check(captions.displayEndForRange(6, 7) == 0) // Whitespace alone isn't a new word.
+    check(captions.displayEndForProgress(-0.01f) == 0)
+    check(captions.displayEndForProgress(0f) == captions.displayEndForRange(0, 5))
+    check(captions.displayEndForProgress(1f) == captions.displayEndForRange(7, 12))
+    val reveal = (0..100).map { captions.displayEndForProgress(it / 100f) }
+    check(reveal.zipWithNext().all { (a, b) -> a <= b })
+    check(SpeechCaption.from("One two three", 8)?.text == "One two")
+    check(SpeechCaption.from("[(no spoken reply)]", 420) == null)
+
     println("Job progress tests passed.")
 }
