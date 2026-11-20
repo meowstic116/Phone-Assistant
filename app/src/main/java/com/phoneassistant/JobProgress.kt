@@ -145,12 +145,14 @@ internal object JobProgress {
     private const val ITEMS = "(?:activity|activities|posts?|reels?|videos?|items?|shorts?)"
     private const val SCOPE = "(?:any|all|every|each)"
     private const val MISSING = "(?:that )?(?:i )?(?:have not|haven't|never|have never) (?:already )?"
-    // Whole-command match: "I haven't yet" can refer back to "give kudos" without
-    // repeating the verb. Don't expand one-off requests or commands with other actions.
-    private val kudosCommand = Regex(
-        "give kudos to $SCOPE $ITEMS(?: (?:${MISSING}given kudos to(?: yet)?|" +
-            "(?:that )?(?:i )?(?:haven't|have not) yet))?"
-    )
+    // Whole-command matches only: support both “activities on Strava” and “Strava
+    // activities,” without accepting a singular request or guessing at extra instructions.
+    private const val KUDOS_START = "give kudos (?:to|on|for) $SCOPE"
+    private const val KUDOS_MISSING = "(?: (?:${MISSING}given kudos (?:to|on|for)(?: yet)?|" +
+        "(?:that )?(?:i )?(?:haven't|have not) yet))?"
+    private val kudosCommand = Regex("$KUDOS_START $ITEMS$KUDOS_MISSING")
+    private val appQualifiedKudos = Regex("$KUDOS_START (.{1,60}?) $ITEMS$KUDOS_MISSING")
+    private val bulkKudosStart = Regex("^$KUDOS_START\\b")
     private val likeCommand = Regex("like $SCOPE (?:unliked $ITEMS|$ITEMS ${MISSING}liked(?: yet)?)")
     private val openApp = Regex("open(?: up)? (.+?),? and (.+)")
     private val appFirst = Regex("(?:in|on) (.+?), (.+)")
@@ -330,6 +332,16 @@ internal object JobProgress {
         return doomscrollStart.containsMatchIn(command)
     }
 
+    fun isBulkKudosRequest(message: String): Boolean {
+        val text = feedText(message)
+        val command = (openApp.matchEntire(text) ?: appFirst.matchEntire(text))
+            ?.groupValues?.get(2)?.removePrefix("then ") ?: text
+        return bulkKudosStart.containsMatchIn(command)
+    }
+
+    fun routeFeedLocally(message: String): Boolean =
+        feedRequest(message) != null || isDoomscrollRequest(message) || isBulkKudosRequest(message)
+
     private val doomscrollStart = Regex("^(?:doomscroll|doom scroll)\\b")
 
     private fun feedText(message: String): String =
@@ -343,6 +355,10 @@ internal object JobProgress {
         val text = feedText(message)
         browse.matchEntire(text)?.let {
             return browseRequest(it.groupValues[2], it.groupValues[1].startsWith("doom"))
+        }
+        appQualifiedKudos.matchEntire(text)?.let {
+            val (app, surface) = feedTarget(it.groupValues[1]) ?: return null
+            return FeedRequest(app, surface, FeedMode.ALL_MISSING, Reaction.KUDOS)
         }
         val namedFirst = openApp.matchEntire(text) ?: appFirst.matchEntire(text)
         val namedLast = if (namedFirst == null) appLast.matchEntire(text) else null
@@ -361,6 +377,43 @@ internal object JobProgress {
         }
         val (app, surface) = feedTarget(target) ?: return null
         return FeedRequest(app, surface, FeedMode.ALL_MISSING, reaction)
+    }
+
+    /** The API's rewrite is advice only; the original unsupported request never runs it. */
+    fun feedSuggestion(original: String, suggestion: String): String? {
+        val example = suggestion.trim().takeIf { it.length in 1..180 && it.none { ch -> ch.isISOControl() } }
+            ?: return null
+        val plan = feedRequest(example) ?: return null
+        val text = feedText(original)
+        val matchesApp = Regex("(?<![\\p{L}\\p{N}])${Regex.escape(plan.app)}(?![\\p{L}\\p{N}])")
+            .containsMatchIn(text) || plan.app == "instagram" && Regex("\\binsta\\b").containsMatchIn(text)
+        if (!matchesApp) return null
+        val keepsScope = when {
+            isDoomscrollRequest(original) -> {
+                val permission = likeClause.find(text)?.let { chooseLikes.matches(text.substring(it.range.last + 1)) } == true
+                plan.mode == FeedMode.CURATE && plan.browseLimit != null && (plan.reaction == null || permission)
+            }
+            isBulkKudosRequest(original) -> plan.mode == FeedMode.ALL_MISSING && plan.reaction == Reaction.KUDOS
+            else -> false
+        }
+        return example.takeIf { keepsScope }
+    }
+
+    enum class FeedRecovery { WAIT_THEN_READ, ASK_USER }
+
+    fun feedRecovery(action: String): FeedRecovery? = when (action) {
+        "wait_then_read" -> FeedRecovery.WAIT_THEN_READ
+        "ask_user" -> FeedRecovery.ASK_USER
+        else -> null
+    }
+
+    class FeedHelpBudget {
+        private var used = false
+        fun take(): Boolean {
+            if (used) return false
+            used = true
+            return true
+        }
     }
 
     class SurfaceWatch(private val originalWindow: Int) {

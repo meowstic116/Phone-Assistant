@@ -126,14 +126,32 @@ object Agent {
                     if (opened) "explicit link handed to Android" else "link launch failed")
                 return
             }
+            val doomscroll = JobProgress.isDoomscrollRequest(originalRequest)
+            val bulkKudos = JobProgress.isBulkKudosRequest(originalRequest)
+            fun clarifyFeed(fallback: String, reason: String) {
+                val configured = AssistantBrain.config(ctx).apiKey.isNotBlank()
+                if (configured && alive()) onSay("I'm asking for a clearer way to phrase that.")
+                val suggestion = if (configured) FeedHelp.suggestion(ctx, originalRequest, ::alive) else null
+                if (!alive()) return
+                if (configured) Diag.jobStep(mine, "ask API for clarification",
+                    if (suggestion != null) "supported example; waiting for user confirmation" else "no usable suggestion",
+                    suggestion != null, turn = true)
+                if (suggestion != null) finish("If this matches what you want, say: ‘$suggestion’",
+                    "API suggested a rephrasing; no actions taken")
+                else finish(fallback, reason)
+            }
             JobProgress.feedRequest(originalRequest)?.let { plan ->
                 val result = FeedRunner.run(ctx, mine, plan, ::alive, onSay)
-                finish(result.first, result.second)
+                if (!alive()) return
+                if (result.second == "feed app not resolved" && (doomscroll || bulkKudos)) clarifyFeed(result.first, result.second)
+                else finish(result.first, result.second)
                 return
             }
-            if (JobProgress.isDoomscrollRequest(originalRequest)) {
-                finish("I couldn't read that doomscroll request. Try ‘Open Instagram and doomscroll for 1 minute.’",
-                    "unsupported doomscroll wording; no actions taken")
+            if (doomscroll || bulkKudos) {
+                val example = if (doomscroll) "Open Instagram and doomscroll for 1 minute."
+                    else "Give kudos on any Strava activity I haven't yet."
+                clarifyFeed("I couldn't read that feed request. For example, try ‘$example’",
+                    "unsupported feed wording; no actions taken")
                 return
             }
             // The apps on this phone, read once: searched so a job that names an app starts
