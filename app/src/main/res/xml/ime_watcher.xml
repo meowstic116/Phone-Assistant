@@ -8,7 +8,7 @@
     leaves the phone except the list of visible labels sent to the model in use.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged|typeViewScrolled"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews"
     android:canPerformGestures="true"

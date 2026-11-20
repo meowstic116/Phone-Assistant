@@ -93,18 +93,49 @@ internal object JobProgress {
         }
     }
 
-    /** Reuse the scroll method that actually worked; an accepted no-op doesn't change it. */
-    class FeedScrollStrategy {
-        private var preferTouch = false
-        fun byTouch(retry: Int): Boolean = preferTouch != (retry % 2 != 0)
-        fun advanced(byTouch: Boolean) { preferTouch = byTouch }
+    data class FeedSwipe(val x: Float, val fromY: Float, val toY: Float, val durationMs: Long)
+
+    // Try different vertical lanes if a container consumes the gesture, never a sideways
+    // gesture. The list stroke keeps more than half the previous screen in view.
+    fun feedSwipe(shortVideo: Boolean, retry: Int): FeedSwipe {
+        val lane = listOf(0.48f, 0.34f, 0.62f)[retry % 3]
+        return if (shortVideo) FeedSwipe(lane, 0.78f, 0.25f, 475L)
+        else FeedSwipe(lane, 0.71f, 0.30f, 550L)
     }
 
-    /** Recovery only: a few live labels can change while the same scroll container stays put. */
-    fun similarFeedContent(before: Set<String>, after: Set<String>): Boolean {
+    enum class SwipeEvidence { NONE, DOWN_FEED, SIDEWAYS }
+
+    class FeedMotion {
+        private var signedY = 0L
+        private var horizontal = 0L
+
+        @Synchronized fun observe(deltaX: Int, deltaY: Int) {
+            // Android uses -1 when one axis wasn't reported. Treat that as no evidence.
+            val x = if (deltaX == -1) 0L else deltaX.toLong()
+            val y = if (deltaY == -1) 0L else deltaY.toLong()
+            if (kotlin.math.abs(y) > kotlin.math.abs(x)) signedY += y else horizontal += kotlin.math.abs(x)
+        }
+
+        @Synchronized fun evidence(minDown: Int, minSide: Int): SwipeEvidence = when {
+            signedY >= minDown -> SwipeEvidence.DOWN_FEED
+            horizontal >= minSide && signedY < minSide -> SwipeEvidence.SIDEWAYS
+            else -> SwipeEvidence.NONE
+        }
+    }
+
+    fun sameReactionCard(before: String?, after: String?): Boolean = before != null && before == after
+
+    fun anonymousReelAdvance(timedOnly: Boolean, swipeCompleted: Boolean, movement: FeedMovement, evidence: SwipeEvidence): Boolean =
+        timedOnly && swipeCompleted && movement == FeedMovement.UNCHANGED && evidence == SwipeEvidence.DOWN_FEED
+
+    fun reactionCardKey(anchors: Set<String>): String? = anchors.takeIf { it.size >= 3 }
+        ?.sorted()?.joinToString("\n")
+
+    // Only for recovery with the same window AND the same scroll container. This never
+    // proves a kudos. A redraw may change counters and layout around the original card.
+    fun sameReactionFeed(before: Set<String>, after: Set<String>): Boolean {
         val shared = before.count { it in after }
-        val largest = maxOf(before.size, after.size)
-        return shared >= 3 && shared * 5 >= largest * 4
+        return shared >= 3 && shared * 2 >= maxOf(before.size, after.size)
     }
 
     /** Confirm the same toggle, not another applied button or new reaction-count text. */
@@ -225,7 +256,8 @@ internal object JobProgress {
         val appAndSurface = if (countedSurface != null && feedSurface.matchEntire(rawApp) == null) {
             "$rawApp $countedSurface"
         } else rawApp
-        val (app, explicitSurface) = feedTarget(appAndSurface) ?: return null
+        val (rawLabel, explicitSurface) = feedTarget(appAndSurface) ?: return null
+        val app = if (doomscroll && rawLabel == "insta") "instagram" else rawLabel
         val surface = explicitSurface ?: "reels".takeIf { doomscroll && app == "instagram" }
         return FeedRequest(app, surface, FeedMode.CURATE, Reaction.LIKE.takeIf { choice.isNotEmpty() },
             if (invalid) null else BrowseLimit(duration, screens))

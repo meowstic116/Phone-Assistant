@@ -66,12 +66,11 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   haven't liked yet.”** Pip reads the reaction controls Android exposes, skips already-applied
   reactions, and counts a press only after verifying that the control changed. Screens
   with no recognizable controls or only already-applied reactions don't end the scan:
-  Pip keeps going while he can reach new screens. He waits for the feed to settle and
-  uses a shorter, slower swipe when the app's accessibility scroll doesn't move it.
-  Bulk scans move on as soon as two fresh reads verify a stable result and wait longer
-  only when the result is uncertain. Diagnostics shows how long scroll and tap checks took.
-  An unverified tap isn't sent again; Pip can try a different control, but stops after several unverified reactions or scrolls
-  that don't reveal new content. Use **Stop** if you don't want to keep scanning a long feed.
+  Pip keeps going while he can reach new screens. Feed jobs swipe up in the app window
+  instead of using the generic accessibility scroll, which can move carousels sideways.
+  List swipes overlap the previous screen, and Diagnostics shows what moved and how long
+  verification took. An uncertain kudos doesn't end the scan if Pip can still identify the
+  feed; he skips that attempt and reports only confirmed reactions. Use **Stop** to end a long scan.
   For something more selective, try **“Doomscroll Instagram Reels and like any you want.”**
   Pip may pick one like per screen or skip it. He judges only the captions and labels Android
   exposes, not the video or audio. **“Doomscroll Instagram Reels for me”** browses without
