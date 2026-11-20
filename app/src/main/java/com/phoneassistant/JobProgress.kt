@@ -6,6 +6,7 @@ import kotlin.random.Random
 /** Local routing and stopping rules; no model or Android runtime required. */
 internal object JobProgress {
     const val FAILURES_BEFORE_STOP = 3
+    const val FEED_FAILURES_BEFORE_STOP = 5
 
     enum class FeedMode { ALL_MISSING, CURATE }
 
@@ -89,14 +90,16 @@ internal object JobProgress {
     // Whole-command match: "I haven't yet" can refer back to "give kudos" without
     // repeating the verb. Don't expand one-off requests or commands with other actions.
     private val kudosCommand = Regex(
-        "give kudos to $SCOPE $ITEMS (?:${MISSING}given kudos to(?: yet)?|" +
-            "(?:that )?(?:i )?(?:haven't|have not) yet)"
+        "give kudos to $SCOPE $ITEMS(?: (?:${MISSING}given kudos to(?: yet)?|" +
+            "(?:that )?(?:i )?(?:haven't|have not) yet))?"
     )
     private val likeCommand = Regex("like $SCOPE (?:unliked $ITEMS|$ITEMS ${MISSING}liked(?: yet)?)")
     private val openApp = Regex("open(?: up)? (.+?),? and (.+)")
     private val appFirst = Regex("(?:in|on) (.+?), (.+)")
     private val appLast = Regex("(.+) (?:in|on) (.+)")
-    private val browse = Regex("(?:doomscroll(?: through)?|doom scroll(?: through)?|browse|scroll through) (.+)")
+    private val browse = Regex("(doomscroll(?: through)?|doom scroll(?: through)?|browse|scroll through)(?: (.+))?")
+    private val vagueDuration = Regex("(?:,? for (?:a bit|a little bit|a while|a little while|a short while))$")
+    private val surfaceOnApp = Regex("(reels|shorts|feed|posts|videos) (?:on|in) (.+)")
     private val stopSuffix = Regex(",? (?:and (?:then )?|then )stop$")
     private val smallNumbers = (listOf("zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
         "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
@@ -140,7 +143,7 @@ internal object JobProgress {
         it in 1.0..Int.MAX_VALUE.toDouble() && it % 1 == 0.0
     }?.toInt()
 
-    private fun browseRequest(raw: String): FeedRequest? {
+    private fun browseRequest(raw: String, doomscroll: Boolean): FeedRequest? {
         var duration: Long? = null
         var screens: Int? = null
         var countUnit: String? = null
@@ -159,6 +162,9 @@ internal object JobProgress {
                     if (parsed == null || screens != null) invalid = true
                     screens = parsed
                     countUnit = counted.groupValues[2]
+                } else if (vagueDuration.containsMatchIn(text)) {
+                    text = text.replace(vagueDuration, "").removeSuffix(" for me")
+                    continue
                 } else return text
                 text = text.substring(0, (time ?: checkNotNull(counted)).range.first).removeSuffix(" for me")
             }
@@ -168,7 +174,11 @@ internal object JobProgress {
         val choice = parts.getOrNull(1).orEmpty()
         if (parts.size == 2 && !chooseLikes.matches(choice)) return null
         val prefix = countPrefix.matchEntire(target)
-        val rawApp = if (prefix == null) target.removePrefix("on ").removePrefix("in ") else {
+        val rawApp = if (prefix == null) {
+            val named = surfaceOnApp.matchEntire(target)
+            if (named != null) "${named.groupValues[2]} ${named.groupValues[1]}"
+            else target.removePrefix("on ").removePrefix("in ")
+        } else {
             val (amount, items, app) = prefix.destructured
             if (screens != null) invalid = true
             screens = count(amount)
@@ -186,7 +196,8 @@ internal object JobProgress {
         val appAndSurface = if (countedSurface != null && feedSurface.matchEntire(rawApp) == null) {
             "$rawApp $countedSurface"
         } else rawApp
-        val (app, surface) = feedTarget(appAndSurface) ?: return null
+        val (app, explicitSurface) = feedTarget(appAndSurface) ?: return null
+        val surface = explicitSurface ?: "reels".takeIf { doomscroll && app == "instagram" }
         return FeedRequest(app, surface, FeedMode.CURATE, Reaction.LIKE.takeIf { choice.isNotEmpty() },
             if (invalid) null else BrowseLimit(duration, screens))
     }
@@ -205,17 +216,36 @@ internal object JobProgress {
         return app to parts?.groupValues?.get(2)
     }
 
+    private val tabMetadata = Regex("(?:,? tab(?: [0-9]+ of [0-9]+)?)$")
+
+    fun matchesFeedTab(label: String, surface: String): Boolean =
+        normalize(label).trimEnd('.').removeSuffix(", selected").replace(tabMetadata, "").trimEnd(',') == surface
+
+    fun selectedFeedTab(label: String, surface: String): Boolean =
+        normalize(label).trimEnd('.').endsWith(", selected") && matchesFeedTab(label, surface)
+
+    fun feedSurfaceChanged(before: Set<String>, after: Set<String>): Boolean =
+        (after - before).size >= 2 && (before - after).isNotEmpty()
+
     /** Only an explicit whole command enables bulk or discretionary reactions. */
     fun feedRequest(message: String): FeedRequest? {
         val text = normalize(message).trim('"', '“', '”').trim().trimEnd('.', '!', '?')
             .removePrefix("pip, ").removePrefix("please ")
             .removePrefix("can you ").removePrefix("could you ").removePrefix("would you ")
             .removePrefix("please ").removeSuffix(", please").removeSuffix(" please")
-        browse.matchEntire(text)?.let { return browseRequest(it.groupValues[1]) }
+        browse.matchEntire(text)?.let {
+            return browseRequest(it.groupValues[2], it.groupValues[1].startsWith("doom"))
+        }
         val namedFirst = openApp.matchEntire(text) ?: appFirst.matchEntire(text)
         val namedLast = if (namedFirst == null) appLast.matchEntire(text) else null
         val target = namedFirst?.groupValues?.get(1) ?: namedLast?.groupValues?.get(2) ?: return null
-        val command = namedFirst?.groupValues?.get(2) ?: namedLast?.groupValues?.get(1) ?: return null
+        val command = namedFirst?.groupValues?.get(2)?.removePrefix("then ")
+            ?: namedLast?.groupValues?.get(1) ?: return null
+        if (namedFirst != null) browse.matchEntire(command)?.let {
+            val tail = it.groupValues[2]
+            val withApp = if (tail.isBlank()) target else "$target $tail"
+            return browseRequest(withApp, it.groupValues[1].startsWith("doom"))
+        }
         val reaction = when {
             kudosCommand.matches(command) -> Reaction.KUDOS
             likeCommand.matches(command) -> Reaction.LIKE

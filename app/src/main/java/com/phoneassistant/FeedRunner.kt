@@ -25,6 +25,7 @@ internal object FeedRunner {
     private const val SAMPLE_MS = 225L
     private const val SETTLE_SAMPLES = 8
     private const val UNCHANGED_SAMPLES = 6
+    private const val TAB_TRIES = 3
     // A slow or abandoned request can't hold up Stop or the browse deadline. Don't queue
     // more work behind an HTTP call that hasn't responded to interruption yet.
     private val likePicker = ThreadPoolExecutor(0, 1, 15, TimeUnit.SECONDS, SynchronousQueue<Runnable>())
@@ -47,7 +48,7 @@ internal object FeedRunner {
         fun active() = jobActive() && remaining() != 0L
         fun pause(ms: Long) = SystemClock.sleep(minOf(ms, remaining() ?: ms))
         val traversal = JobProgress.FeedTraversal()
-        val reactionFailures = JobProgress.FailureStreak()
+        val reactionFailures = JobProgress.FailureStreak(JobProgress.FEED_FAILURES_BEFORE_STOP)
         var screens = 0
         var applied = 0
         var sawControls = false
@@ -100,6 +101,15 @@ internal object FeedRunner {
             return null
         }
 
+        fun settledWithRetry(window: Int, previousViewport: String? = null): Screen.Snapshot? {
+            repeat(2) {
+                settled(window, previousViewport)?.let { return it }
+                // Give a transient animation/loading pass another chance, without touching it.
+                if (!active() || Screen.inFront() != app.packageName) return null
+            }
+            return null
+        }
+
         val driftPx = 32f * ctx.resources.displayMetrics.density
         fun sameControl(original: Screen.Item, probe: Screen.Item): Boolean =
             original.role == probe.role && original.id == probe.id && when {
@@ -135,22 +145,51 @@ internal object FeedRunner {
         var screen = initialRead() ?: return report("I couldn't read the feed.", "app not in front or unreadable")
         if (plan.surface != null) {
             val surface = plan.surface
-            val before = fingerprint(screen)
-            val tabs = screen.items.filter { JobProgress.normalize(it.label) == surface && !it.editable }
-            // A selected tab or a visible heading identifies the current surface. Otherwise
-            // act only on a clear, matching tab, not an app-specific gesture or guessed spot.
-            if (tabs.none { it.node.isSelected || it.node.isChecked || (Build.VERSION.SDK_INT >= 28 && it.node.isHeading) }) {
-                val tab = tabs.singleOrNull { it.node.isEnabled && it.node.isClickable }
-                    ?: return report("Open $surface in ${app.label} and try again.", "requested feed tab not exposed unambiguously")
+            fun tabs(view: Screen.Snapshot) = view.items.filter { Screen.isFeedTab(it, surface) }
+            fun selected(view: Screen.Snapshot) = view.items.any { Screen.isSelectedFeedTab(it, surface) }
+            fun heading(view: Screen.Snapshot) = Build.VERSION.SDK_INT >= 28 &&
+                tabs(view).any { it.node.isHeading && !it.node.isClickable }
+            fun candidates(view: Screen.Snapshot) = tabs(view)
+                .filter { it.node.isEnabled && it.node.isClickable }.distinctBy { it.bounds }
+            var opened = selected(screen) || (heading(screen) && candidates(screen).isEmpty())
+            for (attempt in 1..TAB_TRIES) {
+                if (opened) break
+                if (!active()) return stopped()
+                val tab = candidates(screen).singleOrNull()
+                if (tab == null) {
+                    if (attempt < TAB_TRIES) {
+                        pause(READ_WAIT_MS)
+                        val fresh = initialRead() ?: break
+                        screen = fresh
+                        opened = selected(screen) || (heading(screen) && candidates(screen).isEmpty())
+                    }
+                    continue
+                }
+                val before = fingerprint(screen)
+                val previousLabels = content(screen).toSet()
+                val hadHeading = heading(screen)
                 val accepted = act { Screen.pressFeedTab(tab, screen, surface) }
                 if (!active()) return stopped()
-                val after = if (accepted) initialRead() else null
-                if (after == null || fingerprint(after) == before) return report(
-                    "I couldn't verify that $surface opened.", "requested tab did not visibly open"
-                )
-                Diag.jobStep(mine, "open $surface", "screen changed after tab press", true)
+                // Some apps keep the same Android window; some open a new one. Take a
+                // fresh read and wait there before deciding whether the tab actually opened.
+                val first = initialRead()
+                val after = first?.let { settledWithRetry(it.windowId) }
+                if (!active()) return stopped()
+                val changed = after != null && fingerprint(after) != before
+                opened = after != null && (selected(after) ||
+                    (accepted && changed && ((!hadHeading && heading(after)) ||
+                        JobProgress.feedSurfaceChanged(previousLabels, content(after).toSet()))))
+                Diag.jobStep(mine, "open $surface", when {
+                    opened -> "requested surface opened"
+                    !accepted -> "matching tab did not accept the click"
+                    changed -> "screen changed, but the requested surface was not confirmed"
+                    else -> "matching tab did not visibly open yet"
+                }, opened)
+                if (after == null || (changed && !opened)) break
                 screen = after
             }
+            if (!opened) return report("I couldn't confirm $surface. Open it in ${app.label} and try again.",
+                "requested feed surface not confirmed")
         }
         session = limit?.session(SystemClock.elapsedRealtime())
         session?.let { browse ->
@@ -167,7 +206,7 @@ internal object FeedRunner {
             onSay("I'll browse ${app.label} for $goal.")
             Diag.jobStep(mine, "browse goal", goal, true)
         }
-        screen = settled(screen.windowId) ?: return if (!active()) stopped() else report(
+        screen = settledWithRetry(screen.windowId) ?: return if (!active()) stopped() else report(
             "The feed hadn't settled, so I left it alone.", "feed not stable before scan"
         )
         while (active()) {
@@ -230,7 +269,7 @@ internal object FeedRunner {
                 if (press == ReactionPress.STALE && active()) {
                     // No tap was sent. After settling, allow one fresh attempt at the same
                     // still-ready control. Never retry a dispatched (even declined) click.
-                    val stable = settled(window)
+                    val stable = settledWithRetry(window)
                     val fresh = stable?.takeIf { expected.isNotEmpty() && content(it) == expected }
                         ?.items?.singleOrNull { state(it) == ReactionState.READY && sameControl(target, it) }
                     if (stable != null && fresh != null) {
@@ -242,7 +281,7 @@ internal object FeedRunner {
                 if (!active()) return stopped()
                 attempted += target
                 if (press == ReactionPress.ACCEPTED) pause(SETTLE_MS)
-                val after = settled(window)
+                val after = settledWithRetry(window)
                 if (!active()) return stopped()
                 val sameContent = after != null && expected.isNotEmpty() && content(after) == expected
                 val controls = after?.items.orEmpty().filter { sameControl(target, it) }
@@ -285,11 +324,11 @@ internal object FeedRunner {
 
             val before = fingerprint(screen)
             var next: Screen.Snapshot? = null
-            repeat(JobProgress.FAILURES_BEFORE_STOP) { attempt ->
+            repeat(JobProgress.FEED_FAILURES_BEFORE_STOP) { attempt ->
                 if (next != null || !active()) return@repeat
-                val moved = act { Screen.scrollFeed(screen, byTouch = attempt == 1, active = ::active) }
+                val moved = act { Screen.scrollFeed(screen, byTouch = attempt % 2 == 1, active = ::active) }
                 if (!active()) return stopped()
-                val below = settled(screen.windowId, previousViewport = before) ?: return if (!active()) stopped() else report(
+                val below = settledWithRetry(screen.windowId, previousViewport = before) ?: return if (!active()) stopped() else report(
                     "The feed was still moving or no longer readable, so I didn't scroll again.", "feed not stable after scroll"
                 )
                 val movement = traversal.movement(before, fingerprint(below))

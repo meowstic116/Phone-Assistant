@@ -325,12 +325,20 @@ object Screen {
         } else ReactionPress.DECLINED
     }
 
+    internal fun isFeedTab(item: Item, surface: String): Boolean = !item.editable && !item.password &&
+        listOf(item.node.text, item.node.contentDescription).any {
+            JobProgress.matchesFeedTab(it?.toString().orEmpty(), surface)
+        }
+
+    internal fun isSelectedFeedTab(item: Item, surface: String): Boolean =
+        isFeedTab(item, surface) && (item.node.isSelected || item.node.isChecked ||
+            listOf(item.node.text, item.node.contentDescription).any {
+                JobProgress.selectedFeedTab(it?.toString().orEmpty(), surface)
+            })
+
     internal fun pressFeedTab(item: Item, screen: Snapshot, surface: String): Boolean = runCatching {
-        val node = item.node
-        targetStillVisible(screen, item) && node.isClickable && !node.isEditable &&
-            listOf(node.text, node.contentDescription).any {
-                JobProgress.normalize(it?.toString().orEmpty()) == surface
-            } && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        targetStillVisible(screen, item) && item.node.isClickable && isFeedTab(item, surface) &&
+            item.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }.getOrDefault(false)
 
     internal fun feedScroller(screen: Snapshot): Item? = screen.items.filter { it.scrollable }
