@@ -11,14 +11,13 @@ internal class PopSheet(val columns: Int = 4, val rows: Int = 5) {
 
     fun popped(index: Int): Boolean = popped[index]
 
-    /** Start at the bottom and zigzag back up, skipping bubbles already tapped. */
-    fun nextBubble(): Int? {
-        for (row in rows - 1 downTo 0) {
-            for (col in 0 until columns) {
-                val x = if ((rows - 1 - row) % 2 == 0) col else columns - 1 - col
-                val index = row * columns + x
-                if (!popped[index]) return index
-            }
+    /** Every remaining bubble has an equal chance, including ones beside Pip. */
+    fun nextBubble(nextInt: (Int) -> Int = kotlin.random.Random.Default::nextInt): Int? {
+        val remaining = total - count
+        if (remaining == 0) return null
+        var target = nextInt(remaining)
+        for (index in popped.indices) {
+            if (!popped[index] && target-- == 0) return index
         }
         return null
     }

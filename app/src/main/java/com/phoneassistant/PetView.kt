@@ -39,6 +39,9 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
             }
         }
 
+    internal var gardenGrip: DragMotion.Point? = null
+        set(value) { field = value; invalidate() }
+
     var facingRight: Boolean = true
         set(value) {
             if (field != value) {
@@ -84,6 +87,64 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         doomscrollCue = cue
         doomscrollAt = now
         invalidate()
+    }
+
+    private class PickupBlend {
+        private var from = 0f
+        private var to = 0f
+        private var at = 0L
+        private var duration = 0L
+
+        fun value(now: Long) = PickupMotion.blend(from, to, now - at, duration)
+        fun set(target: Float, now: Long, durationMs: Long) {
+            from = value(now)
+            to = target
+            at = now
+            duration = durationMs
+        }
+        fun visible(now: Long) = to > 0f || from > 0f && now - at < duration
+    }
+
+    private val pickupLift = PickupBlend()
+    private val pickupCarry = PickupBlend()
+    private var gripped = false
+    private var carriedAt = 0L
+    private var pullAt = 0L
+    private var lastPull = 0f
+
+    internal fun setGrip(held: Boolean) {
+        gripped = held
+        val now = SystemClock.uptimeMillis()
+        val duration = when {
+            !ValueAnimator.areAnimatorsEnabled() -> 0L
+            held -> PickupMotion.LIFT_MS
+            else -> PickupMotion.RELEASE_MS
+        }
+        pickupLift.set(if (held) 1f else 0f, now, duration)
+        if (!held) pickupCarry.set(0f, now, duration)
+        invalidate()
+    }
+
+    internal fun startCarry() {
+        if (!gripped) return
+        carriedAt = SystemClock.uptimeMillis()
+        lastPull = 0f
+        pickupCarry.set(1f, carriedAt, if (ValueAnimator.areAnimatorsEnabled()) PickupMotion.LIFT_MS else 0L)
+        invalidate()
+    }
+
+    internal fun pullPickup(horizontal: Float) {
+        if (!gripped || kotlin.math.abs(horizontal) < 0.01f) return
+        val now = SystemClock.uptimeMillis()
+        lastPull = pullAt(now) * 0.45f + horizontal.coerceIn(-1f, 1f) * 0.55f
+        pullAt = now
+    }
+
+    private fun pullAt(now: Long) = lastPull * (1f - (now - pullAt) / 170f).coerceIn(0f, 1f)
+
+    private val carryInk = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = resources.displayMetrics.density * 1.8f
+        strokeCap = Paint.Cap.ROUND
     }
 
     private val powerInk = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF99EDFF.toInt() }
@@ -189,19 +250,17 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         val eyesChanged = blinking != drewBlinking
         drewBlinking = blinking
 
-        if (blinkStarts || eyesChanged || now - lastDrawAt >= frameGapMs()) {
+        if (blinkStarts || eyesChanged || now - lastDrawAt >= frameGapMs(now)) {
             lastDrawAt = now
             invalidate()
         }
     }
 
     /**
-     * How long may pass between redraws. Walking is the one thing that has to be smooth; a
-     * talking mouth is the only other thing that moves by itself, since every other mood is a
-     * still picture that is drawn when it is set. Everything else gets the idle rate.
+     * Walking and being carried need smooth redraws; talking is slower and idle is cheapest.
      */
-    private fun frameGapMs(): Long = when {
-        walking -> GAP_WALKING
+    private fun frameGapMs(now: Long): Long = when {
+        walking || pickupLift.visible(now) || pickupCarry.visible(now) -> GAP_WALKING
         mood == Mood.TALKING -> GAP_TALKING
         else -> GAP_IDLE
     }
@@ -227,9 +286,15 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         val groundY = height - dp(2f)
         val cx = width / 2f
 
-        val attention = if (doomscrollCue == DoomscrollMotion.Cue.CLEAR) null else
-            DoomscrollMotion.pose(doomscrollCue, now - doomscrollAt, ValueAnimator.areAnimatorsEnabled())
         val transition = powerPose
+        val pickup = if (transition == null && (pickupLift.visible(now) || pickupCarry.visible(now))) {
+            PickupMotion.pose(pickupLift.value(now), pickupCarry.value(now), now - carriedAt, pullAt(now),
+                ValueAnimator.areAnimatorsEnabled())
+        } else null
+        val carry = pickup?.carry ?: 0f
+        val carried = carry > 0.12f
+        val attention = if (carried || doomscrollCue == DoomscrollMotion.Cue.CLEAR) null else
+            DoomscrollMotion.pose(doomscrollCue, now - doomscrollAt, ValueAnimator.areAnimatorsEnabled())
         val powerLayer = if (transition != null) {
             drawPowerSpark(canvas, cx, groundY, transition)
             if (transition.opacity <= 0f) return
@@ -240,23 +305,32 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
             layer
         } else -1
 
+        val pickupLayer = if (pickup != null) {
+            val layer = canvas.save()
+            canvas.translate(0f, -dp(pickup.lift))
+            canvas.scale(pickup.scale, pickup.scale, cx, height * 0.5f)
+            layer
+        } else -1
+
+        val onFloor = sitting && !carried
         val bob = when {
-            sitting -> 0f
+            carry > 0f -> dp(carry)
+            onFloor -> 0f
             walking -> kotlin.math.abs(kotlin.math.sin(t * 9f)) * dp(2.4f)
             else -> kotlin.math.sin(t * 2.1f) * dp(1.1f)
         }
         val tilt = when {
-            sitting -> 0f
+            onFloor -> 0f
             walking -> kotlin.math.sin(t * 9f) * 5f
             else -> kotlin.math.sin(t * 1.3f) * 1.4f
         }
-        val bodyCenterY = if (sitting) {
+        val bodyCenterY = if (onFloor) {
             groundY - dp(13f) - bodyH / 2f
         } else {
             groundY - legH - bodyH / 2f - bob
         }
 
-        if (sitting) {
+        if (onFloor) {
             // Folded legs: just a flat little puddle under him.
             bodyRect.set(cx - dp(24f), groundY - dp(8f), cx + dp(24f), groundY)
             canvas.drawRoundRect(bodyRect, dp(4f), dp(4f), rimPaint.fillOnly())
@@ -268,17 +342,22 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
             val leftLift = if (walking) maxOf(0f, stepPhase) * dp(3.5f) else 0f
             val rightLift = if (walking) maxOf(0f, -stepPhase) * dp(3.5f) else 0f
 
-            bodyRect.set(cx - dp(11f), legTop - leftLift, cx - dp(11f) + legW, groundY - leftLift)
-            canvas.drawRoundRect(bodyRect, dp(3f), dp(3f), rimPaint.fillOnly())
-            bodyRect.set(cx + dp(4f), legTop - rightLift, cx + dp(4f) + legW, groundY - rightLift)
-            canvas.drawRoundRect(bodyRect, dp(3f), dp(3f), rimPaint.fillOnly())
+            fun foot(left: Float, lift: Float, angle: Float) {
+                val saved = if (angle != 0f) canvas.save() else -1
+                if (saved != -1) canvas.rotate(angle, left + legW / 2f, legTop)
+                bodyRect.set(left, legTop - lift, left + legW, groundY - lift - dp(carry * 0.7f))
+                canvas.drawRoundRect(bodyRect, dp(3f), dp(3f), rimPaint.fillOnly())
+                if (saved != -1) canvas.restoreToCount(saved)
+            }
+            foot(cx - dp(11f), leftLift, pickup?.leftFoot ?: 0f)
+            foot(cx + dp(4f), rightLift, pickup?.rightFoot ?: 0f)
         }
 
         canvas.save()
         canvas.translate(cx, bodyCenterY)
         val poseTilt = tilt + gardenLean * 10f
         canvas.rotate((if (facingRight) poseTilt else -poseTilt) + toyReachSide * toyReach * 4f +
-            doomscrollSide * (attention?.lean ?: 0f))
+            doomscrollSide * (attention?.lean ?: 0f) + (pickup?.tilt ?: 0f))
 
         // Antenna with a tiny light that brightens while thinking.
         canvas.drawLine(0f, -bodyH / 2f, 0f, -bodyH / 2f - dp(6f), rimPaint)
@@ -297,7 +376,8 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         )
         canvas.drawRoundRect(screenRect, dp(7f), dp(7f), screenPaint)
 
-        drawFace(canvas, t, now, attention)
+        if (carried) drawCarryFace(canvas, carry) else drawFace(canvas, t, now, attention)
+        if (carry > 0f) drawCarryArms(canvas, carry, pickup?.tilt ?: 0f)
         if (attention != null && attention.arm > 0f) drawScrollFlick(canvas, attention)
         if (toyReach > 0f) {
             val end = toyReachSide * dp(20f + 8f * toyReach)
@@ -309,13 +389,38 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
             canvas.drawCircle(end - toyReachSide * dp(2.5f), armY - dp(7f), dp(1.2f), toyInk)
             canvas.drawCircle(end, armY + dp(6f), dp(1f), toyInk)
         }
-        if (gardenLean > 0f) {
-            val side = if (facingRight) 1f else -1f
-            canvas.drawLine(side * dp(17f), dp(8f), side * dp(27f), dp(12f - gardenLean * 9f), facePaint)
-            canvas.drawCircle(side * dp(27f), dp(12f - gardenLean * 9f), dp(2.5f), accentPaint)
-        }
         canvas.restore()
+        gardenGrip?.let { grip ->
+            val shoulder = cx + WateringPose.direction(facingRight) * dp(17f)
+            // Body tilt is decorative; the hand stays on the can's fixed pivot.
+            canvas.drawLine(shoulder, bodyCenterY + dp(8f), grip.x, grip.y, facePaint)
+            canvas.drawCircle(grip.x, grip.y, dp(2.5f), accentPaint)
+        }
+        if (pickupLayer != -1) canvas.restoreToCount(pickupLayer)
         if (powerLayer != -1) canvas.restoreToCount(powerLayer)
+    }
+
+    private fun drawCarryFace(canvas: Canvas, carry: Float) {
+        val eyeY = screenRect.top + screenRect.height() * 0.34f
+        for (side in -1..1 step 2) {
+            val x = side * dp(9.5f)
+            canvas.drawOval(x - dp(3.4f), eyeY - dp(4f), x + dp(3.4f), eyeY + dp(4f), accentPaint)
+            canvas.drawCircle(x + side * dp(0.7f), eyeY + dp(0.5f), dp(1.3f), screenPaint)
+        }
+        val mouthY = screenRect.top + screenRect.height() * 0.65f
+        canvas.drawOval(-dp(2.1f + carry * 0.8f), mouthY - dp(2.1f),
+            dp(2.1f + carry * 0.8f), mouthY + dp(2.7f), facePaint.fillOnly())
+    }
+
+    private fun drawCarryArms(canvas: Canvas, carry: Float, tilt: Float) {
+        carryInk.color = accentPaint.color
+        carryInk.alpha = (255 * carry).toInt()
+        for (side in -1..1 step 2) {
+            val handX = side * dp(22f + 4.5f * carry)
+            val handY = dp(8f - (4f + side * tilt * 0.45f) * carry)
+            canvas.drawLine(side * dp(22f), dp(10f), handX, handY, carryInk)
+            canvas.drawCircle(handX, handY, dp(1.8f), carryInk)
+        }
     }
 
     private fun drawScrollFlick(canvas: Canvas, pose: DoomscrollMotion.Pose) {

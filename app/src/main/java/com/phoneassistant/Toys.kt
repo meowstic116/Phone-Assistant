@@ -393,8 +393,8 @@ object Toys {
                     if (plant.bring(host.stageWidth() * 0.18f, y)) {
                         Outcome(
                             true,
-                            "you put a pot plant on their screen and will water it yourself if they leave it. " +
-                                "they can help by tapping; each stage takes three waterings."
+                            "you put a pot plant on their screen and will water it slowly. " +
+                                "they must tap to water it at least once before it can bloom; each stage takes three waterings."
                         )
                     } else {
                         Outcome(

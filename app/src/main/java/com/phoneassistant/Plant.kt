@@ -1,7 +1,11 @@
 package com.phoneassistant
 
+import android.animation.ValueAnimator
 import android.graphics.Canvas
+import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Path
+import android.graphics.Shader
 import android.os.SystemClock
 import com.phoneassistant.PlantGrowth.Companion.WATER_PER_STAGE
 import kotlin.math.abs
@@ -13,14 +17,9 @@ import kotlin.math.abs
 class Plant(host: PropHost) : Prop(host) {
 
     override val boxW = 119f
-    override val boxH = 144f
+    override val boxH = 144f + PlantDiscovery.LABEL_SPACE_DP
 
-    private enum class Flower(val display: String, val main: Int, val light: Int, val petals: Int) {
-        COSMOS("Pocket Cosmos", 0xFFFF74A9.toInt(), 0xFFFFB2CF.toInt(), 6),
-        STAR("Lemon Star", 0xFFFFB14D.toInt(), 0xFFFFE18A.toInt(), 8),
-        BLUEBELL("Blueberry Bell", 0xFF8D90FF.toInt(), 0xFFB5D5FF.toInt(), 5)
-    }
-    private val flower = Flower.values().random()
+    private val flower = PlantCollection.nextSpecies(context)
     private val growth = PlantGrowth()
     private var hurried = 0
     private var lastTap = -1_000L
@@ -28,10 +27,11 @@ class Plant(host: PropHost) : Prop(host) {
     private var dropUntil = 0L
     private var growthAt = 0L
     private var lastAutoAt = 0L
-    private var nextPourAt = 0L
+    private var nextPourAt = bornAt + PlantGrowth.FIRST_POUR_DELAY_MS
     private var pour: Float? = null
     private var canOnLeft = true
     private var firstPour = true
+    private var discovery = false
 
     internal fun tendingThrough(now: Long): Boolean =
         if (growth.blooming) now - growthAt < 3_400L else lastAutoAt != 0L && now - lastAutoAt < 1_250L
@@ -42,6 +42,10 @@ class Plant(host: PropHost) : Prop(host) {
     private val outline = stroke(0xFF352445.toInt(), 2.1f)
     private val pot = fill(0xFFFF8B99.toInt())
     private val potShade = fill(0xFFD45582.toInt())
+    private val goldPot = fill(0xFFFFCA4F.toInt())
+    private val goldShade = fill(0xFFB97A1C.toInt())
+    private val goldRim = fill(0xFFFFEBA1.toInt())
+    private val goldRing = stroke(0xFFFFEFA7.toInt(), 1.35f)
     private val rim = fill(0xFFFFC69D.toInt())
     private val soil = fill(0xFF59405C.toInt())
     private val stem = stroke(0xFF21534D.toInt(), 4.5f)
@@ -61,9 +65,15 @@ class Plant(host: PropHost) : Prop(host) {
     private val potPath = Path()
     private val canPaint = fill(0xFF62DFD0.toInt())
     private val bug = fill(0xFFFF6C78.toInt())
-    private val label = text(0xFF352445.toInt(), 7.3f, true)
-    private val petalX = FloatArray(flower.petals) { kotlin.math.cos(it * 2 * Math.PI / flower.petals).toFloat() }
-    private val petalY = FloatArray(flower.petals) { kotlin.math.sin(it * 2 * Math.PI / flower.petals).toFloat() }
+    private val namePill = fill(0xF0222035.toInt())
+    private val label = text(0xFFF2EFFB.toInt(), 9.6f, true)
+    private val celebrationInk = fill(flower.discoveryColor)
+    private val sweepWidth = dp(26f)
+    private val sweepMatrix = Matrix()
+    private fun shimmer(base: Int) = LinearGradient(0f, 0f, sweepWidth, 0f,
+        intArrayOf(base, 0xFFFFFFFF.toInt(), base), floatArrayOf(0f, 0.48f, 1f), Shader.TileMode.CLAMP)
+    private val normalShimmer = shimmer(label.color)
+    private val discoveryShimmer = shimmer(flower.discoveryColor)
 
     override fun onTap(x: Float, y: Float) {
         val now = SystemClock.uptimeMillis()
@@ -83,24 +93,27 @@ class Plant(host: PropHost) : Prop(host) {
             return
         }
         hurried = 0
-        if (growth.water(now)) {
+        if (growth.water(now, PlantGrowth.Waterer.USER)) {
             dropUntil = now + 460L
             invalidate()
         }
     }
 
     private fun tryPour(now: Long) {
-        if (held || !growth.thirsty || now < nextPourAt || now - lastTap < 450L ||
-            width <= 0 || now - bornAt < 500L) return
+        if (held || !growth.pipMayWater || now < nextPourAt || now - lastTap < 450L || width <= 0) return
         nextPourAt = now + 160L
-        val cx = centreX
-        val left = cx - dp(57f)
-        val right = cx + dp(57f)
+        val cx = posX + width / 2f
+        val potTop = posY + potTop()
+        val scale = dp(1f)
+        val leftGrip = WateringPose.grip(cx, potTop, true, scale)
+        val rightGrip = WateringPose.grip(cx, potTop, false, scale)
+        val left = WateringPose.stance(leftGrip, true, scale).x
+        val right = WateringPose.stance(rightGrip, false, scale).x
         val halfPet = host.petWidth() / 2f
         val useLeft = left >= halfPet && (right > host.stageWidth() - halfPet ||
             host.petCentreX() <= cx)
-        val feetY = posY + height - dp(6f)
-        if (host.petWaterPlant(this, if (useLeft) left else right, feetY, facesRight = useLeft,
+        val grip = if (useLeft) leftGrip else rightGrip
+        if (host.petWaterPlant(this, grip.x, grip.y, facesRight = useLeft,
                 progress = { frame ->
                     canOnLeft = useLeft
                     pour = frame
@@ -108,10 +121,15 @@ class Plant(host: PropHost) : Prop(host) {
                 }, watered = {
                     val landed = SystemClock.uptimeMillis()
                     lastAutoAt = landed
-                    nextPourAt = landed + 170L
-                    if (!leaving && growth.water(landed) && firstPour) {
-                        firstPour = false
-                        host.say(Lines.pick(PIP_WATER_LINES))
+                    nextPourAt = landed + PlantGrowth.PIP_POUR_PAUSE_MS
+                    if (!leaving && growth.water(landed, PlantGrowth.Waterer.PIP)) {
+                        if (firstPour) {
+                            firstPour = false
+                            host.say("a little water from me. give the pot a tap to add yours.")
+                        } else if (growth.waitingForUser) {
+                            host.say("your turn. one more drop and it’ll bloom.")
+                        }
+                        invalidate()
                     }
                 })) lastAutoAt = now
     }
@@ -146,14 +164,17 @@ class Plant(host: PropHost) : Prop(host) {
         if (growth.advance(now)) {
             growthAt = now
             if (growth.blooming) {
+                discovery = PlantCollection.bloom(context, flower).first
                 host.feel(PetView.Mood.HAPPY, 3_000L)
-                host.say("*sets down the can* a ${flower.display}. look, the ladybug approves.")
+                host.say(if (discovery) "${flower.display}! a new bloom for your collection."
+                    else "*sets down the can* a ${flower.display}. look, the ladybug approves.")
             } else {
                 host.feel(PetView.Mood.HAPPY, 900L)
                 host.say(GROW_LINES[growth.stage - 1])
             }
         }
-        if (growthAt > 0L && now - growthAt <= (if (growth.blooming) 3_250L else 460L)) invalidate()
+        if (growthAt > 0L && (now - growthAt <= (if (growth.blooming) 3_250L else 460L) ||
+                growth.blooming && ValueAnimator.areAnimatorsEnabled())) invalidate()
         tryPour(now)
     }
 
@@ -169,11 +190,12 @@ class Plant(host: PropHost) : Prop(host) {
         canvas.drawPath(path, centre)
     }
 
+    private fun potTop() = height - dp(43f + PlantDiscovery.LABEL_SPACE_DP)
+
     override fun onDraw(canvas: Canvas) {
-        val h = height.toFloat()
         val cx = width / 2f
-        val potTop = h - dp(43f)
-        val foot = h - dp(6f)
+        val potTop = potTop()
+        val foot = height - dp(6f + PlantDiscovery.LABEL_SPACE_DP)
         canvas.drawOval(cx - dp(35f), foot - dp(4f), cx + dp(35f), foot + dp(5f), shadow)
 
         // Lavender soil beneath a bouncy silhouette that grows from sprout to bloom.
@@ -211,13 +233,18 @@ class Plant(host: PropHost) : Prop(host) {
             canvas.drawOval(cx - dp(5f), stemTop - dp(10f), cx + dp(5f), stemTop + dp(5f), outline)
         }
         if (growth.blooming) {
-            for (i in petalX.indices) {
-                val x = cx + dp(12f) * petalX[i]
-                val y = stemTop + dp(12f) * petalY[i]
-                canvas.drawCircle(x, y, dp(8.3f), if (i % 2 == 0) petal else petalLight)
+            for (i in 0 until flower.petals) {
+                val x = cx + dp(12f) * flower.petalX[i]
+                val y = stemTop + dp(12f) * flower.petalY[i]
+                BloomArt.petal(canvas, flower.shape, x, y, dp(8.3f), flower.angle(i),
+                    if (i % 2 == 0) petal else petalLight, path)
                 canvas.drawCircle(x - dp(2.4f), y - dp(2.7f), dp(1.5f), shine)
             }
-            canvas.drawCircle(cx, stemTop, dp(8f), centre)
+            if (flower == PlantSpecies.GOLDEN) {
+                canvas.drawCircle(cx, stemTop, dp(27f), goldRing)
+                sparkle(canvas, cx, stemTop - dp(27f), 3.7f)
+            }
+            canvas.drawCircle(cx, stemTop, dp(8f), if (flower == PlantSpecies.GOLDEN) goldRim else centre)
             canvas.drawCircle(cx, stemTop, dp(8f), outline)
             canvas.drawCircle(cx - dp(2.7f), stemTop, dp(1.15f), eyes)
             canvas.drawCircle(cx + dp(2.7f), stemTop, dp(1.15f), eyes)
@@ -234,13 +261,14 @@ class Plant(host: PropHost) : Prop(host) {
         potPath.lineTo(cx - dp(15f), foot)
         potPath.quadTo(cx - dp(24f), foot, cx - dp(27f), potTop)
         potPath.close()
-        canvas.drawPath(potPath, pot)
+        val golden = growth.blooming && flower == PlantSpecies.GOLDEN
+        canvas.drawPath(potPath, if (golden) goldPot else pot)
         canvas.save()
         canvas.clipPath(potPath)
-        canvas.drawOval(cx - dp(27f), foot - dp(9f), cx + dp(34f), foot + dp(13f), potShade)
+        canvas.drawOval(cx - dp(27f), foot - dp(9f), cx + dp(34f), foot + dp(13f), if (golden) goldShade else potShade)
         canvas.restore()
         canvas.drawPath(potPath, outline)
-        canvas.drawRoundRect(cx - dp(29f), potTop - dp(1f), cx + dp(29f), potTop + dp(8f), dp(4f), dp(4f), rim)
+        canvas.drawRoundRect(cx - dp(29f), potTop - dp(1f), cx + dp(29f), potTop + dp(8f), dp(4f), dp(4f), if (golden) goldRim else rim)
         canvas.drawLine(cx - dp(22f), potTop + dp(2f), cx - dp(9f), potTop + dp(2f), stemShine)
         val faceY = potTop + dp(17f)
         canvas.drawCircle(cx - dp(7f), faceY, dp(2.2f), eyes)
@@ -253,7 +281,16 @@ class Plant(host: PropHost) : Prop(host) {
             canvas.drawCircle(x, foot - dp(5f), dp(2.4f),
                 if (i < growth.water || growth.blooming) droplet else meterEmpty)
         }
-        if (growth.blooming) centred(canvas, flower.display, cx, potTop + dp(3.4f), label)
+        if (growth.blooming) {
+            val elapsed = now - growthAt
+            val animated = ValueAnimator.areAnimatorsEnabled()
+            if (discovery && animated && elapsed < PlantDiscovery.CELEBRATION_MS) {
+                celebrate(canvas, cx, stemTop, elapsed / PlantDiscovery.CELEBRATION_MS.toFloat())
+            }
+            drawLabel(canvas, flower.display, cx, foot, elapsed, animated)
+        } else if (growth.waitingForUser) {
+            drawLabel(canvas, "Tap for the last drop", cx, foot, 0L, animated = false)
+        }
         if (dropUntil > 0L) {
             for (i in 0..2) {
                 val x = cx + dp(9f + i * 8f)
@@ -268,6 +305,85 @@ class Plant(host: PropHost) : Prop(host) {
         pour?.let { drawPour(canvas, cx, potTop, it) }
     }
 
+    /** Fixed to the pot, not the leaning stem or the moving ladybug. */
+    private fun drawLabel(canvas: Canvas, title: String, cx: Float, foot: Float, elapsed: Long, animated: Boolean) {
+        val half = label.measureText(title) / 2f
+        val midY = foot + dp(16f)
+        canvas.drawRoundRect(cx - half - dp(7f), midY - dp(7f), cx + half + dp(7f), midY + dp(7f),
+            dp(7f), dp(7f), namePill)
+        label.color = if (discovery) flower.discoveryColor else 0xFFF2EFFB.toInt()
+        val sweep = if (animated) PlantDiscovery.shimmer(elapsed) else null
+        if (sweep != null) {
+            val shader = if (discovery) discoveryShimmer else normalShimmer
+            sweepMatrix.setTranslate(cx - half - sweepWidth + sweep * (2f * half + sweepWidth), 0f)
+            shader.setLocalMatrix(sweepMatrix)
+            label.shader = shader
+        }
+        centred(canvas, title, cx, midY, label)
+        label.shader = null
+    }
+
+    /** First blooms only: pink petals orbit, golden rays burst, blue bells send out dew. */
+    private fun celebrate(canvas: Canvas, cx: Float, y: Float, progress: Float) {
+        val t = progress.coerceIn(0f, 1f)
+        celebrationInk.alpha = (245f * (1f - t) * minOf(1f, t * 8f + 0.35f)).toInt()
+        when (flower) {
+            PlantSpecies.COSMOS -> for (i in 0..6) {
+                val angle = i * 2 * Math.PI / 7 + t * Math.PI * 1.3
+                val x = cx + dp(24f + 23f * t) * kotlin.math.cos(angle).toFloat()
+                val petalY = y + dp(16f + 12f * t) * kotlin.math.sin(angle).toFloat()
+                canvas.save()
+                canvas.rotate((angle * 180 / Math.PI).toFloat(), x, petalY)
+                canvas.drawOval(x - dp(3.7f), petalY - dp(1.9f), x + dp(3.7f), petalY + dp(1.9f), celebrationInk)
+                canvas.restore()
+            }
+            PlantSpecies.STAR -> for (i in 0..7) {
+                val angle = i * Math.PI / 4
+                val x = cx + dp(23f + 25f * t) * kotlin.math.cos(angle).toFloat()
+                val pointY = y + dp(23f + 11f * t) * kotlin.math.sin(angle).toFloat()
+                val ray = dp(3.9f - 1.8f * t)
+                canvas.save()
+                canvas.rotate(45f + 80f * t, x, pointY)
+                canvas.drawRect(x - ray, pointY - dp(0.95f), x + ray, pointY + dp(0.95f), celebrationInk)
+                canvas.drawRect(x - dp(0.95f), pointY - ray, x + dp(0.95f), pointY + ray, celebrationInk)
+                canvas.restore()
+            }
+            PlantSpecies.BLUEBELL -> for (i in 0..7) {
+                val x = cx + dp((i - 3.5f) * (5.5f + 7f * t))
+                val dropY = y + dp(3f - 24f * kotlin.math.sin(t * Math.PI).toFloat() + 32f * t * t + (i % 3) * 5f)
+                canvas.drawOval(x - dp(1.8f), dropY - dp(3f), x + dp(1.8f), dropY + dp(3f), celebrationInk)
+            }
+            PlantSpecies.GOLDEN -> {
+                val radius = dp(25f + 27f * t)
+                goldRing.alpha = celebrationInk.alpha
+                val ringY = y + dp(11f)
+                val ry = radius * 0.67f
+                canvas.drawOval(cx - radius, ringY - ry, cx + radius, ringY + ry, goldRing)
+                canvas.drawOval(cx - radius * 0.79f, ringY - ry * 0.79f,
+                    cx + radius * 0.79f, ringY + ry * 0.79f, goldRing)
+                goldRing.alpha = 255
+                for (i in 0..7) {
+                    val angle = i * Math.PI / 4 - 1.2 * t
+                    val x = cx + radius * kotlin.math.cos(angle).toFloat()
+                    val yy = y + dp(11f) + radius * 0.66f * kotlin.math.sin(angle).toFloat()
+                    BloomArt.petal(canvas, PetalShape.DIAMOND, x, yy, dp(4.4f - t * 2f), 90f, celebrationInk, path)
+                }
+            }
+            else -> {
+                // Each silhouette and petal count carries through to its discovery particles.
+                val turn = (if (flower.petals % 2 == 0) 1 else -1) * t * 1.6f
+                for (i in 0 until flower.petals) {
+                    val angle = i * 2 * Math.PI / flower.petals + turn
+                    val spread = 24f + 22f * t * (if (i % 2 == 0) 1f else 0.65f)
+                    val x = cx + dp(spread) * kotlin.math.cos(angle).toFloat()
+                    val yy = y + dp(8f) + dp(spread * 0.64f) * kotlin.math.sin(angle).toFloat()
+                    BloomArt.petal(canvas, flower.shape, x, yy, dp(3.8f - 1.3f * t),
+                        (angle * 180 / Math.PI).toFloat(), celebrationInk, path)
+                }
+            }
+        }
+    }
+
     private fun drawLadybug(canvas: Canvas, cx: Float, stemTop: Float, now: Long) {
         val t = ((now - growthAt) / 2_200f).coerceIn(0f, 1f)
         val x = cx + dp(45f - t * 25f)
@@ -279,14 +395,15 @@ class Plant(host: PropHost) : Prop(host) {
     }
 
     private fun drawPour(canvas: Canvas, cx: Float, potTop: Float, fraction: Float) {
-        val toward = if (canOnLeft) 1f else -1f
-        val x = cx - toward * dp(35f)
-        val y = potTop - dp(29f)
-        val tip = kotlin.math.sin(fraction * Math.PI).toFloat()
+        val scale = dp(1f)
+        val grip = WateringPose.grip(cx, potTop, canOnLeft, scale)
+        val angle = WateringPose.tilt(fraction)
         canvas.save()
-        canvas.translate(x, y)
-        canvas.scale(toward, 1f)
-        canvas.rotate(tip * 33f)
+        // Rotate the can around the back of its handle, where Pip is holding it.
+        canvas.translate(grip.x, grip.y)
+        canvas.scale(WateringPose.direction(canOnLeft), 1f)
+        canvas.rotate(angle)
+        canvas.translate(dp(WateringPose.HANDLE_FROM_CAN), 0f)
         canvas.drawOval(-dp(18f), -dp(9f), dp(2f), dp(7f), outline)
         path.reset()
         path.moveTo(dp(4f), 0f)
@@ -301,10 +418,11 @@ class Plant(host: PropHost) : Prop(host) {
         canvas.drawCircle(0f, 0f, dp(3.4f), shine)
         canvas.restore()
         if (fraction in 0.19f..0.94f) {
+            val nozzle = WateringPose.spout(grip, canOnLeft, scale, angle)
             for (i in 0..5) {
                 val t = (fraction * 5f + i * 0.17f) % 1f
-                val dx = x + toward * dp(21f + t * 12f)
-                val dy = y + dp(4f + t * t * 24f)
+                val dx = nozzle.x + (cx - nozzle.x) * t
+                val dy = nozzle.y + (potTop - nozzle.y) * t * t
                 canvas.drawOval(dx - dp(1.5f), dy - dp(2.4f), dx + dp(1.5f), dy + dp(2.4f), droplet)
             }
         }
@@ -312,14 +430,14 @@ class Plant(host: PropHost) : Prop(host) {
 
     override fun describe(): String =
         if (growth.blooming) "a blooming ${flower.display} with a tiny ladybug"
-        else "a ${flower.display} at growth stage ${growth.stage} of ${PlantGrowth.MAX_STAGE}, watered by Pip or by tapping"
+        else "a ${flower.display} at growth stage ${growth.stage} of ${PlantGrowth.MAX_STAGE}. " +
+            when {
+                growth.waitingForUser -> "The user needs to tap the pot for the last drop."
+                growth.wateredByUser -> "The user already watered it; Pip can help with the rest."
+                else -> "Pip helps water it, but the user must water it at least once for it to bloom."
+            }
 
     companion object {
-        val PIP_WATER_LINES = listOf(
-            "*tips the can* they put me in charge of one leaf. big day.",
-            "a little water. I'm being responsible, briefly.",
-            "watering shift. very small department."
-        )
         val OVERWATER_LINES = listOf(
             "ease off. it's a plant, not a swimming pool.",
             "that's plenty. it's not a fish."

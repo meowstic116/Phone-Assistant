@@ -44,13 +44,6 @@ class PipSettingsActivity : Activity() {
         content.requestFocus()
 
         text("Pip settings", 30f, R.color.text)
-        addPermissions()
-        heading(getString(R.string.settings_personal_heading))
-        button(getString(R.string.settings_personality)) { startActivity(Intent(this, PersonaActivity::class.java)) }
-        button(getString(R.string.settings_memory)) { startActivity(Intent(this, MemoryActivity::class.java)) }
-        button(getString(R.string.settings_logins)) { startActivity(Intent(this, VaultActivity::class.java)) }
-        addApiSettings()
-
         heading("Movement & startup")
         option("Wander around the screen", Option.WANDER)
         text("Pip can still move to clear his chat box or keyboard, or to use a toy.")
@@ -60,18 +53,18 @@ class PipSettingsActivity : Activity() {
         }
         bootHint = text("")
 
-        val toyHeading = heading("Toys")
-        option("Allow toys", Option.TOYS)
-        toySwitches += option("Bring out toys on his own", Option.SPONTANEOUS)
-        text("Turn this off to keep enabled toys available only when you ask.")
-        for (toy in Toy.values()) {
-            toySwitches += toggle(toy.label, PipSettings.toySelected(this, toy)) {
-                PipSettings.setToy(this, toy, it)
-                OverlayService.behaviorSettingsChanged()
-            }
-        }
-        text("Pip can pick Doomscroll on his own only when your Home screen is clear. Turn off “Bring out toys on his own” to make it manual-only.")
-        button("Painting gallery") { startActivity(Intent(this, PaintingGalleryActivity::class.java)) }
+        heading("Phone access")
+        option(getString(R.string.permissions_access_switch), Option.ACCESSIBILITY)
+        accessHint = text("")
+
+        heading("Memory")
+        option("Learn from chat", Option.LEARN_FROM_CHAT)
+        text("Let Pip save useful details from your conversations. Turning this off leaves existing notes and direct requests to remember something unchanged.")
+
+        val toyHeading = addToySettings()
+        addPersonalityAndData()
+        addPermissions()
+        addApiSettings()
         button(getString(R.string.debug_options)) { startActivity(Intent(this, DebugOptionsActivity::class.java)) }
         button("Done") { finish() }
         if (savedInstanceState == null && intent.getBooleanExtra(EXTRA_SHOW_TOYS, false)) {
@@ -79,18 +72,43 @@ class PipSettingsActivity : Activity() {
         }
     }
 
+    private fun addToySettings(): TextView {
+        val toyHeading = heading("Toys")
+        option("Allow toys", Option.TOYS)
+        toySwitches += option("Bring out toys on his own", Option.SPONTANEOUS)
+        text("Turn this off to keep enabled toys available only when you ask.")
+        text("Pip can pick Doomscroll on his own only when your Home screen is clear.")
+        for (toy in Toy.values()) {
+            toySwitches += toggle(toy.label, PipSettings.toySelected(this, toy)) {
+                PipSettings.setToy(this, toy, it)
+                OverlayService.behaviorSettingsChanged()
+            }
+        }
+        button("Painting gallery") { startActivity(Intent(this, PaintingGalleryActivity::class.java)) }
+        return toyHeading
+    }
+
+    private fun addPersonalityAndData() {
+        heading(getString(R.string.settings_personal_heading))
+        button(getString(R.string.settings_personality)) { startActivity(Intent(this, PersonaActivity::class.java)) }
+        button(getString(R.string.settings_memory)) { startActivity(Intent(this, MemoryActivity::class.java)) }
+        button(getString(R.string.settings_logins)) { startActivity(Intent(this, VaultActivity::class.java)) }
+    }
+
     private fun addPermissions() {
         heading(getString(R.string.permissions_heading))
         permission(R.string.permissions_overlay, { Settings.canDrawOverlays(this) }, R.string.permissions_overlay_info) {
             PipPermissions.openOverlay(this)
         }
-        option(getString(R.string.permissions_access_switch), Option.ACCESSIBILITY)
-        accessHint = text("")
         permission(R.string.permissions_access_android, { ImeWatch.enabled(this) }) {
             PipPermissions.openAccessibility(this)
         }
         permission(R.string.permissions_usage, { AppWatcher.hasPermission(this) }, R.string.permissions_usage_info) {
             PipPermissions.openUsage(this)
+        }
+        permission(R.string.permissions_now_playing, { PipMediaAccess.enabled(this) },
+            R.string.permissions_now_playing_info, R.string.permissions_now_playing_manage) {
+            PipPermissions.openMediaAccess(this)
         }
         permission(R.string.permissions_notifications, { PipPermissions.notificationsEnabled(this) },
             R.string.permissions_notifications_info, R.string.permissions_notifications_manage) {
@@ -160,7 +178,7 @@ class PipSettingsActivity : Activity() {
         accessHint.text = when {
             !PipSettings.enabled(this, Option.ACCESSIBILITY) ->
                 "Pip won't read other apps or use accessibility to keep clear of their keyboards. Android's separate permission is unchanged."
-            !ImeWatch.enabled(this) -> "Also turn on Phone Assistant in Android accessibility settings to use this."
+            !ImeWatch.enabled(this) -> "Turn on Phone Assistant in Android accessibility settings under Permissions below."
             else -> "Lets Pip work other apps when you ask and stay clear of their keyboards."
         }
         val toysAllowed = PipSettings.enabled(this, Option.TOYS)

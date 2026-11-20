@@ -53,4 +53,7 @@
     <string name="debug_setup_replay_notice">Your current API settings are filled in. Any API changes are saved only when you finish setup.</string>
     <string name="debug_setup_exit">Back to Debug options</string>
     <string name="debug_back">Back to Pip settings</string>
+    <string name="permissions_now_playing">Pip · Now playing access</string>
+    <string name="permissions_now_playing_info">Optional. Android calls this Notification access. Pip checks active media controls when you ask what’s playing. Pip does not read notification messages or send track metadata to the API.</string>
+    <string name="permissions_now_playing_manage">Manage Now playing access</string>
 </resources>

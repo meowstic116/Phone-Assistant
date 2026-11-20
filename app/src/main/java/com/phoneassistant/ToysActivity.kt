@@ -3,7 +3,11 @@ package com.phoneassistant
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.res.ColorStateList
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -21,6 +25,11 @@ import android.widget.Toast
 class ToysActivity : Activity() {
     private data class Art(val description: Int, val action: Int, val icon: Int, val badge: Int)
     private data class Card(val action: Button, val hint: TextView)
+    private data class PlantRow(val icon: BloomIcon, val name: TextView, val count: TextView)
+    private val plantRows = mutableMapOf<PlantSpecies, PlantRow>()
+    private lateinit var plantProgress: TextView
+    private lateinit var goldenHint: TextView
+    private val plantChanges = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> refreshCollection() }
 
     private lateinit var status: TextView
     private lateinit var tidy: Button
@@ -56,6 +65,8 @@ class ToysActivity : Activity() {
         page.addView(label(32f, R.color.text, heading = true).apply { setText(R.string.toys_title) }, row(12))
         page.addView(label(15f).apply { setText(R.string.toys_intro) }, row(4))
 
+        page.addView(buildPlantCollection(), row(14))
+
         val controls = column(12).apply { background = rounded(getColor(R.color.surface), 16) }
         status = label(14f, R.color.accent)
         controls.addView(status, row(bottom = 6))
@@ -83,14 +94,100 @@ class ToysActivity : Activity() {
     override fun onResume() {
         super.onResume()
         OverlayService.onPowerStateChanged = powerChanged
+        PlantCollection.preferences(this).registerOnSharedPreferenceChangeListener(plantChanges)
+        refreshCollection()
         refresh()
         status.postDelayed(countdown, 1_000L)
     }
 
     override fun onPause() {
+        PlantCollection.preferences(this).unregisterOnSharedPreferenceChangeListener(plantChanges)
         if (OverlayService.onPowerStateChanged === powerChanged) OverlayService.onPowerStateChanged = null
         status.removeCallbacks(countdown)
         super.onPause()
+    }
+
+    private fun buildPlantCollection(): View {
+        val section = column(14).apply { background = rounded(getColor(R.color.surface), 16) }
+        section.addView(label(20f, R.color.text, heading = true).apply {
+            setText(R.string.plant_collection_title)
+        }, row())
+        plantProgress = label(13f, R.color.accent)
+        section.addView(plantProgress, row(top = 4, bottom = 4))
+        for (species in PlantSpecies.values()) {
+            if (species == PlantSpecies.GOLDEN) {
+                section.addView(label(12f, R.color.accent, heading = true).apply {
+                    setText(R.string.plant_collection_bonus)
+                    letterSpacing = 0.08f
+                }, row(top = 12))
+            }
+            val icon = BloomIcon(species)
+            val name = label(14f).apply { text = species.display }
+            val count = label(13f).apply { gravity = Gravity.END }
+            val tile = LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(40)
+                setPadding(dp(9), dp(4), dp(9), dp(4))
+                background = rounded(getColor(R.color.surfaceAlt), 10)
+                addView(icon, LinearLayout.LayoutParams(dp(24), dp(24)))
+                addView(name, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                    marginStart = dp(8)
+                    marginEnd = dp(5)
+                })
+                addView(count, LinearLayout.LayoutParams(-2, -2))
+            }
+            section.addView(tile, row(top = 5))
+            plantRows[species] = PlantRow(icon, name, count)
+        }
+        goldenHint = label(13f)
+        section.addView(goldenHint, row(top = 6))
+        refreshCollection()
+        return section
+    }
+
+    private fun refreshCollection() {
+        val counts = PlantCollection.counts(this)
+        val regular = PlantSelection.regular
+        plantProgress.text = getString(R.string.plant_collection_regular_progress,
+            regular.count { counts.getValue(it) > 0L }, regular.size)
+        goldenHint.setText(if (counts.getValue(PlantSpecies.GOLDEN) > 0L) R.string.plant_collection_golden_found
+            else if (PlantSelection.goldenEligible(counts)) R.string.plant_collection_golden_eligible
+            else R.string.plant_collection_golden_locked)
+        for ((species, entry) in plantRows) {
+            val times = counts.getValue(species)
+            val unlocked = times > 0L
+            entry.icon.unlocked = unlocked
+            entry.name.setTextColor(if (unlocked) species.discoveryColor else getColor(R.color.textDim))
+            entry.count.setTextColor(getColor(if (unlocked) R.color.text else R.color.textDim))
+            entry.count.text = getString(R.string.plant_collection_count, times)
+            entry.count.contentDescription = if (unlocked) entry.count.text else getString(R.string.plant_collection_locked)
+        }
+    }
+
+    private inner class BloomIcon(private val species: PlantSpecies) : View(this@ToysActivity) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val path = Path()
+        var unlocked = false
+            set(value) {
+                if (field == value) return
+                field = value
+                invalidate()
+            }
+
+        init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
+
+        override fun onDraw(canvas: Canvas) {
+            val r = minOf(width, height) / 2f
+            val x = width / 2f
+            val y = height / 2f
+            for (i in 0 until species.petals) {
+                paint.color = if (!unlocked) 0xFF697181.toInt() else if (i % 2 == 0) species.main else species.light
+                BloomArt.petal(canvas, species.shape, x + r * 0.49f * species.petalX[i],
+                    y + r * 0.49f * species.petalY[i], r * 0.32f, species.angle(i), paint, path)
+            }
+            paint.color = if (unlocked) 0xFFFFDB7D.toInt() else 0xFF969EAD.toInt()
+            canvas.drawCircle(x, y, r * 0.35f, paint)
+        }
     }
 
     private fun addCard(page: LinearLayout, toy: Toy) {

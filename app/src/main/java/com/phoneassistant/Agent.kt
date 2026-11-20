@@ -71,6 +71,7 @@ object Agent {
         onSay: (Int, String) -> Unit,
         onDone: (Int, String) -> Unit,
         onGesture: (Rect?) -> Boolean,
+        approach: JobApproachGate,
         onFeedMotion: (Int, DoomscrollMotion.Cue) -> Unit,
         originalRequest: String = request,
         fromClearHome: Boolean = false
@@ -80,6 +81,12 @@ object Agent {
         Diag.jobStarted(mine, originalRequest)
         val appContext = ctx.applicationContext
         worker.execute {
+            if (!approach.await { lifetime.active(mine) }) {
+                if (complete(mine, "Pip did not reach his task position")) {
+                    onDone(mine, "I couldn’t get into position, so I didn’t start the task.")
+                }
+                return@execute
+            }
             Screen.withGestureGuard({ lifetime.active(mine) }, { bounds ->
                 val clear = onGesture(bounds)
                 if (bounds != null && !clear) {

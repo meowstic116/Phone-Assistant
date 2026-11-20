@@ -31,7 +31,7 @@
     <string name="toy_canvas_description">Watch Pip paint a picture, stroke by stroke. Tap the finished painting to hear what he thinks of it.</string>
     <string name="toy_soccer_description">Tap the ball to shoot and Pip kicks it back. First to three goals wins, or the match ends after 90 seconds.</string>
     <string name="toy_bubbles_description">Pop a sheet of 20 bubbles together. Tap any bubble, or watch Pip hop across the sheet and pop them himself.</string>
-    <string name="toy_plant_description">Help Pip grow a flower. Tap the pot to water it, or watch him bring over his little watering can.</string>
+    <string name="toy_plant_description">Grow a flower together. Pip waters it slowly; tap the pot to add water at least once before it can bloom.</string>
     <string name="toy_doomscroll_description">Pip watches and swipes through Instagram Reels for 30 seconds to 5 minutes. He won’t like reels from this button.</string>
     <string name="toy_lemonade_action">Open stand</string>
     <string name="toy_canvas_action">Start painting</string>
@@ -39,4 +39,12 @@
     <string name="toy_bubbles_action">Pop bubbles</string>
     <string name="toy_plant_action">Grow a plant</string>
     <string name="toy_doomscroll_action">Watch Reels</string>
+    <string name="plant_collection_title">Plant Collection</string>
+    <string name="plant_collection_regular_progress">%1$d of %2$d regular plants discovered</string>
+    <string name="plant_collection_bonus">RARE BONUS</string>
+    <string name="plant_collection_golden_locked">Grow all ten regular plants at least once to unlock the chance to grow a Golden Bloom.</string>
+    <string name="plant_collection_golden_eligible">All ten regular plants discovered! Every new pot has a 1 in 10 chance of growing a Golden Bloom.</string>
+    <string name="plant_collection_golden_found">Golden Bloom discovered! It can still appear in new pots.</string>
+    <string name="plant_collection_count">Grown %1$d</string>
+    <string name="plant_collection_locked">Not yet discovered. Grown 0 times.</string>
 </resources>

@@ -18,7 +18,7 @@ import kotlin.math.abs
 class BubbleWrap(host: PropHost) : Prop(host) {
 
     override val boxW = 150f
-    override val boxH = 174f
+    override val boxH = 154f
 
     private val game = PopSheet()
     private val cols = game.columns
@@ -26,11 +26,11 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     private val total = game.total
     private val burstAt = LongArray(total)
     private var removeAt = 0L
-    private var nextPipPop = 0L
+    private var nextPipPop = bornAt + FIRST_HOP_DELAY_MS
     private var lastHopAt = 0L
 
-    // Most sheets finish before the usual 15-second timeout. If play is already going,
-    // let the remaining jumps and the victory line finish instead of cutting him off.
+    // If play is already going, let the remaining jumps and the victory line finish
+    // instead of cutting him off at the usual idle timeout.
     internal fun playingThrough(now: Long): Boolean =
         removeAt > now || (lastHopAt != 0L && now - lastHopAt <= 1_000L && game.count < total)
 
@@ -38,9 +38,6 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     private var sheetHeight = -1f
     private val sheetEdge = stroke(0xFF392557.toInt(), 2.2f)
     private val streak = stroke(0x9CFFFFFF.toInt(), 2.4f)
-    private val labelInk = text(0xFF3B285E.toInt(), 11f, true)
-    private val countInk = text(0xFF3B285E.toInt(), 8f, true)
-    private val header = fill(0xFFFFE187.toInt())
     private val light = stroke(0xAAFFF9E7.toInt(), 1.2f)
     private val confetti = intArrayOf(0xFFFF76A3.toInt(), 0xFFFFD16A.toInt(), 0xFF71E6C0.toInt(), 0xFF7ECAFF.toInt())
 
@@ -66,11 +63,10 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     private val area = RectF()
 
     private fun pad(): Float = dp(9f)
-    private fun gridTop(): Float = dp(29f)
+    private fun gridTop(): Float = pad()
     private fun gridBottom(): Float = height - dp(9f)
     private fun cellW(): Float = (width - pad() * 2f) / cols
     private fun cellH(): Float = (gridBottom() - gridTop()) / rows
-    private var counter = "0 / $total"
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
@@ -88,10 +84,6 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         area.set(dp(1f), dp(1f), w - dp(1f), h - dp(1f))
         canvas.drawRoundRect(area, dp(16f), dp(16f), sheet)
         canvas.drawRoundRect(area, dp(16f), dp(16f), sheetEdge)
-        canvas.drawRoundRect(dp(10f), dp(7f), w - dp(10f), dp(25f), dp(8f), dp(8f), header)
-        centred(canvas, "POP CLUB", dp(49f), dp(16f), labelInk)
-        centred(canvas, counter, w - dp(34f), dp(16f), countInk)
-        canvas.drawLine(dp(11f), dp(29f), w - dp(11f), dp(29f), light)
         canvas.drawLine(dp(12f), h - dp(5f), w - dp(12f), h - dp(5f), streak)
 
         val cw = cellW()
@@ -191,7 +183,6 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     private fun pop(index: Int, now: Long, byPip: Boolean) {
         val milestone = game.pop(index, byPip) ?: return
         burstAt[index] = now
-        counter = "${game.count} / $total"
         invalidate()
 
         if (milestone == Milestone.COMPLETE) {
@@ -226,7 +217,7 @@ class BubbleWrap(host: PropHost) : Prop(host) {
             return
         }
 
-        if (!held && width > 0 && height > 0 && now >= nextPipPop && now - bornAt >= 450L) {
+        if (!held && width > 0 && height > 0 && now >= nextPipPop) {
             game.nextBubble()?.let { jumpTo(it, now) }
         }
 
@@ -251,7 +242,7 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         nextPipPop = now + 100L // Don't retry on every frame if another activity has his attention.
         if (host.petHopOn(this, cx, cy) {
                 val landedAt = SystemClock.uptimeMillis()
-                nextPipPop = landedAt + 100L
+                nextPipPop = landedAt + HOP_PAUSE_MS
                 if (!leaving && !held && abs(posX - sheetX) < dp(1f) && abs(posY - sheetY) < dp(1f)) {
                     lastHopAt = landedAt
                     pop(index, landedAt, byPip = true)
@@ -306,6 +297,9 @@ class BubbleWrap(host: PropHost) : Prop(host) {
             "no bubbles left. my feet would like a tiny round of applause.",
             "and that's the last hop. I retire undefeated in packaging."
         )
+
+        private const val FIRST_HOP_DELAY_MS = 750L
+        private const val HOP_PAUSE_MS = 380L
 
         /** How long the little burst stays on screen after a pop. */
         private const val BURST_MS = 260L
