@@ -86,10 +86,12 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   for clarification or the app/tab and obstacle for recovery, not the screen tree or chat history.
   Say **“Doomscroll Instagram Reels for 2 minutes”** or **“Doomscroll 10 reels on
   Instagram”** to set a time or count. The timer starts when the feed opens. A count means
-  distinct reel screens Android exposes, including the first one, not full videos played.
+  distinct reel screens Android exposes, not full videos played. Pip skips disclosed
+  Instagram ads without waiting, liking, or counting them toward the limit.
   With neither limit specified (including “for a little bit”), Pip picks a random duration
   from 30 seconds to 5 minutes. Pip waits for an exposed playback end or loop before
-  deciding whether to like and swipe; if playback isn't exposed, he pauses for about 18
+  deciding whether to like and swipe. With accessible playback data, he checks roughly
+  four times a second to catch the restart. If playback isn't exposed, he pauses for about 18
   seconds instead. Missing or conflicting playback readings aren't treated as a loop.
   Changing captions or counters alone don't prove that the next reel
   opened. If the reel is hard to identify but the viewer is still readable, Pip can finish
