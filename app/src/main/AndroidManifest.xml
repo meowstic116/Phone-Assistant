@@ -75,6 +75,11 @@
             android:label="@string/toys_menu" />
 
         <activity
+            android:name=".PlantCollectionActivity"
+            android:exported="false"
+            android:label="@string/plant_collection_title" />
+
+        <activity
             android:name=".PaintingGalleryActivity"
             android:exported="false" />
 
