@@ -136,9 +136,9 @@ class OverlayService : Service(), PropHost {
             else if (VoiceSettings.enabled(context)) PipVoice.reply(context, text)
         }
 
-        internal fun heardVoice(text: String, stillListening: () -> Boolean, done: () -> Unit) {
+        internal fun heardVoice(text: String, stillListening: () -> Boolean, done: (WakeFeedback) -> Unit) {
             val service = instance
-            if (service == null || service.ending || !running) done()
+            if (service == null || service.ending || !running) done(WakeFeedback.BUSY)
             else service.handleVoice(text, stillListening, done)
         }
 
@@ -275,18 +275,8 @@ class OverlayService : Service(), PropHost {
     private lateinit var petParams: WindowManager.LayoutParams
     private var pet: PetView? = null
 
-    private class VoicedReply(val text: String) {
-        val presentation = ReplyBubbleState(text.length, spoken = true)
-    }
-    private var voicedReply: VoicedReply? = null
-    private var bubble: ReplyBubbleView? = null
-    private var bubbleParams: WindowManager.LayoutParams? = null
-    private data class BubbleExit(val view: ReplyBubbleView, val animation: ValueAnimator)
-    private var bubbleExit: BubbleExit? = null
-    private var bubbleHideAt = 0L
-
-    private var thinking: ThinkingView? = null
-    private var thinkingParams: WindowManager.LayoutParams? = null
+    private var voicedReply: ReplyBubbleState? = null
+    private lateinit var speechBubble: SpeechBubble
 
     private var voiceDraft: Pair<String, Long>? = null
     private var inputBar: LinearLayout? = null
@@ -445,6 +435,10 @@ class OverlayService : Service(), PropHost {
         instance = this
         running = true
         windowManager = getSystemService(WindowManager::class.java)
+        speechBubble = SpeechBubble(this, windowManager, limits = {
+            (screenW - dpInt(12f)).coerceIn(1, dpInt(232f).coerceAtLeast(1)) to
+                (screenH - topInset - bottomInset - dpInt(12f)).coerceIn(1, dpInt(280f).coerceAtLeast(1))
+        }, place = ::placePanel)
 
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(
@@ -466,6 +460,7 @@ class OverlayService : Service(), PropHost {
 
         // A restarted service should know whether anyone is actually looking.
         paused = getSystemService(PowerManager::class.java)?.isInteractive != true
+        speechBubble.setScreenHidden(!screenUsable())
 
         // Every start, extension and early end reconciles the timer with the new deadline.
         Quiet.onChanged = { settleBreak() }
@@ -533,8 +528,8 @@ class OverlayService : Service(), PropHost {
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         if (ending || pet == null) return
-        clearBubbleExit()
         readDisplayBounds()
+        speechBubble.reflow()
         petDrag?.cancel()
         cancelToyHop()
         cancelGardenVisit()
@@ -774,8 +769,8 @@ class OverlayService : Service(), PropHost {
         doomscrollJob = false
         automaticDoomscrollJob = false
         pet?.showDoomscrollCue(DoomscrollMotion.Cue.CLEAR)
-        hideThinking()
-        hideBubble()
+        voicedReply = null
+        speechBubble.clear()
         hideHud()
         props.toList().forEach(::dropProp)
         resetToIdle()
@@ -797,6 +792,7 @@ class OverlayService : Service(), PropHost {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        voicedReply = null
         WakeListenService.stop(this)
         PipVoice.stop()
         cancelPowerAnimation()
@@ -805,8 +801,7 @@ class OverlayService : Service(), PropHost {
         petDrag = null
         props.forEach { it.cancelDrag() }
         handler.removeCallbacksAndMessages(null)
-        hideBubble()
-        hideThinking()
+        speechBubble.clear()
         removeInputBar()
         hideJobBar()
         // The panel is its own window and nothing else owns it, so it goes with the service.
@@ -878,7 +873,7 @@ class OverlayService : Service(), PropHost {
     private fun replyHasFloor(): Boolean {
         val now = SystemClock.uptimeMillis()
         // The wait has a ceiling: a request that never answers must not mute the toys all day.
-        return voicedReply != null || (awaitingReply && now - replyAskedAt < 15_000L) || now < replyUntil
+        return voicedReply != null || speechBubble.showingConversation || (awaitingReply && now - replyAskedAt < 15_000L) || now < replyUntil
     }
 
     /** From here until the reply lands, only the model speaks. */
@@ -1324,7 +1319,7 @@ class OverlayService : Service(), PropHost {
         if (stillDue()) endStill()
         val still = standingStill()
 
-        if (bubble != null && bubbleParams?.alpha != 0f && now >= bubbleHideAt) fadeBubble()
+        speechBubble.onFrame()
 
         keyboardWatch -= frameMs
         if (keyboardWatch <= 0L) {
@@ -1599,18 +1594,7 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun repositionPanels() {
-        bubble?.let { view ->
-            bubbleParams?.let { params ->
-                placePanel(params.width, params.height, params)
-                runCatching { windowManager.updateViewLayout(view, params) }
-            }
-        }
-        thinking?.let { view ->
-            thinkingParams?.let { params ->
-                placePanel(params.width, params.height, params)
-                runCatching { windowManager.updateViewLayout(view, params) }
-            }
-        }
+        speechBubble.reposition()
         positionInputBar()
     }
 
@@ -1623,79 +1607,24 @@ class OverlayService : Service(), PropHost {
     private fun bubbleLifetime(text: String): Long =
         (2200L + text.length * 55L).coerceIn(3_000L, 14_000L)
 
-    private fun openBubble(text: String, end: Int = text.length) {
-        ChatRecovery.attempt(Unit, { Diag.chatFailure("reply bubble", it) }) { attachBubble(text, end) }
-    }
-
-    private fun attachBubble(text: String, end: Int) {
-        clearBubbleExit()
-        val widthLimit = (screenW - dpInt(12f)).coerceIn(1, dpInt(232f).coerceAtLeast(1))
-        val view = ReplyBubbleView(this, text, widthLimit)
-        view.measure(View.MeasureSpec.makeMeasureSpec(widthLimit, View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-        val width = view.measuredWidth.coerceIn(dpInt(48f).coerceAtMost(widthLimit), widthLimit)
-        val height = view.measuredHeight.coerceAtLeast(dpInt(26f))
-        view.reveal(end)
-
-        val params = WindowManager.LayoutParams(
-            width, height, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.START }
-        placePanel(width, height, params)
-        if (overlayDucked) params.alpha = 0f
-
-        windowManager.addView(view, params)
-        bubble = view
-        bubbleParams = params
-        bubbleHideAt = SystemClock.uptimeMillis() + bubbleLifetime(text)
-
-        // Enter at full opacity. If Android drops the animation (for example during a
-        // window relayout), the bubble is still visible instead of being left transparent.
-        if (ValueAnimator.areAnimatorsEnabled()) {
-            val above = params.y + height <= posY
-            view.pivotX = (posX + petW / 2f - params.x).coerceIn(0f, width.toFloat())
-            view.pivotY = if (above) height.toFloat() else 0f
-            view.scaleX = 0.96f
-            view.scaleY = 0.96f
-            view.translationY = dp(if (above) 6f else -6f)
-            view.animate().scaleX(1f).scaleY(1f).translationY(0f)
-                .setDuration(185L).setInterpolator(DecelerateInterpolator(1.65f)).start()
-        }
-    }
-
     private fun captionReply(text: String, handsFree: Boolean = false) {
-        val reply = VoicedReply(text)
-        val presentation = reply.presentation
-        voicedReply = reply
-
-        fun render() {
-            hideThinking()
-            val view = bubble
-            if (view != null) view.reveal(presentation.visibleEnd)
-            else openBubble(text, presentation.visibleEnd)
-        }
-
-        fun holdText(ms: Long) {
-            bubbleHideAt = SystemClock.uptimeMillis() + ms
-            replyUntil = bubbleHideAt
-        }
+        val presentation = ReplyBubbleState(text.length, spoken = true)
+        voicedReply = presentation
 
         fun onCaption(end: Int?) {
-            if (voicedReply !== reply || ending) return
+            if (voicedReply !== presentation || ending) return
             val previous = presentation.visibleEnd
             val changed = presentation.reveal(end)
             if (end == null) {
                 voicedReply = null
-                if (changed || previous == 0) render()
+                val unseen = text.length - previous
+                val hold = if (previous > 0 && unseen <= 16) 3_000L else bubbleLifetime(text.substring(previous))
+                if (changed || previous == 0) speechBubble.text(text, readMs = hold, conversation = true)
+                else speechBubble.hold(hold)
+                replyUntil = SystemClock.uptimeMillis() + hold
                 if (previous == 0) startTalking()
-                if (previous < text.length) {
-                    val unseen = text.length - previous
-                    holdText(if (previous > 0 && unseen <= 16) 3_000L else bubbleLifetime(text.substring(previous)))
-                } else if (bubbleHideAt == Long.MAX_VALUE) holdText(3_000L)
             } else if (changed) {
-                render()
-                bubbleHideAt = Long.MAX_VALUE
+                speechBubble.text(text, presentation.visibleEnd, conversation = true)
                 idleUntil = SystemClock.uptimeMillis() + SPEAKING_PAUSE_MS
                 if (previous == 0 || pet?.mood == PetView.Mood.TALKING || pet?.mood == PetView.Mood.NEUTRAL) {
                     startTalking(950L)
@@ -1707,62 +1636,17 @@ class OverlayService : Service(), PropHost {
             Diag.chatFailure("start spoken reply", it)
             onCaption(null)
         }) { PipVoice.reply(this, text, ::onCaption, allowLocked = handsFree) }
-        // Keep the same animated dots through synthesis. Playback or the voice layer's
-        // bounded failure callback decides when to replace them, not a separate UI timer.
-        if (voicedReply === reply && presentation.waiting) showThinking()
-    }
-
-    private fun fadeBubble() {
-        val view = bubble ?: return
-        clearBubbleExit()
-        bubble = null
-        bubbleParams = null
-        bubbleHideAt = 0L
-        view.animate().cancel()
-        // Fix the entry transform before exiting. The exit only changes opacity; shrinking
-        // or translating here made the text jump when Pip started walking again.
-        view.scaleX = 1f
-        view.scaleY = 1f
-        view.translationY = 0f
-        if (!ValueAnimator.areAnimatorsEnabled() || !view.isAttachedToWindow) {
-            runCatching { windowManager.removeViewImmediate(view) }
-            return
-        }
-        val animation = ValueAnimator.ofFloat(view.alpha, 0f).apply {
-            duration = 180L
-            interpolator = LinearInterpolator()
-            addUpdateListener { view.alpha = it.animatedValue as Float }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    if (bubbleExit?.view !== view) return
-                    bubbleExit = null
-                    runCatching { windowManager.removeViewImmediate(view) }
-                }
-            })
-        }
-        bubbleExit = BubbleExit(view, animation)
-        animation.start()
-    }
-
-    private fun clearBubbleExit() {
-        val outgoing = bubbleExit ?: return
-        bubbleExit = null
-        outgoing.animation.cancel()
-        runCatching { windowManager.removeViewImmediate(outgoing.view) }
+        // The existing dots remain in the same window until actual playback or text fallback.
+        if (voicedReply === presentation && presentation.waiting) speechBubble.thinking()
     }
 
     private fun hideBubble() {
-        clearBubbleExit()
-        if (voicedReply?.presentation?.waiting == true) hideThinking()
+        if (voicedReply?.waiting == true) speechBubble.clearThinking()
         voicedReply = null
-        bubble?.let { view ->
-            view.animate().cancel()
-            runCatching { windowManager.removeView(view) }
-        }
-        bubble = null
-        bubbleParams = null
-        bubbleHideAt = 0L
+        speechBubble.clearText()
     }
+
+    private fun hideThinking() = speechBubble.clearThinking()
 
     // ---------------------------------------------------------------- thinking
 
@@ -1775,49 +1659,7 @@ class OverlayService : Service(), PropHost {
         arrive = null
         pet?.walking = false
         feel(PetView.Mood.THINKING, 0L)
-        showThinking()
-    }
-
-    private fun showThinking() {
-        if (thinking != null) return
-        val width = dpInt(52f)
-        val height = dpInt(26f)
-        val view = ThinkingView(this)
-
-        val params = WindowManager.LayoutParams(
-            width,
-            height,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-        }
-        placePanel(width, height, params)
-
-        if (overlayDucked) params.alpha = 0f
-        if (runCatching { windowManager.addView(view, params) }.isSuccess) {
-            thinking = view
-            thinkingParams = params
-            view.alpha = 0f
-            view.scaleX = 0.9f
-            view.scaleY = 0.9f
-            view.animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .setDuration(140L)
-                .setInterpolator(DecelerateInterpolator(1.8f))
-                .start()
-        }
-    }
-
-    private fun hideThinking() {
-        thinking?.let { view -> runCatching { windowManager.removeView(view) } }
-        thinking = null
-        thinkingParams = null
+        speechBubble.thinking()
     }
 
     // --------------------------------------------------------------------- chat
@@ -1863,12 +1705,12 @@ class OverlayService : Service(), PropHost {
             pet?.walking = false
         }
         idleUntil = SystemClock.uptimeMillis() + SPEAKING_PAUSE_MS
-        hideBubble()
+        voicedReply = null // Callbacks from an old utterance cannot replace the new panel.
+        val line = text.ifBlank { "(silence)" }
         if (finalReply && VoiceSettings.enabled(this)) {
-            captionReply(text, handsFree)
+            captionReply(line, handsFree)
         } else {
-            hideThinking()
-            openBubble(text)
+            speechBubble.text(line, readMs = bubbleLifetime(line), conversation = finalReply)
             startTalking()
         }
     }
@@ -2218,11 +2060,15 @@ class OverlayService : Service(), PropHost {
         if (!screenUsable()) PipVoice.reply(this, "Unlock your phone and tap Send to confirm.", allowLocked = true)
     }
 
-    private fun handleVoice(text: String, stillListening: () -> Boolean, done: () -> Unit) {
-        if (!stillListening() || Agent.running() || inputField != null || awaitingReply) { done(); return }
+    private fun handleVoice(text: String, stillListening: () -> Boolean, done: (WakeFeedback) -> Unit) {
+        val waiting = awaitingReply && SystemClock.uptimeMillis() - replyAskedAt < 15_000L
+        if (!stillListening() || Agent.running() || waiting) { done(WakeFeedback.BUSY); return }
+        if (!inputField?.text.isNullOrBlank()) { done(WakeFeedback.DRAFT); return }
+        // Tapping Pip first opens an empty composer. It shouldn't swallow a spoken request.
+        if (inputBar != null) closeChat()
         if (JobProgress.routePhoneLocally(text) || PhoneContext.mayInspect(text) || NowPlaying.requested(text)) {
             confirmVoiceRequest(text)
-            done()
+            done(WakeFeedback.REVIEW)
             return
         }
         val turn = ChatTurns.begin()
@@ -2232,6 +2078,7 @@ class OverlayService : Service(), PropHost {
         // on an unconfirmed voice turn. Only a later tap on the ordinary Send button can act.
         AssistantBrain.reply(this, null, turn = turn, voiceMessage = text) { ok, reply ->
             handler.post {
+                var result = WakeFeedback.BUSY
                 try {
                     if (instance !== this || ending || !ChatTurns.isCurrent(turn)) return@post
                     awaitingReply = false
@@ -2240,6 +2087,7 @@ class OverlayService : Service(), PropHost {
                         hideThinking()
                         leaveAttention()
                         confirmVoiceRequest(text)
+                        result = WakeFeedback.REVIEW
                         return@post
                     }
                     ChatRecovery.attempt(Unit, { Diag.chatFailure("voice chat history", it) }) {
@@ -2254,7 +2102,8 @@ class OverlayService : Service(), PropHost {
                         leaveAttention()
                         PipVoice.reply(this, reply, allowLocked = true)
                     }
-                } finally { done() }
+                    result = if (ok) WakeFeedback.REPLIED else WakeFeedback.CHAT_FAILED
+                } finally { done(result) }
             }
         }
     }
@@ -2580,15 +2429,10 @@ class OverlayService : Service(), PropHost {
         pet?.let { if (!duckLayout(it, petParams, overlaps(it), DUCK_ALPHA)) ok = false }
         if (!setHudDucked(hud?.let(::overlaps) == true)) ok = false
         props.forEach { prop -> if (!duckLayout(prop, prop.params, overlaps(prop))) ok = false }
-        (fading + listOfNotNull(bubble, bubbleExit?.view, thinking)).forEach { view ->
+        if (!speechBubble.setDucked(overlayDucked)) ok = false
+        fading.forEach { view ->
             val params = view.layoutParams as? WindowManager.LayoutParams
-            if (params != null) {
-                val wasHidden = params.alpha == 0f
-                if (!duckLayout(view, params, overlaps(view), alwaysUntouchable = true)) ok = false
-                if (view === bubble && wasHidden && params.alpha > 0f && bubbleHideAt != Long.MAX_VALUE) {
-                    bubbleHideAt = maxOf(bubbleHideAt, SystemClock.uptimeMillis() + 3_000L)
-                }
-            }
+            if (params != null && !duckLayout(view, params, overlaps(view), alwaysUntouchable = true)) ok = false
         }
         return ok
     }
@@ -2860,6 +2704,7 @@ class OverlayService : Service(), PropHost {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
+                    speechBubble.setScreenHidden(true)
                     if (voicedReply != null) {
                         hideBubble()
                         hideThinking()
@@ -2893,6 +2738,7 @@ class OverlayService : Service(), PropHost {
                     if (ending) return
                     val resume = paused
                     paused = false
+                    speechBubble.setScreenHidden(!screenUsable())
                     pet?.animating = true
                     if (resume) handler.post(tick)
                     settleBreak()

@@ -3,6 +3,8 @@ package com.phoneassistant
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import com.k2fsa.sherpa.onnx.EndpointConfig
+import com.k2fsa.sherpa.onnx.EndpointRule
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
@@ -77,7 +79,8 @@ internal object WakeModel {
         check(ready(ctx))
         val root = directory(ctx)
         fun path(name: String) = File(root, name).absolutePath
-        return OnlineRecognizer(config = OnlineRecognizerConfig(modelConfig = OnlineModelConfig(
+        return OnlineRecognizer(config = OnlineRecognizerConfig(endpointConfig = EndpointConfig(rule2 = EndpointRule(true, 0.9f, 0f)),
+            modelConfig = OnlineModelConfig(
             transducer = OnlineTransducerModelConfig(path("encoder.onnx"), path("decoder.onnx"), path("joiner.onnx")),
             tokens = path("tokens.txt"), modelType = "zipformer2", numThreads = 1)))
     }

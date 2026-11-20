@@ -36,6 +36,8 @@ class PipSettingsActivity : Activity() {
     private lateinit var kokoroStatus: TextView
     private lateinit var kokoroAction: Button
     private lateinit var wakeAction: Button
+    private lateinit var wakeStatus: TextView
+    private lateinit var wakeSpeak: Button
     private val kokoroChanged: () -> Unit = { refreshVoiceSummary() }
     private var refreshApiIfChanged: () -> Unit = {}
     private val permissionStatuses = mutableListOf<() -> Unit>()
@@ -104,6 +106,12 @@ class PipSettingsActivity : Activity() {
         heading("Talk to Pip")
         text("Say ‘Pip’ or ‘Hey Pip’, then speak in English. Listening runs on your phone, even after locking. It can use battery and stops when you stop Pip or tap Stop listening. Audio is not saved or sent; recognized chat uses your chat API. Phone actions require unlocking and tapping Send. Turn on Read Pip’s replies aloud to hear answers while locked.")
         wakeAction = button("") { changeWakeListening() }
+        wakeStatus = text("")
+        wakeSpeak = button("Speak now (no wake word)") {
+            if (!WakeListenService.speakNow()) {
+                Toast.makeText(this, "Wait until Pip is ready to listen.", Toast.LENGTH_SHORT).show()
+            }
+        }
         refreshWakeAction()
 
         val toyHeading = addToySettings()
@@ -119,6 +127,10 @@ class PipSettingsActivity : Activity() {
 
     private fun refreshWakeAction() {
         if (!::wakeAction.isInitialized) return
+        val status = WakeListenService.feedback
+        wakeStatus.text = status.message
+        wakeSpeak.visibility = if (WakeListenService.running) View.VISIBLE else View.GONE
+        wakeSpeak.isEnabled = status.canSpeak
         wakeAction.isEnabled = !WakeModel.busy && (KokoroVoice.supported() || WakeListenService.running)
         wakeAction.text = when {
             WakeListenService.running -> "Stop listening for Pip"
