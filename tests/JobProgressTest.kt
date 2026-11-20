@@ -802,8 +802,41 @@ fun main() {
     check(wakePhrase.accept("Pip.", 100) == null && wakePhrase.awaiting)
     check(wakePhrase.accept("How are you?", 5_000) == "How are you?" && !wakePhrase.awaiting)
     check(wakePhrase.accept("Pip", 10_000) == null && wakePhrase.awaiting)
-    check(wakePhrase.expire(18_001) && !wakePhrase.awaiting)
-    check(wakePhrase.accept("This must not send after expiry", 19_000) == null)
+    check(wakePhrase.expire(20_001) && !wakePhrase.awaiting)
+    check(wakePhrase.accept("This must not send after expiry", 21_000) == null)
+    check(wakePhrase.hasAddress("“HEY — P. I. P, tell me a joke”"))
+    check(wakePhrase.accept("Hey Peep — what time is it?", 23_000) == "what time is it?")
+    check(wakePhrase.accept("Peep the window", 24_000) == null)
+    check(!wakePhrase.hasAddress("I said Hey Pip yesterday"))
+    wakePhrase.arm(25_000) // The explicit Speak now tap only arms one message.
+    check(wakePhrase.accept("Tell me a joke", 26_000) == "Tell me a joke")
+    check(wakePhrase.accept("Not part of the same request", 26_500) == null)
+    wakePhrase.arm(27_000)
+    check(wakePhrase.accept("Too late", 38_000) == null)
+
+    val bubbleClock = SpeechBubbleTiming()
+    bubbleClock.hold(null)
+    repeat(500) { bubbleClock.advance(it * 33L, visible = true, animate = true) }
+    check(bubbleClock.opacity == 1f) // Neither thinking nor active captions have a read deadline.
+    bubbleClock.hold(200)
+    bubbleClock.advance(50_000L, visible = false, animate = true) // Window isn't visible yet.
+    bubbleClock.advance(60_000L, visible = true, animate = true)
+    check(bubbleClock.opacity == 1f)
+    bubbleClock.advance(60_100L, visible = true, animate = true)
+    bubbleClock.advance(60_101L, visible = false, animate = true) // An automated gesture hides it.
+    bubbleClock.advance(70_000L, visible = true, animate = true)
+    bubbleClock.advance(70_190L, visible = true, animate = true)
+    check(bubbleClock.fading && bubbleClock.opacity == .5f)
+    bubbleClock.suspend() // Screen off during the fade, then back on.
+    bubbleClock.advance(90_000L, visible = true, animate = true)
+    check(bubbleClock.opacity == .5f)
+    bubbleClock.advance(90_090L, visible = true, animate = true)
+    check(bubbleClock.finished)
+    bubbleClock.hold(100) // New reply replaces an old fade at full opacity.
+    bubbleClock.advance(100_000L, visible = true, animate = false)
+    check(bubbleClock.opacity == 1f)
+    bubbleClock.advance(100_100L, visible = true, animate = false)
+    check(bubbleClock.finished)
 
     val spokenReply = "One two three"
     val voiceCaption = checkNotNull(SpeechCaption.from(spokenReply, 420))

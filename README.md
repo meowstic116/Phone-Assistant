@@ -245,11 +245,13 @@ existing explicit voice choice stays selected.
 Pip doesn't send reply text to a speech provider. The separate chat API still generates
 chat replies when needed, whether or not speech is enabled.
 
-The same animated dots stay visible while Pip prepares a spoken reply. When playback
+A single overlay shows the animated dots, captions, and text without swapping windows.
+The dots stay animated while Pip prepares a spoken reply. When playback
 begins, the bubble reveals words without resizing. Android engines may report word ranges;
 Kokoro estimates word timing from the playback position. If audio is unavailable or times
-out, Pip shows the full reply instead. Voice-off replies appear immediately. The bubble fades without
-shrinking or moving. Kokoro runs in a separate app process so a voice-engine failure
+out, Pip shows the reply instead. Voice-off replies appear immediately. The bubble only
+counts visible time, then fades without shrinking or moving. Long replies fit the screen;
+the full text remains in chat history. Kokoro runs in a separate app process so a voice-engine failure
 doesn’t restart the overlay. If that process stops, Pip pauses automatic Kokoro
 speech for the session; a successful **Preview Pip’s voice** resumes it. Preview
 reports whether a failure happens during voice generation or playback. The last voice
@@ -265,6 +267,10 @@ Start the assistant, then open **Pip settings → Talk to Pip**. Download offlin
 Say **“Pip”** or **“Hey Pip”**, followed by an English message. You can also say his name,
 pause briefly, then speak. Turn on **Read Pip’s replies aloud** if you want to hear answers
 with the screen locked.
+
+If he doesn't respond, check the live status under **Talk to Pip** or in the listening
+notification. **Speak now (no wake word)** opens a short window to say one message without
+the name, useful for checking that the microphone and chat work independently of wake detection.
 
 Listening is opt-in for each session. It can continue after locking and uses battery; Android
 or the phone maker may suspend it. The persistent notification has a **Stop listening** action,
@@ -312,7 +318,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.179-debug.apk`](dist/phone-assistant-0.179-debug.apk).
+[`phone-assistant-0.181-debug.apk`](dist/phone-assistant-0.181-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by
