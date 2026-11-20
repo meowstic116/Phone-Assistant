@@ -245,10 +245,10 @@ existing explicit voice choice stays selected.
 Pip doesn't send reply text to a speech provider. The separate chat API still generates
 chat replies when needed, whether or not speech is enabled.
 
-The floating bubble reveals words during playback without resizing. Android engines may
-report word ranges; Kokoro uses estimated timing. The bubble appears even if audio
-hasn’t started. If it takes more than 2.5 seconds to show the first word, or audio
-is unavailable, the full reply is shown without waiting. The bubble fades without
+The same animated dots stay visible while Pip prepares a spoken reply. When playback
+begins, the bubble reveals words without resizing. Android engines may report word ranges;
+Kokoro estimates word timing from the playback position. If audio is unavailable or times
+out, Pip shows the full reply instead. Voice-off replies appear immediately. The bubble fades without
 shrinking or moving. Kokoro runs in a separate app process so a voice-engine failure
 doesn’t restart the overlay. If that process stops, Pip pauses automatic Kokoro
 speech for the session; a successful **Preview Pip’s voice** resumes it. Preview
@@ -257,6 +257,27 @@ issue also appears in **Debug options → Diagnostics**, without recording any s
 Kokoro’s runtime is bundled for arm64-v8a, armeabi-v7a and
 x86_64. Its weights are not bundled with the APK or committed to Git. See
 [third-party notices](app/src/main/assets/voice-licenses/README.txt) for source and licenses.
+
+## Talk to Pip hands-free
+
+Start the assistant, then open **Pip settings → Talk to Pip**. Download offline recognition
+(about 57 MB), grant microphone and notification permissions, and tap **Start listening for Pip**.
+Say **“Pip”** or **“Hey Pip”**, followed by an English message. You can also say his name,
+pause briefly, then speak. Turn on **Read Pip’s replies aloud** if you want to hear answers
+with the screen locked.
+
+Listening is opt-in for each session. It can continue after locking and uses battery; Android
+or the phone maker may suspend it. The persistent notification has a **Stop listening** action,
+and stopping the assistant also stops listening. The microphone is paused while Pip replies so
+he won’t normally wake himself. Microphone audio is processed in memory on the phone, not
+saved or sent to a server. Only recognized messages addressed to Pip enter the regular chat
+flow and use your configured chat API. Hands-free replies don’t use earlier conversations or
+saved facts, because a wake phrase doesn’t verify who’s speaking. Phone actions and screen
+access require unlocking, reviewing the transcript, and tapping **Send**. Neither boot nor service recovery starts listening.
+
+Offline recognition uses the English [Kroko community model](https://github.com/kroko-ai/kroko-onnx)
+[distributed by sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models),
+under the model’s CC BY-SA terms. The pinned weights are downloaded separately, not bundled.
 
 ## Personality
 
@@ -291,7 +312,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.177-debug.apk`](dist/phone-assistant-0.177-debug.apk).
+[`phone-assistant-0.179-debug.apk`](dist/phone-assistant-0.179-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by

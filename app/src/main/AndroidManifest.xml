@@ -11,6 +11,9 @@
     <!-- Keeps the character alive while you use other apps. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Which app is in the foreground. Granted by the user under "Usage access";
@@ -58,6 +61,9 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Pip">
+
+        <service android:name=".WakeListenService" android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <service
             android:name=".KokoroSpeechService"

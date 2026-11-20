@@ -8,7 +8,8 @@ internal class SpeechCaption private constructor(val text: String, private val w
         words.lastOrNull { it.spokenStart < end && it.spokenEnd > start }?.displayEnd ?: 0
 
     fun displayEndForProgress(progress: Float): Int {
-        if (progress < 0f) return 0
+        // At zero the player is still priming; no spoken frame has passed yet.
+        if (!progress.isFinite() || progress <= 0f) return 0
         val position = weight * progress.coerceAtMost(1f)
         return words.lastOrNull { it.startsAt <= position }?.displayEnd ?: 0
     }

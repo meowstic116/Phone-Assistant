@@ -12,6 +12,4 @@ internal class ReplyBubbleState(val fullLength: Int, spoken: Boolean) {
         visibleEnd = next
         return true
     }
-
-    fun showTextIfWaiting(): Boolean = waiting && reveal(null)
 }

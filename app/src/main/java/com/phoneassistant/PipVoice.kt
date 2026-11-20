@@ -23,6 +23,12 @@ internal object PipVoice {
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
     }
     private var sequence = 0L
+    private var allowLockedPlayback = false
+    @Volatile private var speaking = false
+    @Volatile private var keepMicMutedUntil = 0L
+    fun microphoneBlocked() = speaking || SystemClock.elapsedRealtime() < keepMicMutedUntil
+    fun stopHandsFree() { if (allowLockedPlayback) stop() }
+    fun stopUnlessHandsFree() { if (!allowLockedPlayback) stop() }
     private var kokoroRequest: KokoroIpc.Request? = null
     private var player: KokoroPlayback? = null
     private val clipReader = Executors.newSingleThreadExecutor()
@@ -50,6 +56,11 @@ internal object PipVoice {
 
     private fun finishCaptions() {
         clearClocks()
+        if (speaking) {
+            keepMicMutedUntil = SystemClock.elapsedRealtime() + 400L
+            speaking = false
+        }
+        allowLockedPlayback = false
         val report = captionUpdate
         captionUpdate = null
         report?.invoke(null)
@@ -92,8 +103,9 @@ internal object PipVoice {
     }
 
     private fun mayPlay(ctx: Context, id: Long) = id == sequence &&
-        ctx.getSystemService(PowerManager::class.java)?.isInteractive == true &&
-        ctx.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != true
+        ((allowLockedPlayback && WakeListenService.running) ||
+            (ctx.getSystemService(PowerManager::class.java)?.isInteractive == true &&
+                ctx.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != true))
 
     private fun takeFocus(ctx: Context, id: Long): Boolean {
         val manager = ctx.getSystemService(AudioManager::class.java) ?: return false
@@ -108,9 +120,9 @@ internal object PipVoice {
         return true
     }
 
-    fun reply(context: Context, text: String, captions: ((Int?) -> Unit)? = null) {
+    fun reply(context: Context, text: String, captions: ((Int?) -> Unit)? = null, allowLocked: Boolean = false) {
         val config = VoiceSettings.config(context)
-        if (config.enabled) speak(context.applicationContext, text, config, null, captions)
+        if (config.enabled) speak(context.applicationContext, text, config, null, captions, allowLocked)
         else captions?.invoke(null)
     }
 
@@ -118,10 +130,12 @@ internal object PipVoice {
         speak(context.applicationContext, VoiceProtocol.PREVIEW, VoiceSettings.config(context), report, null)
 
     private fun speak(ctx: Context, value: String, config: VoiceSettings.Config, report: ((String) -> Unit)?,
-                      captions: ((Int?) -> Unit)?) {
+                      captions: ((Int?) -> Unit)?, allowLocked: Boolean = false) {
         val line = SpeechCaption.from(value, VoiceProtocol.MAX_TEXT) ?: run { captions?.invoke(null); return }
         stop()
         val id = sequence
+        allowLockedPlayback = allowLocked
+        speaking = true
         captionUpdate = captions
         lastCaptionEnd = 0
         if (!mayPlay(ctx, id)) { finishCaptions(); return }
@@ -286,7 +300,7 @@ internal object PipVoice {
                 player = playback
                 if (runCatching { playback.play() }.isFailure) { failed(KokoroFailure.PLAYBACK); return@post }
                 timeLimit(id, pcm.frames * 1000L / pcm.sampleRate + 8_000L) { failed(KokoroFailure.PLAYBACK) }
-                estimate(id, line) { runCatching { playback.progress() }.getOrNull() }
+                estimate(id, line) { runCatching { playback.progress() }.getOrDefault(0f) }
             }
         }
     }
