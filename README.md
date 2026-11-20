@@ -86,12 +86,17 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   Instagram”** to set a time or count. The timer starts when the feed opens. A count means
   distinct reel screens Android exposes, including the first one, not full videos played.
   With neither limit specified (including “for a little bit”), Pip picks a random duration
-  from 30 seconds to 5 minutes.
+  from 30 seconds to 5 minutes. Pip waits for an exposed playback end or loop before
+  deciding whether to like and swipe; if playback isn't exposed, he pauses for about 18
+  seconds instead. The session timer and Stop take priority over finishing a reel.
   He may stop sooner if the feed stalls, and **Stop** works at any time. If Pip can't find
   the requested tab, open it in the app and retry. If a request names an app, Pip opens it before his first step
   unless you're already in it, in which case he leaves your
   screen alone — so the job happens in front of you rather than somewhere behind   it, and he moves into the bottom corner so he is not covering it. He is given the list of apps really
   installed on the phone, so "open WhatsApp" reaches that WhatsApp and not a guess.
+  “Message Sam and say hello” and “Call Sam” use Android's default SMS and Phone apps.
+  Name another app explicitly to use it instead, e.g. “Open Discord and message Sam.”
+  App names inside the message body don't change the selected app.
   Looking something up is one action, not a browser driven by hand: the query goes to
   whichever browser Android has been told to use — yours, wherever you set it — as a search
   URL, and "take me to the images" is the pictures page of it. An exact request such as

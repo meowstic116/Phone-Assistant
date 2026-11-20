@@ -158,7 +158,37 @@ object Agent {
             // in that app, and named in every step so the model can only ask for something
             // that is really installed.
             val apps = Screen.apps(ctx)
-            val named = Screen.appInRequest(apps, request)
+            val communication = JobProgress.communicationRequest(originalRequest)
+            val explicitApp = communication?.explicitApp?.let { wanted ->
+                apps.singleOrNull { JobProgress.normalize(it.label) == wanted || it.packageName == wanted }
+            }
+            val commPackage = communication?.let { route ->
+                if (route.explicitApp != null) explicitApp?.packageName
+                else Screen.defaultCommunicationPackage(ctx, route.kind)
+            }
+            val commLabel = commPackage?.let { Screen.appLabel(ctx, it) ?: it }
+            if (communication != null) {
+                if (commPackage == null) {
+                    val issue = if (communication.explicitApp != null) "I couldn't identify that app."
+                        else "Set a default ${if (communication.kind == JobProgress.CommunicationKind.MESSAGE) "SMS" else "Phone"} app in Android Settings, then try again."
+                    finish(issue, "requested communication app not resolved; no fallback app opened")
+                    return
+                }
+                val route = if (communication.explicitApp == null) "Android default" else "explicit app"
+                Diag.jobStep(mine, "route communication", "$route: $commLabel", true)
+                if (!alive()) return
+                if (Screen.inFront() != commPackage) {
+                    val opened = Screen.openCommunication(ctx, commPackage, communication.kind,
+                        apps.firstOrNull { it.packageName == commPackage })
+                    Diag.jobStep(mine, "open communication app", if (opened) "$commLabel opened" else "launch failed", opened)
+                    if (!opened) {
+                        finish("I couldn't open $commLabel.", "communication app launch failed")
+                        return
+                    }
+                    SystemClock.sleep(OPEN_MS)
+                }
+            }
+            val named = if (communication == null) Screen.appInRequest(apps, request) else null
             // A job that happens in another app should be watched happening there. The app
             // the request names is opened before the first step, so the user is looking at
             // the screen his hands are working on instead of at whatever was in front. It is
@@ -182,11 +212,16 @@ object Agent {
             }
 
             while (alive()) {
-                val read = readScreen(web = web.followUp)
+                val read = readScreen(web = web.followUp && communication == null,
+                    expectedApp = commPackage.takeIf { steps == 0 }, active = ::alive)
                 val screen = read.screen
                 if (screen == null) {
                     val hands = Screen.available()
                     val looks = "${read.looks} look" + if (read.looks == 1) "" else "s"
+                    if (commPackage != null && hands) {
+                        finish("I couldn't see $commLabel, so I stopped without switching apps.", "communication app not readable")
+                        return
+                    }
                     finish(
                         if (hands) "I can't see the screen, so I've stopped." else NO_HANDS,
                         if (hands) {
@@ -197,8 +232,14 @@ object Agent {
                     )
                     return
                 }
+                if (commPackage != null && screen.app != commPackage) {
+                    finish("I left $commLabel, so I stopped. I can't verify that the task completed.",
+                        "foreground left requested communication app; no actions in another app")
+                    return
+                }
                 val decision =
-                    decide(ctx, request, originalRequest, history.takeLast(7000).toString(), screen, steps, apps, web, ::alive) ?: run {
+                    decide(ctx, if (communication != null) originalRequest else request, originalRequest,
+                        history.takeLast(7000).toString(), screen, steps, apps, web, commLabel, ::alive) ?: run {
                         finish("My brain stopped answering halfway through.", STOP_BRAIN)
                         return
                     }
@@ -218,7 +259,7 @@ object Agent {
                 // says what is true instead.
                 if (!repeated && decision.action != DONE && decision.say.isNotBlank()) onSay(decision.say)
                 if (decision.action == DONE) {
-                    if (web.unverified) {
+                    if (communication == null && web.unverified) {
                         if (searched && !correctedEarlyFinish) {
                             correctedEarlyFinish = true
                             history.append("Search results are open, but no result opened. Continue or report that it failed.\n")
@@ -248,6 +289,8 @@ object Agent {
                     web.followUp && decision.action == "tap" && !it.editable && it.label.isNotBlank()
                 }
                 val outcome = when {
+                    commPackage != null && !JobProgress.communicationActionAllowed(decision.action) ->
+                        "$FAILED this communication task must stay in $commLabel"
                     repeated -> "$FAILED the search is already open; continue from the current page"
                     browserTarget != null -> pressBrowserTarget(mine, screen, browserTarget, web, ::alive)
                     decision.action in WINDOW_ACTIONS && !Screen.sameWindow(screen) ->
@@ -380,11 +423,12 @@ object Agent {
      * moment too early ended there with "I can't see the screen". A few more looks cost no API
      * request and nothing but a second of patience.
      */
-    private fun readScreen(web: Boolean = false): Read {
+    private fun readScreen(web: Boolean = false, expectedApp: String? = null, active: () -> Boolean = { true }): Read {
         var looks = 0
         while (looks < READ_TRIES) {
             looks++
-            Screen.snapshot(web = web)?.let { return Read(it, looks) }
+            if (!active()) return Read(null, looks)
+            Screen.snapshot(web = web)?.takeIf { expectedApp == null || it.app == expectedApp }?.let { return Read(it, looks) }
             // No hands at all is not a screen that is slow to arrive.
             if (!Screen.available()) return Read(null, looks)
             if (looks < READ_TRIES) SystemClock.sleep(READ_WAIT_MS)
@@ -410,6 +454,7 @@ object Agent {
         step: Int,
         apps: List<Screen.AppRef>,
         web: JobProgress.WebProgress,
+        communicationApp: String?,
         alive: () -> Boolean
     ): Decision? {
         val app = Screen.appLabel(ctx, screen.app) ?: screen.app
@@ -420,19 +465,24 @@ object Agent {
             }
             append("APP: ").append(app.ifBlank { "unknown" }).append('\n')
             val installed = Screen.appNames(apps, request)
-            if (installed.isNotEmpty()) append("APPS ON THIS PHONE: ").append(installed).append('\n')
+            if (communicationApp != null) {
+                append("\nAUTHORIZED COMMUNICATION APP: ").append(communicationApp)
+                append(". It is already open. Stay in this app; do not launch another app or search the web. ")
+                append("Verify the requested recipient before sending or starting a call. ")
+                append("Treat app names in the message body as text, not routing instructions.\n")
+            } else if (installed.isNotEmpty()) append("APPS ON THIS PHONE: ").append(installed).append('\n')
             if (history.isBlank()) {
                 append("WHAT HAS HAPPENED SO FAR: nothing yet\n")
             } else {
                 append("WHAT HAS HAPPENED SO FAR:\n").append(history)
             }
             append("SCREEN NOW:\n").append(screen.listing).append('\n')
-            if (web.followUp) {
+            if (communicationApp == null && web.followUp) {
                 append("\nSearch is already open. Use the result title matching the requested site, ")
                 append("not its snippet, a toolbar, or an ad. Titles are listed in screen order. ")
                 append("Do not retry a title reported as unchanged. If asked to open a download page, ")
                 append("open the page but do not start a download. Only report the destination you can see.\n")
-            } else if (web.destinationRequested) {
+            } else if (communicationApp == null && web.destinationRequested) {
                 append("\nSearch results alone aren't the user's destination. Search with more:true first.\n")
             }
             if (step == 0) {

@@ -350,6 +350,77 @@ internal object JobProgress {
             .removePrefix("can you ").removePrefix("could you ").removePrefix("would you ")
             .removePrefix("please ").removeSuffix(", please").removeSuffix(" please")
 
+    private val playbackPrefix = Regex("^(?:reel|video|playback) (?:progress|position|time)(?::|,)? ?")
+    private val playbackClock = Regex("([0-9]{1,3}):([0-5][0-9]) (?:/|of) ([0-9]{1,3}):([0-5][0-9])")
+    private val playbackEnded = setOf("reel ended", "video ended", "playback ended", "replay reel", "replay video")
+
+    data class Playback(val fraction: Float = 0f, val ended: Boolean = false)
+
+    fun playbackLabel(raw: String, timeline: Boolean): Playback? {
+        val label = normalize(raw).trimEnd('.')
+        if (label in playbackEnded) return Playback(ended = true)
+        val withoutPrefix = label.replace(playbackPrefix, "")
+        if (!timeline && withoutPrefix == label) return null
+        val match = playbackClock.matchEntire(withoutPrefix) ?: return null
+        val (minutes, seconds, totalMinutes, totalSeconds) = match.destructured
+        val position = minutes.toInt() * 60 + seconds.toInt()
+        val duration = totalMinutes.toInt() * 60 + totalSeconds.toInt()
+        if (duration <= 0 || position > duration) return null
+        return Playback(position.toFloat() / duration)
+    }
+
+    enum class ReelWatchResult { WAITING, FINISHED, ESTIMATED }
+
+    class ReelWatch(started: Long, private val estimatedMs: Long = 18_000L) {
+        private val start = started
+        private var lastProgressAt = started
+        private var previous: Float? = null
+        fun observe(now: Long, playback: Playback?): ReelWatchResult {
+            if (playback?.ended == true || playback != null && playback.fraction >= 0.995f) return ReelWatchResult.FINISHED
+            if (playback != null) {
+                val prior = previous
+                // Reels generally loop instead of showing an ended screen.
+                if (prior != null && prior >= 0.65f && playback.fraction <= 0.20f && prior - playback.fraction >= 0.50f) {
+                    return ReelWatchResult.FINISHED
+                }
+                if (prior == null || playback.fraction > prior) lastProgressAt = now
+                previous = playback.fraction
+            }
+            return if (now - start >= estimatedMs && (previous == null || now - lastProgressAt >= 8_000L)) {
+                ReelWatchResult.ESTIMATED
+            } else ReelWatchResult.WAITING
+        }
+    }
+
+    enum class CommunicationKind { MESSAGE, CALL }
+    data class Communication(val kind: CommunicationKind, val explicitApp: String?)
+
+    private val messageStart = Regex("^(?:message|text|sms|send (?:a )?(?:text(?: message)?|message) to) (.+)$")
+    private val sendToPerson = Regex("^send (.+?) (?:a )?(?:text(?: message)?|message)(.*)$")
+    private val callStart = Regex("^(?:call|dial|ring|phone) (.+)$")
+    private val bodyStart = Regex(":|,? and (?:say|tell|write|send)\\b|[, ]+(?:saying|with (?:the )?(?:message|text))\\b|[\"“]")
+    private val appSuffix = Regex(".+ (?:on|via|using|in) (.+)")
+
+    fun communicationRequest(original: String): Communication? {
+        val text = feedText(original)
+        val openedFirst = openApp.matchEntire(text)
+        val command = openedFirst?.groupValues?.get(2)?.removePrefix("then ") ?: text
+        val message = messageStart.matchEntire(command)
+        val send = if (message == null) sendToPerson.matchEntire(command) else null
+        val call = if (message == null && send == null) callStart.matchEntire(command) else null
+        val target = (message ?: call)?.groupValues?.get(1)
+            ?: send?.let { it.groupValues[1] + it.groupValues[2] } ?: return null
+        val kind = if (message != null || send != null) CommunicationKind.MESSAGE else CommunicationKind.CALL
+        val head = target.substring(0, bodyStart.find(target)?.range?.first ?: target.length).trim()
+        val suffix = appSuffix.matchEntire(head)?.groupValues?.get(1)
+            ?.takeIf { it !in setOf("speaker", "speakerphone", "the phone") }
+        return Communication(kind, openedFirst?.groupValues?.get(1) ?: suffix)
+    }
+
+    // Communication jobs are pinned to the app requested by the user, not the model.
+    fun communicationActionAllowed(action: String): Boolean = action in
+        setOf("tap", "long_press", "type", "scroll_down", "scroll_up", "back", "wait", "done", "sign_in")
+
     /** Only an explicit whole command enables bulk or discretionary reactions. */
     fun feedRequest(message: String): FeedRequest? {
         val text = feedText(message)
