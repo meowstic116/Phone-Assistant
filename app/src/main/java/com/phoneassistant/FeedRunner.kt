@@ -38,16 +38,23 @@ internal object FeedRunner {
     // more work behind an HTTP call that hasn't responded to interruption yet.
     private val likePicker = ThreadPoolExecutor(0, 1, 15, TimeUnit.SECONDS, SynchronousQueue<Runnable>())
 
-    fun run(
+    internal fun run(
         ctx: Context, mine: Int, plan: FeedRequest,
-        jobActive: () -> Boolean, onSay: (String) -> Unit
+        jobActive: () -> Boolean, onSay: (String) -> Unit, fromClearHome: Boolean,
+        onMotion: (DoomscrollMotion.Cue) -> Unit
     ): Pair<String, String> {
         val bulk = plan.mode == FeedMode.ALL_MISSING
         val limit = plan.browseLimit
         if (!bulk && limit == null) {
             return "Give me a positive duration or a whole reel count, like 2 minutes or 10 reels." to "invalid browse limit"
         }
-        val app = Screen.apps(ctx).singleOrNull { JobProgress.normalize(it.label) == plan.app }
+        val app = if (fromClearHome) {
+            if (plan.app != "instagram" || plan.surface != "reels" || bulk || plan.reaction != null) {
+                return "" to "invalid automatic Reels plan"
+            }
+            Screen.apps(ctx).firstOrNull { it.packageName == DoomscrollMotion.INSTAGRAM_PACKAGE }
+                ?: return "" to "Instagram is not launchable for automatic Reels"
+        } else Screen.apps(ctx).singleOrNull { JobProgress.normalize(it.label) == plan.app }
             ?: return "I couldn't identify an installed app named ${plan.app}." to "feed app not resolved"
         val reaction = plan.reaction
         val shortVideo = JobProgress.shortVideoSurface(plan.surface)
@@ -59,7 +66,7 @@ internal object FeedRunner {
         val traversal = JobProgress.FeedTraversal()
         val helpBudget = JobProgress.FeedHelpBudget()
         fun wantsExtraRead(obstacle: String): Boolean {
-            if (!active() || !helpBudget.take() || AssistantBrain.config(ctx).apiKey.isBlank()) return false
+            if (fromClearHome || !active() || !helpBudget.take() || AssistantBrain.config(ctx).apiKey.isBlank()) return false
             val choice = FeedHelp.recovery(ctx, app.label, plan.surface, obstacle, ::active)
             if (!active()) return false
             val extra = choice == JobProgress.FeedRecovery.WAIT_THEN_READ
@@ -228,7 +235,12 @@ internal object FeedRunner {
         Diag.jobStep(mine, "route", if (bulk) "verified feed scan" else "selective feed browsing", true)
         if (bulk) onSay("I'll check ${app.label}'s feed for missing reactions.")
         if (!active()) return stopped()
-        if (Screen.inFront() != app.packageName) {
+        if (fromClearHome || Screen.inFront() != app.packageName) {
+            if (fromClearHome && (!PipSettings.toyAllowed(ctx, Toy.DOOMSCROLL) ||
+                    !PipSettings.enabled(ctx, PipSettings.Option.SPONTANEOUS) || Quiet.active(ctx) ||
+                    !Screen.clearHomeScreen(ctx))) {
+                return "" to "automatic Reels skipped: Home was not clear or the toy was disabled"
+            }
             if (!active()) return stopped()
             val opened = Screen.open(ctx, app)
             Diag.jobStep(mine, "open ${app.label}", if (opened) "opened it" else "launch failed", opened)
@@ -392,6 +404,7 @@ internal object FeedRunner {
 
             var reelCanBeLiked = true
             if (singleItemSurface && !reelIsAd) {
+                if (active()) onMotion(DoomscrollMotion.Cue.WATCH)
                 val started = SystemClock.elapsedRealtime()
                 val watch = JobProgress.ReelWatch(started)
                 val observer = JobProgress.ReelObservation(viewport, started)
@@ -601,6 +614,7 @@ internal object FeedRunner {
                 val scrollStarted = SystemClock.elapsedRealtime()
                 val probe = Screen.startFeedScrollProbe(screen)
                 try {
+                    if (active()) onMotion(DoomscrollMotion.Cue.SWIPE)
                     val sent = Screen.swipeFeed(screen, shortVideo, attempt, ::active)
                     if (!active()) return stopped()
                     val wait = when {

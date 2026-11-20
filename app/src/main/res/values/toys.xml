@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="toyMenuScroll" type="id" />
+    <string name="toys_menu">Toys</string>
+    <string name="toys_back">Back</string>
+    <string name="toys_title">Pip’s toys</string>
+    <string name="toys_intro">Pick something to play with. Pip brings it out on your screen.</string>
+    <string name="toys_catalog_heading">PLAY WITH PIP</string>
+    <string name="toys_settings">Toy settings</string>
+    <string name="toys_tidy">Tidy up</string>
+    <string name="toys_rest">Give Pip a break</string>
+    <string name="toys_end_rest">End break</string>
+    <string name="toys_rest_prompt">How long should Pip take a break?</string>
+    <string-array name="toys_rest_lengths">
+        <item>15 minutes</item>
+        <item>30 minutes</item>
+        <item>1 hour</item>
+        <item>2 hours</item>
+    </string-array>
+    <string name="toys_rest_status">Pip is on a break · %1$s left</string>
+    <string name="toys_off">Start Pip on the main screen to play.</string>
+    <string name="toys_stopping">Pip is turning off.</string>
+    <string name="toys_disabled">Toys are turned off in Toy settings.</string>
+    <string name="toy_disabled">Turn this toy on in Toy settings.</string>
+    <string name="toy_canvas_disabled">Enable a picture in the Painting gallery first.</string>
+    <string name="toy_reels_access">Doomscroll needs accessibility. Turn it on in Toy settings and in Android.</string>
+    <string name="toy_reels_instagram">Install Instagram to use this toy.</string>
+    <string name="toys_busy">Pip is busy right now.</string>
+    <string name="toys_action_accessibility">%1$s: %2$s</string>
+    <string name="toy_lemonade_description">Pip opens a lemonade stand. Tap the counter to order a glass, then tap the glass to take a sip.</string>
+    <string name="toy_canvas_description">Watch Pip paint a picture, stroke by stroke. Tap the finished painting to hear what he thinks of it.</string>
+    <string name="toy_soccer_description">Tap the ball to shoot and Pip kicks it back. First to three goals wins, or the match ends after 90 seconds.</string>
+    <string name="toy_bubbles_description">Pop a sheet of 20 bubbles together. Tap any bubble, or watch Pip hop across the sheet and pop them himself.</string>
+    <string name="toy_plant_description">Help Pip grow a flower. Tap the pot to water it, or watch him bring over his little watering can.</string>
+    <string name="toy_doomscroll_description">Pip watches and swipes through Instagram Reels for 30 seconds to 5 minutes. He won’t like reels from this button.</string>
+    <string name="toy_lemonade_action">Open stand</string>
+    <string name="toy_canvas_action">Start painting</string>
+    <string name="toy_soccer_action">Play soccer</string>
+    <string name="toy_bubbles_action">Pop bubbles</string>
+    <string name="toy_plant_action">Grow a plant</string>
+    <string name="toy_doomscroll_action">Watch Reels</string>
+</resources>

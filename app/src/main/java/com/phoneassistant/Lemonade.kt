@@ -1,5 +1,6 @@
 package com.phoneassistant
 
+import android.animation.ValueAnimator
 import android.graphics.Canvas
 import android.graphics.Path
 import android.graphics.RectF
@@ -7,6 +8,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import kotlin.math.sin
+
+private const val LEMON_INK = 0xFF352445.toInt()
 
 /**
  * A little lemonade stand. Tap it and Pip pours you a glass; the glass is a separate
@@ -17,27 +20,25 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     override val boxW = 112f
     override val boxH = 148f
 
-    private val wood = fill(Ink.WOOD)
-    private val woodEdge = stroke(0xFF7E5B3B.toInt(), 1f)
-    private val cream = fill(0xFFF4EFE2.toInt())
-    private val red = fill(0xFFE2564A.toInt())
-    private val juice = fill(Ink.LEMON)
-    private val glassEdge = stroke(0xFFBFD9E6.toInt(), 1.2f)
-    private val glassFill = fill(0x33DCE9F2)
-    private val signInk = text(0xFF3A2A1C.toInt(), 9f, true)
-    private val tiny = text(0xFF6B4A2C.toInt(), 6.5f)
-    private val slicePaint = fill(0xFFFFF1A8.toInt())
-
-    /**
-     * The stand is one size for its whole life, and it redraws every frame the sign swings,
-     * so its geometry is worked out once instead of five RectFs a frame for the bin.
-     */
-    private val jugRect = RectF(dp(6f), dp(72f), dp(26f), dp(96f))
-    private val jugHandle = RectF(dp(24f), dp(76f), dp(34f), dp(92f))
-    private val cupRect = RectF(dp(88f), dp(82f), dp(106f), dp(98f))
-    private val counterRect = RectF()
-    private val boardRect = RectF()
-    private var rectWidth = -1f
+    private val edge = stroke(LEMON_INK, 2f)
+    private val detail = stroke(LEMON_INK, 1.1f)
+    private val ink = fill(LEMON_INK)
+    private val mint = fill(0xFF9AEAD2.toInt())
+    private val teal = fill(0xFF5BBCB3.toInt())
+    private val mintShine = stroke(0xFFD9FFF0.toInt(), 1.7f)
+    private val cream = fill(0xFFFFF5CE.toInt())
+    private val lemon = fill(0xFFFFD75F.toInt())
+    private val pink = fill(0xFFFFA1BA.toInt())
+    private val awningShade = fill(0x28A33C72)
+    private val glass = fill(0xFFCCF3F9.toInt())
+    private val shadow = fill(0x44352445)
+    private val signInk = text(LEMON_INK, 9.3f, true)
+    private val tiny = text(LEMON_INK, 6.5f)
+    private val shape = Path()
+    private val awning = Path()
+    private val sign = RectF()
+    private val rect = RectF()
+    private var artWidth = -1f
 
     /** Glasses promised and not yet poured, capped at what the stand can hold. */
     private var owed = 0
@@ -47,65 +48,111 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     /** Runs the next owed pour, a beat after the last one. */
     private val pourNext = Runnable { pourPending(announce = false) }
 
-    private fun buildRects(w: Float) {
-        if (w == rectWidth) return
-        rectWidth = w
-        counterRect.set(dp(2f), dp(96f), w - dp(2f), dp(112f))
-        boardRect.set(dp(14f), dp(115f), w - dp(14f), dp(137f))
+    private fun buildArt(w: Float) {
+        if (w == artWidth) return
+        artWidth = w
+        sign.set(dp(12f), dp(113f), w - dp(12f), dp(139f))
+        // The six curved hems share the same outer path as the stripe mask and outline.
+        val left = dp(3f)
+        val seam = (w - dp(6f)) / 6f
+        awning.rewind()
+        awning.moveTo(dp(10f), dp(3f))
+        awning.quadTo(dp(7f), dp(3f), dp(6f), dp(7f))
+        awning.lineTo(left, dp(17f))
+        for (i in 0 until 6) {
+            awning.quadTo(left + seam * (i + 0.5f), dp(26f), left + seam * (i + 1), dp(17f))
+        }
+        awning.lineTo(w - dp(6f), dp(7f))
+        awning.quadTo(w - dp(7f), dp(3f), w - dp(10f), dp(3f))
+        awning.close()
     }
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
-        val h = height.toFloat()
-        buildRects(w)
+        val cx = w / 2f
+        buildArt(w)
 
-        // Two uprights carrying the awning, and the legs under the counter. Every number
-        // here is in the stand's own dp, and the block below is what Pip has to fit around:
-        // awning 2–22, open front 22–96, counter 96–112, legs 112–146, sign 115–137.
-        canvas.drawRect(dp(7f), dp(22f), dp(11f), dp(112f), wood)
-        canvas.drawRect(w - dp(11f), dp(22f), w - dp(7f), dp(112f), wood)
-        canvas.drawRect(dp(12f), dp(112f), dp(17f), h - dp(2f), wood)
-        canvas.drawRect(w - dp(17f), dp(112f), w - dp(12f), h - dp(2f), wood)
+        // Keep the middle 54dp clear for Pip's face and the antenna below the canopy.
+        canvas.drawOval(dp(4f), dp(138f), w - dp(4f), dp(147f), shadow)
+        for (side in 0..1) {
+            val x = if (side == 0) dp(9f) else w - dp(9f)
+            rect.set(x - dp(3f), dp(16f), x + dp(3f), dp(103f))
+            panel(canvas, rect, 2f, edge, mint)
+            canvas.drawLine(x, dp(27f), x, dp(66f), mintShine)
+        }
+        rect.set(dp(10f), dp(104f), w - dp(10f), dp(144f))
+        panel(canvas, rect, 8f, edge, teal)
+        for (i in 1..3) {
+            val x = dp(10f) + i * (w - dp(20f)) / 4f
+            canvas.drawLine(x, dp(130f), x, dp(142f), detail)
+        }
 
-        // Pitcher and a spare cup, at the ends of the counter: the middle is where Pip
-        // stands, so nothing on this stand is painted over his face.
-        panel(canvas, jugRect, 4f, glassEdge, juice)
-        canvas.drawArc(jugHandle, -70f, 140f, false, glassEdge)
-        canvas.drawCircle(dp(10f), dp(74f), dp(4f), slicePaint)
-        canvas.drawRect(cupRect, glassFill)
-        canvas.drawRect(cupRect, glassEdge)
-
-        // The counter, drawn over his hips and feet, just below his chin when he stands
-        // behind it. Sixteen dp thick so his feet stay hidden even when he bobs downwards.
-        panel(canvas, counterRect, 2f, woodEdge, wood)
-
-        // The sign, which is the entire marketing strategy, hanging on the counter front,
-        // below where he stands rather than across his face. It swings from its top edge,
-        // the way anything hung on one nail would.
-        val board = boardRect
+        // A lemon pitcher and a little stack of cups live at the counter's corners.
+        canvas.drawRoundRect(dp(20f), dp(79f), dp(29f), dp(92f), dp(4f), dp(4f), edge)
+        shape.rewind()
+        shape.moveTo(dp(4f), dp(73f))
+        shape.lineTo(dp(24f), dp(75f))
+        shape.lineTo(dp(24f), dp(90f))
+        shape.quadTo(dp(24f), dp(96f), dp(19f), dp(97f))
+        shape.lineTo(dp(12f), dp(97f))
+        shape.quadTo(dp(7f), dp(97f), dp(7f), dp(91f))
+        shape.lineTo(dp(7f), dp(78f))
+        shape.close()
+        canvas.drawPath(shape, glass)
         canvas.save()
-        canvas.rotate(signSway(SystemClock.uptimeMillis()), board.centerX(), board.top)
-        panel(canvas, board, 3f, woodEdge, cream)
-        centred(canvas, "LEMONADE", board.centerX(), board.centerY() - dp(4f), signInk)
-        centred(canvas, "50c or a compliment", board.centerX(), board.centerY() + dp(7f), tiny)
+        canvas.clipPath(shape)
+        canvas.drawOval(dp(4f), dp(81f), dp(31f), dp(110f), lemon)
+        canvas.drawLine(dp(10f), dp(80f), dp(10f), dp(89f), mintShine)
         canvas.restore()
+        canvas.drawPath(shape, edge)
+        canvas.drawCircle(dp(23f), dp(74f), dp(4.5f), cream)
+        canvas.drawCircle(dp(23f), dp(74f), dp(4.5f), detail)
+        canvas.drawCircle(dp(23f), dp(74f), dp(2.8f), lemon)
+        for (i in 0..1) {
+            val y = dp(81f + i * 4f)
+            rect.set(w - dp(22f), y, w - dp(6f), y + dp(12f))
+            panel(canvas, rect, 3f, detail, if (i == 0) pink else cream)
+            canvas.drawLine(rect.left + dp(2f), y + dp(3f), rect.right - dp(2f), y + dp(3f), detail)
+        }
 
-        // Striped awning, a canopy over his antenna with a couple of dp to spare.
-        val awnTop = dp(2f)
-        val awnBottom = dp(22f)
+        rect.set(dp(2f), dp(96f), w - dp(2f), dp(112f))
+        panel(canvas, rect, 5f, edge, mint)
+        canvas.drawLine(dp(8f), dp(100f), w - dp(8f), dp(100f), mintShine)
+        canvas.drawLine(cx - dp(24f), dp(109f), cx - dp(24f), dp(118f), detail)
+        canvas.drawLine(cx + dp(24f), dp(109f), cx + dp(24f), dp(118f), detail)
+
         canvas.save()
-        canvas.clipRect(dp(2f), awnTop, w - dp(2f), awnBottom)
-        canvas.drawRect(dp(2f), awnTop, w - dp(2f), awnBottom, cream)
-        val stripe = (w - dp(4f)) / 6f
-        var i = 0
-        while (i < 6) {
-            canvas.drawRect(
-                dp(2f) + stripe * i, awnTop,
-                dp(2f) + stripe * (i + 1), awnBottom, red
-            )
-            i += 2
+        canvas.rotate(signSway(SystemClock.uptimeMillis()), cx, sign.top)
+        panel(canvas, sign, 6f, edge, cream)
+        centred(canvas, "LEMONADE", cx, sign.top + dp(8f), signInk)
+        centred(canvas, "50¢ or a compliment", cx, sign.top + dp(19f), tiny)
+        // Lemon stickers on the sign, with little mint leaves.
+        for (side in -1..1 step 2) {
+            val x = cx + side * dp(35f)
+            val y = sign.top + dp(9f)
+            canvas.drawOval(x - dp(4f), y - dp(3f), x + dp(4f), y + dp(3f), lemon)
+            canvas.drawOval(x - dp(4f), y - dp(3f), x + dp(4f), y + dp(3f), detail)
+            canvas.drawOval(x, y - dp(5f), x + dp(3f), y - dp(2.5f), teal)
         }
         canvas.restore()
+
+        canvas.drawPath(awning, cream)
+        canvas.save()
+        canvas.clipPath(awning)
+        val stripe = (w - dp(6f)) / 6f
+        for (i in 0..5 step 2) {
+            val left = dp(3f) + stripe * i
+            canvas.drawRect(left, dp(3f), left + stripe, dp(24f), pink)
+        }
+        canvas.drawRect(dp(3f), dp(15f), w - dp(3f), dp(24f), awningShade)
+        canvas.restore()
+        canvas.drawPath(awning, edge)
+        // A grinning lemon badge on the canopy, like the plant pot's little face.
+        canvas.drawOval(cx - dp(9f), dp(4.5f), cx + dp(9f), dp(16.5f), lemon)
+        canvas.drawOval(cx - dp(9f), dp(4.5f), cx + dp(9f), dp(16.5f), detail)
+        canvas.drawCircle(cx - dp(3f), dp(9.5f), dp(0.9f), ink)
+        canvas.drawCircle(cx + dp(3f), dp(9.5f), dp(0.9f), ink)
+        canvas.drawArc(cx - dp(2f), dp(9.5f), cx + dp(2f), dp(13f), 10f, 160f, false, detail)
     }
 
     /**
@@ -118,10 +165,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     }
 
     override fun onFrame() {
-        // The sign moves every frame, so this redraws every frame. That is affordable: a
-        // stand is a dozen rects, one arc and two lines of text in a 112×148dp window, less
-        // drawing than PetView does at twice the rate. Throttling it to 20fps would step a
-        // 1.2° swing visibly, which is a worse trade than the saving.
+        // Keep the hanging sign swinging while the stand is out.
         invalidate()
     }
 
@@ -132,11 +176,8 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      * His window is 86dp tall and his middle is 43dp down it, so this puts the top of his
      * window 24dp below the top of the stand. Measured from there, and from the layout
      * above: antenna tip 27.8, head 37, face 45–89, mouth 73.2, hips 95 onwards, feet 108.
-     * His idle bob moves him 1.1dp either way and his idle tilt can swing his chin 1.9dp
-     * lower, so the worst cases are an antenna tip at 28.9 against an awning that ends at
-     * 22, and a chin at 92 against a counter that starts at 96. Everything from his hips
-     * down is behind the counter (his feet clear it by 2.9dp), the sign hangs entirely
-     * below him, and no part of his face, head or antenna sits behind wood.
+     * The canopy stops above his antenna, and the 96dp counter lip is below his chin
+     * even at the bottom of his idle bob. Keep the sign and the cabinet below that lip.
      */
     fun behindCounterY(): Float = posY + windowH - dp(81f)
 
@@ -309,20 +350,26 @@ class LemonadeGlass(host: PropHost) : Prop(host) {
     private var drunk = false
     private var wobble = 0f
 
-    private val rim = stroke(0xFFBFD9E6.toInt(), 1.4f)
-    private val body = fill(0x2EDCE9F2)
-    private val juice = fill(Ink.LEMON)
-    private val straw = stroke(0xFFE2564A.toInt(), 2f)
-    private val ice = fill(0x66FFFFFF)
+    private val rim = stroke(LEMON_INK, 1.9f)
+    private val body = fill(0xD3D3FAFF.toInt())
+    private val juice = fill(0xFFFFD75F.toInt())
+    private val juiceShade = fill(0xFFF9B64E.toInt())
+    private val shadow = fill(0x44352445)
+    private val straw = stroke(0xFFFFA1BA.toInt(), 2.3f)
+    private val strawEdge = stroke(LEMON_INK, 3.9f)
+    private val shine = stroke(0xEBFFFFFF.toInt(), 1.3f)
+    private val pith = stroke(0xFFECAF48.toInt(), 0.95f)
+    private val ice = fill(0xFFFFF2CE.toInt())
+    private val iceEdge = stroke(0xFFD99646.toInt(), 0.8f)
     private val glassPath = Path()
-
-    /** The ice cube's box, reused: a glass is redrawn while it wobbles. */
+    private val liquid = Path()
+    private val strawPath = Path()
     private val iceRect = RectF()
 
     override fun onTap(x: Float, y: Float) {
         if (!drunk) {
             drunk = true
-            wobble = 1f
+            wobble = if (ValueAnimator.areAnimatorsEnabled()) 1f else 0f
             invalidate()
             host.feel(PetView.Mood.HAPPY, 1800L)
             host.say(Lines.pick(SIP_LINES))
@@ -334,56 +381,81 @@ class LemonadeGlass(host: PropHost) : Prop(host) {
 
     override fun onFrame() {
         if (wobble <= 0f) return
-        wobble -= 0.06f
+        wobble = (wobble - 0.06f).coerceAtLeast(0f)
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
-        val w = width.toFloat()
-        val h = height.toFloat()
-        val cx = w / 2f
-        val top = dp(8f)
-        val bottom = h - dp(4f)
-        val topHalf = w * 0.34f
-        val bottomHalf = w * 0.26f
+        val cx = width / 2f
+        val top = dp(13f)
+        val bottom = height - dp(6f)
+        val topHalf = dp(16f)
+        val foot = dp(10f)
+        canvas.drawOval(cx - dp(19f), bottom - dp(2f), cx + dp(19f), bottom + dp(5f), shadow)
+        canvas.save()
+        canvas.rotate(sin((1f - wobble) * 14f) * wobble * 6f, cx, bottom - dp(8f))
 
-        glassPath.reset()
+        glassPath.rewind()
         glassPath.moveTo(cx - topHalf, top)
         glassPath.lineTo(cx + topHalf, top)
-        glassPath.lineTo(cx + bottomHalf, bottom)
-        glassPath.lineTo(cx - bottomHalf, bottom)
+        glassPath.lineTo(cx + foot + dp(1f), bottom - dp(5f))
+        glassPath.quadTo(cx + foot, bottom, cx + foot - dp(3f), bottom)
+        glassPath.lineTo(cx - foot + dp(3f), bottom)
+        glassPath.quadTo(cx - foot, bottom, cx - foot - dp(1f), bottom - dp(5f))
         glassPath.close()
 
         canvas.drawPath(glassPath, body)
-
+        canvas.save()
+        canvas.clipPath(glassPath)
         if (!drunk) {
-            canvas.save()
-            canvas.clipPath(glassPath)
-            val levelTop = top + (bottom - top) * 0.18f
-            canvas.drawRect(cx - topHalf, levelTop, cx + topHalf, bottom, juice)
-            // Ice, floating with the wobble.
-            canvas.save()
-            val iceY = levelTop + dp(4f) + wobble * dp(2f)
-            canvas.rotate(wobble * 8f, cx, iceY)
-            iceRect.set(cx - dp(7f), iceY, cx + dp(1f), iceY + dp(7f))
-            canvas.drawRoundRect(iceRect, dp(1.5f), dp(1.5f), ice)
-            canvas.restore()
-            canvas.restore()
+            val level = top + dp(10f)
+            liquid.rewind()
+            liquid.moveTo(cx - topHalf, level)
+            liquid.cubicTo(cx - dp(7f), level - dp(8f), cx + dp(6f), level + dp(7f), cx + topHalf, level)
+            liquid.lineTo(cx + topHalf, bottom)
+            liquid.lineTo(cx - topHalf, bottom)
+            liquid.close()
+            canvas.drawPath(liquid, juice)
+            canvas.drawOval(cx - dp(21f), bottom - dp(6f), cx + dp(21f), bottom + dp(8f), juiceShade)
+            cube(canvas, cx - dp(6f), level + dp(5f), -20f)
+            cube(canvas, cx + dp(6f), level + dp(11f), 15f)
+            canvas.drawCircle(cx - dp(5f), bottom - dp(15f), dp(1.3f), ice)
+            canvas.drawCircle(cx + dp(4f), bottom - dp(8f), dp(1f), ice)
+            canvas.drawCircle(cx + dp(7f), bottom - dp(20f), dp(1.2f), ice)
+        } else {
+            canvas.drawOval(cx - dp(5f), bottom - dp(4f), cx + dp(5f), bottom - dp(1f), juice)
         }
-
+        canvas.drawLine(cx - dp(11f), top + dp(7f), cx - dp(8f), bottom - dp(8f), shine)
+        canvas.restore()
         canvas.drawPath(glassPath, rim)
 
-        // Straw, bent, and a lemon wheel on the rim.
-        val strawTop = if (drunk) dp(2f) else dp(6f)
-        canvas.drawLine(cx + dp(6f), bottom - dp(6f), cx + dp(2f), strawTop, straw)
-        canvas.drawLine(cx + dp(2f), strawTop, cx - dp(6f), strawTop, straw)
-        canvas.drawCircle(cx - topHalf + dp(2f), top, dp(5f), fill(0xFFFFF1A8.toInt()))
-        canvas.drawCircle(cx - topHalf + dp(2f), top, dp(5f), stroke(0xFFE0B93A.toInt(), 1f))
+        val bendX = cx + dp(9f)
+        val bendY = dp(4f)
+        strawPath.rewind()
+        strawPath.moveTo(cx + dp(4f), top + dp(13f))
+        strawPath.lineTo(bendX, bendY)
+        strawPath.lineTo(cx + dp(17f), bendY + dp(2f))
+        canvas.drawPath(strawPath, strawEdge)
+        canvas.drawPath(strawPath, straw)
+        canvas.drawLine(bendX - dp(2f), bendY + dp(7f), bendX - dp(1.3f), bendY + dp(4.5f), shine)
+        canvas.drawLine(cx - topHalf, top, cx + topHalf, top, rim)
 
-        if (drunk) {
-            val fizz = text(Ink.DIM, 6.5f)
-            centred(canvas, "empty", cx, bottom - dp(6f), fizz)
-        }
+        val wheelX = cx - dp(12f)
+        val wheelY = top - dp(2f)
+        canvas.drawCircle(wheelX, wheelY, dp(6.6f), juice)
+        canvas.drawCircle(wheelX, wheelY, dp(6.6f), rim)
+        canvas.drawCircle(wheelX, wheelY, dp(4.7f), ice)
+        canvas.drawLine(wheelX - dp(4f), wheelY + dp(1.7f), wheelX + dp(4f), wheelY - dp(1.7f), pith)
+        canvas.drawLine(wheelX - dp(1.8f), wheelY - dp(4f), wheelX + dp(1.8f), wheelY + dp(4f), pith)
+        canvas.restore()
+    }
+
+    private fun cube(canvas: Canvas, x: Float, y: Float, turn: Float) {
+        canvas.save()
+        canvas.rotate(turn, x, y)
+        iceRect.set(x - dp(3.1f), y - dp(3.1f), x + dp(3.1f), y + dp(3.1f))
+        panel(canvas, iceRect, 1.6f, iceEdge, ice)
+        canvas.restore()
     }
 
     override fun describe(): String =

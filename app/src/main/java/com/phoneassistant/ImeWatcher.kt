@@ -19,9 +19,8 @@ import android.view.accessibility.AccessibilityWindowInfo
  * window type and bounds only.
  *
  * The rest is what [Screen] needs to do a job the user asked for: the element list of the
- * window in front, and the ability to press, type, scroll, and go back. None of that happens
- * while it is idle — see [Screen], which only reads when a job is running, and nothing is
- * kept or sent anywhere except to the model choosing the next step.
+ * window in front, and the ability to press, type, scroll, and go back. The idle Home guard
+ * looks only at window metadata and launcher resource IDs, not screen text. See [Screen].
  */
 class ImeWatcher : AccessibilityService() {
 

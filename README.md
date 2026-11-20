@@ -7,10 +7,13 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
 ## What it does
 
 - A floating character drawn entirely in code (no sprite sheets) that wanders the whole
-  screen, blinks, sits down, and reacts.
-- Everything moves rather than appears: a toy he puts down pops into place and shrinks away
-  when it goes, a prop lifts slightly under your finger while you drag it, and the speech
-  bubble eases in, then drifts out. A line stays up for as long as it takes to read.
+  screen, blinks, sits down, and reacts. Pip pops into a cyan glow when started and
+  folds into a tiny spark when stopped from the app or notification. Stopping still
+  cancels any phone job immediately, and Android's animation-off setting is respected.
+- Pip reaches out to bring his toys onto the screen: the lemonade stand slides in, the
+  canvas unfolds, the soccer ball spins into place, bubble wrap flutters, and the plant
+  bounces. When he tidies up, the pieces fold or shrink back toward his hand. A prop lifts
+  slightly under your finger while you drag it, and the speech bubble eases in, then drifts out. A line stays up for as long as it takes to read.
   Drag Pip or a toy and it follows your finger, with a short glide on release if you
   were still moving. Pause before lifting to leave it exactly where you put it.
 - He is drawn no more often than there is something to see: a walk gets every frame, the
@@ -103,6 +106,13 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   unless you're already in it, in which case he leaves your
   screen alone — so the job happens in front of you rather than somewhere behind   it, and he moves into the bottom corner so he is not covering it. He is given the list of apps really
   installed on the phone, so "open WhatsApp" reaches that WhatsApp and not a guess.
+  “What's the weather like today?” opens a launchable Weather app without asking the
+  chat API. If no Weather app can open, or if you name a city, Pip opens a forecast
+  search in the browser. This doesn't require accessibility or an API key.
+  “Play the Emo Rap Mix playlist on Spotify” checks the visible Home/Recently Played
+  cards for that exact title before asking the model to search. It starts playback locally
+  when Spotify exposes the playlist's own play control. Diagnostics show how long phone-job
+  model calls took, separately from the time spent on the phone.
   “Message Sam and say hello” and “Call Sam” use Android's default SMS and Phone apps.
   Name another app explicitly to use it instead, e.g. “Open Discord and message Sam.”
   App names inside the message body don't change the selected app.
@@ -136,7 +146,7 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
 Everything below is real, movable screen furniture. Drag any of it wherever you want and
 tap it to use it. Each piece is its own small overlay window, so it never blocks the app
 underneath, and anything that ends up under the chat box is nudged clear of it. Bring them
-out from the **Toys** buttons in the app, ask him for one in chat ("open your lemonade
+out from the separate **Toys** menu in the app, ask him for one in chat ("open your lemonade
 stand", "paint something", "let's play soccer"), or just leave the screen alone — he gets
 bored every few minutes and starts something himself.
 
@@ -162,13 +172,26 @@ bubble, from a local list of lines, so it costs no API call and feels like he wa
 waiting. The timer is checked against the real deadline the moment the screen comes back on,
 so a phone asleep through the end of a break still gets told about it immediately rather than
 whenever the sleeping timer wakes up, and an announcement he never got to make is remembered
-on disk — if Android kills the service mid-break he still says it when he comes back. The app can start one too — **Give Pip a break** offers 15 minutes, 30, an hour or two —
+on disk — if Android kills the service mid-break he still says it when he comes back. The **Toys** menu can start one too — **Give Pip a break** offers 15 minutes, 30, an hour or two —
 and while a break is on it shows a live countdown next to an **End break** button that cuts
 it short and gets him talking again. "You can play again" does the same from chat. Phrases only count when they are aimed at him, so "I need a break
 from work" leaves the lemonade stand alone.
 
-- **Lemonade stand** — tap the stand and he pours you a glass, to a maximum of two because
-  he has one jug. The glass is its own prop: tap it once to drink, tap the empty glass
+Open **Toys** from the main screen to see a description and play button for each toy.
+The same menu has **Tidy up**, break controls, and a shortcut to Toy settings. A toy that
+is disabled stays in the catalog, with a note explaining why it can’t be launched.
+
+- **Doomscroll** — tap the toy button (or say “doomscroll”) to open Instagram Reels for
+  a random 30 seconds to 5 minutes, with no automatic likes. You can still ask for a
+  particular time or reel count in chat. Pip leans in and follows the reel with his eyes,
+  then flicks his hand up as he swipes. With **Bring out toys on his own** enabled, Pip
+  may also pick Doomscroll at random, but only when he can verify the unlocked launcher’s
+  Home workspace is visible with no other app or panel open. Unrecognized launcher layouts
+  are skipped. Manual Doomscroll does not need to start on Home. This toy needs accessibility;
+  **Stop**, **Tidy up**, or turning the screen off ends the session.
+- **Lemonade stand** — a mint counter, scalloped pink canopy, and a smiling lemon badge,
+  with matching glasses and bendy straws. Tap the stand and he pours you a glass, up to
+  two at a time. The glass is its own prop: tap it once to drink, tap the empty glass
   again to hand it back. Ask him for "a lemonade" in chat and the glass is on the screen
   at once: he pours first and hurries round behind the counter with it, rather than making
   you wait out the crossing. One request makes exactly one glass: the debt is cleared
@@ -238,45 +261,51 @@ it were.
 
 ## Setup on the phone
 
-The current build is committed at `dist/phone-assistant-0.111-debug.apk` if you just want to
-sideload it without building. Each new build replaces the file in `dist/`, so there is
-always exactly one APK to grab — easiest thing to download from a phone.
+To sideload without building, download the latest signed APK:
+[`phone-assistant-0.153-debug.apk`](dist/phone-assistant-0.153-debug.apk).
+The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by
 `.github/workflows/release.yml`, which is what the in-app update check looks at.
 
 1. Build and install: `./gradlew installDebug` (or open in Android Studio and Run).
-2. On the setup screen, grant **Display over other apps**, **Usage access**, and
-   **Notifications**. **Pip can work other apps** (an accessibility service) is needed for
-   phone jobs, and is the only way he can see a keyboard opened in another app — a floating
-   overlay is never told about a keyboard it did not raise itself. He reads the labels of the
-   app in front only while a job is running — never what is inside a text field, and never a
-   password — and that list of labels is the only thing that leaves the phone. Nothing he
-   reads is stored. If the switch was already on
-   from an older build, turn it off and on once so Android picks up the new capabilities:
-   before 0.59 it could only see window bounds. **Diagnostics** on the main screen shows
-   whether it is reporting at all, which is the quickest way to tell a working service from a
-   switched-off one. It also keeps the last phone job's steps, so a job that stopped early
-   says why there rather than leaving you to guess at a bubble that has already gone.
-3. Paste an API key. The defaults point at Gemini's free tier
-   (`https://generativelanguage.googleapis.com/v1beta/openai` with
-   `gemini-3.5-flash-lite`), and a key from https://aistudio.google.com/apikey costs
-   nothing and needs no card. Roughly 500 requests/day at 15/minute.
-   `gemini-3.8-flash` is smarter but its free tier allows only about 20 requests/day.
-   Any OpenAI-compatible endpoint works too — OpenAI, OpenRouter, Groq, or Ollama on
-   your network.
+2. On first launch, **Meet Pip** guides you into **Connect Pip**. Paste an API key and
+   tap **Verify & continue**. Pip sends a short test prompt (no chat or screen data) to
+   the configured HTTPS provider and model. You can’t continue until the model replies.
+   The defaults point at Gemini (`https://generativelanguage.googleapis.com/v1beta/openai`
+   with `gemini-3.5-flash-lite`); use the link to Google AI Studio for a Gemini key or
+   enter another OpenAI-compatible endpoint. Existing installs have their saved settings
+   prefilled for this one-time check. After setup, you can edit the connection from
+   **Pip settings → API & model**. The developer does not collect what you tell Pip or ask
+   him to save. Requests go directly to your selected provider and may include chat context
+   or visible app text; provider policies apply. Passwords in Android-designated password
+   fields and in Pip’s login vault are not sent. Avoid pasting passwords into chat or leaving
+   them visible as plain text while Pip is working.
+3. In **Make room for Pip**, grant **Display over other apps** to show Pip on your screen.
+   **Accessibility** (needed for phone jobs), **Usage access**, and **Notifications** are
+   optional. Without accessibility you can still chat and use on-screen toys, but Pip can’t
+   control other apps (including Doomscroll or in-app playback) or detect their keyboards.
+   You can change those grants later in **Pip settings → Permissions**. **Pip settings → Debug options → Diagnostics** shows whether
+   accessibility is connected and records the last phone job’s steps.
 4. Press **Start assistant**. Open **Pip settings** below that button to change what Pip
    does. Changes are saved and apply without restarting the overlay.
 
+   - **Permissions:** Manage overlay, Android accessibility, usage access, and notifications.
+     To turn off notifications while Pip keeps running, open **Manage notifications** and
+     turn them off in Android. Android may still list Pip among active apps. The separate
+     **Let Pip use accessibility** switch stops phone actions and other apps’ keyboard
+     tracking without changing Android’s grant. Chat and explicit links don’t need it.
+   - **Personality & data:** Edit Pip’s personality, review his memory, or open his login vault.
+   - **API & model:** Configure the API key, base URL, and model in their own section.
    - **Movement & startup:** Turn off wandering to keep Pip in place between tasks.
      You can still drag him, and he can move for his chat box, keyboard, and toys.
      **Start Pip when the phone starts** is off by default. With **Display over other
      apps** permission, it starts the overlay after the first unlock, not old jobs.
-   - **Phone access:** Turn off **Let Pip use accessibility** to stop screen-reading,
-     phone actions, and other apps' keyboard tracking. This does not change Android's
-     separate permission. Chat and opening an explicit link do not need accessibility.
    - **Toys:** Turn off **Allow toys** for no toys, or select individual toys. Turning
      off **Bring out toys on his own** leaves enabled toys available by request only.
+   - **Debug options:** Open **Diagnostics** or choose **Run setup again** to revisit the
+     welcome, API verification, and permissions screens. Your data stays in place; changes
+     to the API connection are saved only if you finish the walkthrough.
 
 ### Testing phone jobs
 
@@ -340,7 +369,8 @@ delete a bad capture. The conversation itself is still capped at the last 24 mes
 
 ## Changing the character
 
-- **Personality**: the **Personality** button in the app opens the prompt in an editor and
+- **Personality**: the **Personality** button under **Pip settings → Personality & data** opens
+  the prompt in an editor and
   saves it on the device. The built-in version lives in `Persona.kt`; **use new built-in**
   goes back to it, stashing your text in `custom_backup` first so **bring my text back**
   can restore it. The note about which app you are in, the list of

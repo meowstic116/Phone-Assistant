@@ -21,6 +21,13 @@
 
     <!-- Needed on Android 11+ to resolve the label of whatever app is in front. -->
     <queries>
+        <package android:name="com.sec.android.daemonapp" />
+        <package android:name="com.google.android.apps.weather" />
+        <package android:name="com.instagram.android" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -58,6 +65,16 @@
         </activity>
 
         <activity
+            android:name=".OnboardingActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ToysActivity"
+            android:exported="false"
+            android:label="@string/toys_menu" />
+
+        <activity
             android:name=".PaintingGalleryActivity"
             android:exported="false" />
 
@@ -79,6 +96,11 @@
             android:name=".ChatHistoryActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".DebugOptionsActivity"
+            android:exported="false"
+            android:label="@string/debug_options" />
 
         <activity
             android:name=".DiagnosticsActivity"

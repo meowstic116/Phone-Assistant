@@ -1,5 +1,8 @@
 package com.phoneassistant
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -29,6 +32,7 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.LinearInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -57,9 +61,10 @@ class OverlayService : Service(), PropHost {
             private set
 
         private var instance: OverlayService? = null
+        val stopping: Boolean get() = instance?.ending == true
+        internal var onPowerStateChanged: (() -> Unit)? = null
 
         private const val NOTIFICATION_ID = 42
-        private const val CHANNEL_ID = "assistant"
         private const val ACTION_STOP = "com.phoneassistant.STOP"
 
         /** Where the cancel chip's last dragged position is kept. */
@@ -94,8 +99,11 @@ class OverlayService : Service(), PropHost {
             ctx.startForegroundService(Intent(ctx, OverlayService::class.java))
         }
 
+        /** Main-screen stop; the notification action reaches the same exit path. */
         fun stop(ctx: Context) {
-            ctx.stopService(Intent(ctx, OverlayService::class.java))
+            val service = instance
+            if (service != null) service.beginExit()
+            else ctx.stopService(Intent(ctx, OverlayService::class.java))
         }
 
         /** Show the three dots, for messages sent from the history screen. */
@@ -122,7 +130,7 @@ class OverlayService : Service(), PropHost {
 
         /** Main-screen buttons: put one of Pip's toys on the screen. */
         fun bringOut(toy: Toy): Boolean {
-            val service = instance ?: return false
+            val service = instance?.takeUnless { it.ending } ?: return false
             // Whether toys are allowed is decided in one place; this only adds his protest
             // when the reason is the break.
             val outcome = Toys.summon(service, toy)
@@ -398,6 +406,10 @@ class OverlayService : Service(), PropHost {
     private var watchCountdown = 0L
 
     private var petDrag: WindowDrag? = null
+    private var ending = false
+    private var powerAnimator: ValueAnimator? = null
+    private var toyReachAnimator: ValueAnimator? = null
+    private val closeAfterExit = Runnable { finishExit() }
 
     private val frameMs = 33L
 
@@ -468,6 +480,8 @@ class OverlayService : Service(), PropHost {
         // from the power manager rather than from the next screen event. Set before the view
         // is attached, so there is not even one frame drawn into a dark display.
         view.animating = !paused
+        val entrance = canAnimatePower()
+        if (entrance) view.powerPose = PipTransition.pose(entering = true, fraction = 0f)
         pet = view
 
         val added = runCatching { windowManager.addView(view, petParams) }.isSuccess
@@ -476,6 +490,8 @@ class OverlayService : Service(), PropHost {
             return
         }
 
+        if (entrance) playPowerAnimation(view, entering = true)
+        onPowerStateChanged?.invoke()
         idleUntil = SystemClock.uptimeMillis() + 2500L
         applyBehaviorSettings()
         registerScreenReceiver()
@@ -625,6 +641,7 @@ class OverlayService : Service(), PropHost {
 
     /** Called when the accessibility service sees a keyboard appear, move or go. */
     private fun onImeChanged(ime: Int) {
+        if (ending) return
         keyboardUp = ime > 0
         if (ime == 0) {
             // The keyboard has gone, so the box can go back down to his feet.
@@ -641,16 +658,92 @@ class OverlayService : Service(), PropHost {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopSelf()
-            return START_NOT_STICKY
+        if (intent?.action == ACTION_STOP) beginExit()
+        return if (ending) START_NOT_STICKY else START_STICKY
+    }
+
+    private fun canAnimatePower(): Boolean = screenUsable() && ValueAnimator.areAnimatorsEnabled()
+
+    private fun playPowerAnimation(view: PetView, entering: Boolean) {
+        cancelPowerAnimation()
+        val animation = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = if (entering) PipTransition.ENTRANCE_MS else PipTransition.EXIT_MS
+            interpolator = LinearInterpolator()
+            addUpdateListener { view.powerPose = PipTransition.pose(entering, it.animatedValue as Float) }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animator: Animator) {
+                    if (powerAnimator !== animator) return
+                    powerAnimator = null
+                    if (entering) view.powerPose = null else finishExit()
+                }
+            })
         }
-        return START_STICKY
+        powerAnimator = animation
+        animation.start()
+    }
+
+    private fun cancelPowerAnimation() {
+        val old = powerAnimator
+        powerAnimator = null
+        old?.cancel()
+    }
+
+    private fun beginExit() {
+        if (ending) return
+        ending = true
+        onPowerStateChanged?.invoke()
+        // Work stops immediately, not after the decorative exit has finished.
+        Agent.cancel()
+        ChatTurns.begin()
+        petDrag?.cancel()
+        cancelToyHop()
+        cancelGardenVisit()
+        prepareExitUi()
+        val view = pet
+        if (view == null || !view.isAttachedToWindow || !canAnimatePower()) {
+            finishExit()
+            return
+        }
+        // A long system animation scale or a missing completion callback must not keep
+        // the foreground service around. The screen-off receiver also finishes at once.
+        handler.postDelayed(closeAfterExit, 850L)
+        playPowerAnimation(view, entering = false)
+    }
+
+    private fun prepareExitUi() {
+        handler.removeCallbacks(tick)
+        finishToyFlights()
+        hideKeyboard()
+        removeInputBar()
+        hideJobBar()
+        doomscrollJob = false
+        automaticDoomscrollJob = false
+        pet?.showDoomscrollCue(DoomscrollMotion.Cue.CLEAR)
+        hideThinking()
+        hideBubble()
+        hideHud()
+        props.toList().forEach(::dropProp)
+        resetToIdle()
+        pet?.let { view ->
+            if (!::petParams.isInitialized) return@let
+            petParams.flags = petParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            petParams.alpha = 1f
+            runCatching { windowManager.updateViewLayout(view, petParams) }
+        }
+    }
+
+    private fun finishExit() {
+        handler.removeCallbacks(closeAfterExit)
+        cancelPowerAnimation()
+        pet?.powerPose = PipTransition.pose(entering = false, fraction = 1f)
+        stopSelf()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        cancelPowerAnimation()
+        cancelToyReach()
         petDrag?.cancel()
         petDrag = null
         props.forEach { it.cancelDrag() }
@@ -685,6 +778,7 @@ class OverlayService : Service(), PropHost {
         Still.onChanged = null
         instance = null
         running = false
+        onPowerStateChanged?.invoke()
         super.onDestroy()
     }
 
@@ -976,7 +1070,7 @@ class OverlayService : Service(), PropHost {
 
     override fun propLetGo(prop: Prop) = Unit
 
-    override fun userDragAllowed(): Boolean = !paused && !overlayDucked
+    override fun userDragAllowed(): Boolean = !ending && !paused && !overlayDucked && powerAnimator == null
 
     private val toyLifetimes = mutableMapOf<Toy, ToyLifetime>()
 
@@ -985,10 +1079,65 @@ class OverlayService : Service(), PropHost {
         Toy.values().firstOrNull { it.owns(prop) }?.let { toyLifetimes[it]?.tapped(SystemClock.uptimeMillis()) }
     }
 
+    private fun toyHand(towardX: Float): DragMotion.Point? {
+        val view = pet ?: return null
+        if (ending || powerAnimator != null || overlayDucked || Agent.running() ||
+            petDrag?.moving == true || toyHop != null || gardenVisit != null ||
+            !view.isAttachedToWindow || !canAnimatePower()) return null
+        val side = if (towardX < petCentreX()) -1f else 1f
+        return DragMotion.Point(petCentreX() + side * dp(25f), posY + petH - dp(34f))
+    }
+
+    private fun reachForToy(toy: Prop, hand: DragMotion.Point, entering: Boolean, linger: Long) {
+        val view = pet ?: return
+        cancelToyReach()
+        view.toyReachColor = toy.motion.color
+        view.toyReachSide = if (hand.x < petCentreX()) -1f else 1f
+        idleUntil = maxOf(idleUntil, SystemClock.uptimeMillis() + linger)
+        if (walking && !toyWalk && !relocating) standStillNow()
+        val animation = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = linger
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                val reach = if (entering) minOf(t * 5f, (1f - t) * 1.65f)
+                    else minOf(t * 4f, (1f - t) * 3.5f)
+                view.toyReach = reach.coerceIn(0f, 1f)
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (toyReachAnimator === animation) {
+                        toyReachAnimator = null
+                        view.toyReach = 0f
+                    }
+                }
+            })
+        }
+        toyReachAnimator = animation
+        animation.start()
+    }
+
+    private fun cancelToyReach() {
+        val old = toyReachAnimator
+        toyReachAnimator = null
+        old?.removeAllListeners()
+        old?.cancel()
+        pet?.toyReach = 0f
+    }
+
+    /** Snap to final positions before Android gestures, screen-off, or shutdown. */
+    private fun finishToyFlights() {
+        cancelToyReach()
+        props.toList().forEach(Prop::completeToyMotion)
+        fading.filterIsInstance<Prop>().forEach(Prop::completeToyMotion)
+    }
+
     override fun addProp(prop: Prop): Boolean {
+        if (ending) return false
         val toy = Toy.values().firstOrNull { it.owns(prop) }
         if (toy != null && !PipSettings.toyAllowed(this, toy)) return false
         if (props.contains(prop)) return true
+        val hand = toyHand(prop.centreX)
         val params = WindowManager.LayoutParams(
             prop.windowW,
             prop.windowH,
@@ -999,7 +1148,7 @@ class OverlayService : Service(), PropHost {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                (if (overlayDucked) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0),
+                (if (overlayDucked || hand != null) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0),
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -1007,11 +1156,25 @@ class OverlayService : Service(), PropHost {
             y = prop.posY.toInt()
         }
         prop.params = params
+        if (hand != null) prop.alpha = 0f
         if (overlayDucked) params.alpha = 0f
         if (!runCatching { windowManager.addView(prop, params) }.isSuccess) return false
         props += prop
         if (toy != null) toyLifetimes.getOrPut(toy) { ToyLifetime(SystemClock.uptimeMillis()) }
-        prop.appear()
+        if (hand != null) {
+            val delay = when (prop) {
+                is Goal -> if (prop.pipDefends) 78L else 32L
+                is Ball -> 106L
+                else -> 0L
+            }
+            if (delay == 0L) reachForToy(prop, hand, true, prop.motion.duration + 100L)
+            prop.arriveFrom(hand, delay) {
+                if (!overlayDucked && prop in props) {
+                    prop.params.flags = duckFlags(prop.params.flags, false)
+                    updateProp(prop)
+                }
+            }
+        }
         keepBarClear()
         return true
     }
@@ -1024,20 +1187,18 @@ class OverlayService : Service(), PropHost {
         Toy.values().firstOrNull { it.owns(prop) }?.let { toy ->
             if (props.none(toy::owns)) toyLifetimes.remove(toy)
         }
-        // Released here rather than when the window finally detaches: the fade takes 170ms,
-        // and a new stand summoned in that window would have its post wiped by the old one
-        // leaving.
         if (prop === postOwner) petRelease()
-        // Gone from the logic at once, so nothing reacts to a toy that has left, but off the
-        // screen gently: it shrinks away instead of blinking out.
-        prop.fadeAway()
-        fadeOut(prop)
+        val hand = toyHand(prop.centreX)
+        if (hand != null && toyReachAnimator == null) reachForToy(prop, hand, false, 390L)
+        prop.params.flags = prop.params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        updateProp(prop)
+        fading += prop
+        prop.leaveFor(hand) {
+            if (fading.remove(prop)) runCatching { windowManager.removeView(prop) }
+        }
     }
 
-    /**
-     * Removes a window once it has faded. It is tracked until then, so a service that stops
-     * in the middle of a fade cannot leave the window behind.
-     */
+    /** Remove a speech bubble after its fade. */
     private fun fadeOut(view: View) {
         fading += view
         handler.postDelayed({
@@ -1061,6 +1222,7 @@ class OverlayService : Service(), PropHost {
      * screen comes back.
      */
     private fun settleBreak() {
+        if (ending) return
         handler.removeCallbacks(breakAlarm)
         val left = Quiet.remaining(this)
         if (left > 0L) {
@@ -1098,6 +1260,7 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun step() {
+        if (ending || powerAnimator != null) return
         val view = pet ?: return
         val now = SystemClock.uptimeMillis()
 
@@ -1129,6 +1292,7 @@ class OverlayService : Service(), PropHost {
             frameScratch.clear()
             frameScratch.addAll(props)
             frameScratch.forEach { prop ->
+                if (prop.inToyMotion) return@forEach
                 try {
                     prop.onFrame()
                 } catch (t: Throwable) {
@@ -1228,8 +1392,12 @@ class OverlayService : Service(), PropHost {
         else if (!wasWandering) idleUntil = SystemClock.uptimeMillis() + idleDelay()
 
         val forbidden = Toy.values().filterNot { PipSettings.toyAllowed(this, it) }
-        spontaneousToysAllowed = forbidden.size < Toy.values().size &&
-            PipSettings.enabled(this, PipSettings.Option.SPONTANEOUS)
+        val spontaneous = PipSettings.enabled(this, PipSettings.Option.SPONTANEOUS)
+        spontaneousToysAllowed = Toy.values().any { it !in forbidden } && spontaneous
+        if (Toy.DOOMSCROLL in forbidden || !PipSettings.enabled(this, PipSettings.Option.ACCESSIBILITY) ||
+            automaticDoomscrollJob && !spontaneous) {
+            stopDoomscrollToy()
+        }
         propsOnScreen().filter { prop -> forbidden.any { it.owns(prop) } }.forEach(::dropProp)
 
         if (!PipSettings.enabled(this, PipSettings.Option.ACCESSIBILITY) && jobBar != null && !Agent.running()) {
@@ -1470,6 +1638,7 @@ class OverlayService : Service(), PropHost {
     // ---------------------------------------------------------------- thinking
 
     private fun startThinking() {
+        if (ending) return
         attentive = true
         walking = false
         toyWalk = false
@@ -1525,6 +1694,7 @@ class OverlayService : Service(), PropHost {
     // --------------------------------------------------------------------- chat
 
     private fun enterAttention(moveUp: Boolean) {
+        if (ending) return
         attentive = true
         walking = false
         toyWalk = false
@@ -1552,7 +1722,7 @@ class OverlayService : Service(), PropHost {
     private fun sayAloud(text: String) {
         // A reply can land after the overlay has been stopped, and a bubble added to a dead
         // service is a window nothing will ever take down again.
-        if (!running) return
+        if (ending || !running) return
         hideThinking()
         // Speaking is a pause, not attention. Attention belongs to the chat bar and to sitting
         // at his easel; claiming it here is what used to root him to the spot, because nothing
@@ -1574,6 +1744,7 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun toggleChat() {
+        if (ending) return
         if (inputBar != null) {
             closeChat()
         } else {
@@ -1905,7 +2076,7 @@ class OverlayService : Service(), PropHost {
         startThinking()
         // Some things are done, not said: stands get opened, games get started, and
         // criticism gets taken personally.
-        if (JobProgress.routeFeedLocally(text) || JobProgress.communicationRequest(text) != null || JobProgress.explicitUrl(text) != null) {
+        if (JobProgress.routePhoneLocally(text)) {
             startJob(text, text, turn)
             return
         }
@@ -1939,8 +2110,37 @@ class OverlayService : Service(), PropHost {
      * The job speaks and finishes on its own thread, so both callbacks come back to the main
      * looper before they touch a window.
      */
-    private fun startJob(job: String, original: String, turn: Long): Boolean {
-        if (instance !== this || !ChatTurns.isCurrent(turn)) return false
+    private var doomscrollJob = false
+    private var automaticDoomscrollJob = false
+
+    internal fun canStartDoomscrollAtHome(): Boolean = !ending && !awaitingReply && !Agent.running() &&
+        !attentive && !walking && inputBar == null && !keyboardUp && !overlayDucked &&
+        petDrag?.moving != true && props.isEmpty() && !standingStill() && screenUsable() &&
+        PipSettings.toyAllowed(this, Toy.DOOMSCROLL) && PipSettings.enabled(this, PipSettings.Option.SPONTANEOUS) &&
+        !Quiet.active(this) && Screen.available() &&
+        packageManager.getLaunchIntentForPackage(DoomscrollMotion.INSTAGRAM_PACKAGE) != null && Screen.clearHomeScreen(this)
+
+    internal fun startDoomscrollToy(automatic: Boolean = false): Boolean {
+        if (ending || instance !== this || Agent.running()) return false
+        // The random sampler just checked Home. The feed worker independently checks again
+        // at the launch, in case the user opened something after the sample.
+        if (!automatic) closeChat()
+        val turn = if (automatic) ChatTurns.current() else ChatTurns.begin()
+        return startJob(DoomscrollMotion.COMMAND, DoomscrollMotion.COMMAND, turn, fromClearHome = automatic)
+    }
+
+    internal fun stopDoomscrollToy() {
+        if (!doomscrollJob) return
+        if (Agent.running()) stopJob() else endJobWatch()
+    }
+
+    private fun startJob(job: String, original: String, turn: Long, fromClearHome: Boolean = false): Boolean {
+        if (ending || instance !== this || !ChatTurns.isCurrent(turn)) return false
+        val doomscroll = JobProgress.isDoomscrollRequest(original)
+        if (doomscroll && (!PipSettings.toyAllowed(this, Toy.DOOMSCROLL) || Quiet.active(this))) {
+            sayAloud(if (Quiet.active(this)) "I'm on a break. you asked." else "Doomscroll is turned off in Pip settings.")
+            return false
+        }
         // The chat model has answered, so nothing is waiting on it any more: the toys may
         // talk again while the job runs.
         awaitingReply = false
@@ -1963,9 +2163,11 @@ class OverlayService : Service(), PropHost {
                         hideJobBar()
                         endJobWatch()
                     }
-                    Memory.append(this, "assistant", line)
-                    sayAloud(line)
-                    feel(PetView.Mood.HAPPY, 2500L)
+                    if (line.isNotBlank()) {
+                        if (!fromClearHome) Memory.append(this, "assistant", line)
+                        sayAloud(line)
+                        feel(PetView.Mood.HAPPY, 2500L)
+                    }
                 }
             },
             // For as long as the phone is being touched, his own windows are inert: they
@@ -1973,10 +2175,21 @@ class OverlayService : Service(), PropHost {
             // return until they really are out of the way — a gesture dispatched before the
             // window was updated is exactly the press the duck is there to protect.
             onGesture = { footprint -> duckOverlay(footprint) },
-            originalRequest = original
+            onFeedMotion = { id, cue ->
+                handler.post {
+                    if (instance === this && !ending && !paused && ChatTurns.isCurrent(turn) &&
+                        (Agent.isActive(id) || cue == DoomscrollMotion.Cue.CLEAR && Agent.isCurrent(id))) {
+                        val side = if (petCentreX() >= screenW / 2f) -1f else 1f
+                        pet?.showDoomscrollCue(cue, side)
+                    }
+                }
+            },
+            originalRequest = original,
+            fromClearHome = fromClearHome
         )
         if (!started) {
             if (!Agent.running()) hideJobBar()
+            if (fromClearHome) return false
             sayAloud(
                 when {
                     Agent.running() -> "I'm already in the middle of something."
@@ -1989,6 +2202,9 @@ class OverlayService : Service(), PropHost {
         }
         // His hands are busy: he stands out of the way of the app he is working in, and the
         // way out of the job appears at the bottom of the screen.
+        doomscrollJob = doomscroll
+        automaticDoomscrollJob = fromClearHome
+        pet?.showDoomscrollCue(DoomscrollMotion.Cue.CLEAR)
         beginJobWatch()
         showJobBar()
         return true
@@ -2094,7 +2310,7 @@ class OverlayService : Service(), PropHost {
 
     /** Refuse a touch if any overlay couldn't move aside rather than press through it. */
     private fun applyDuck(path: Rect?): Boolean {
-        if (instance !== this) return false
+        if (ending || instance !== this) return false
         fun overlaps(view: View): Boolean {
             if (path == null) return false
             if (!view.isLaidOut) return true // it could finish layout before the gesture lands
@@ -2111,6 +2327,7 @@ class OverlayService : Service(), PropHost {
         if (overlayDucked) {
             petDrag?.cancel()
             props.forEach { it.cancelDrag() }
+            finishToyFlights()
         }
         var ok = setChipDucked(jobBar?.let(::overlaps) == true)
         pet?.let { if (!duckLayout(it, petParams, overlaps(it), DUCK_ALPHA)) ok = false }
@@ -2303,6 +2520,9 @@ class OverlayService : Service(), PropHost {
 
     /** Job over: he may wander again, once the line he says has had its moment. */
     private fun endJobWatch() {
+        doomscrollJob = false
+        automaticDoomscrollJob = false
+        pet?.showDoomscrollCue(DoomscrollMotion.Cue.CLEAR)
         // A job that ended in the middle of a step — cancelled, or the service going away —
         // must not leave his windows unable to be tapped afterwards.
         // Screen restores any overlapping windows when the in-flight Android gesture ends.
@@ -2356,9 +2576,21 @@ class OverlayService : Service(), PropHost {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
+                    if (ending) {
+                        finishExit()
+                        return
+                    }
+                    cancelPowerAnimation()
+                    finishToyFlights()
+                    pet?.powerPose = null
                     cancelToyHop()
                     cancelGardenVisit()
                     paused = true
+                    if (doomscrollJob) {
+                        Agent.cancel()
+                        hideJobBar()
+                        endJobWatch()
+                    }
                     petDrag?.cancel()
                     props.forEach { it.cancelDrag() }
                     pet?.walking = false
@@ -2368,6 +2600,7 @@ class OverlayService : Service(), PropHost {
                 // Awake or unlocked: check the real deadline, since the timer sleeps with
                 // the phone. A locked one is skipped here and caught by USER_PRESENT.
                 Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
+                    if (ending) return
                     paused = false
                     pet?.animating = true
                     settleBreak()
@@ -2393,7 +2626,7 @@ class OverlayService : Service(), PropHost {
     private fun buildNotification(): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Assistant", NotificationManager.IMPORTANCE_LOW).apply {
+            NotificationChannel(PipPermissions.STATUS_CHANNEL, "Assistant", NotificationManager.IMPORTANCE_LOW).apply {
                 description = Persona.NAME + " stays on your screen"
                 setShowBadge(false)
             }
@@ -2412,7 +2645,7 @@ class OverlayService : Service(), PropHost {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return Notification.Builder(this, CHANNEL_ID)
+        return Notification.Builder(this, PipPermissions.STATUS_CHANNEL)
             .setContentTitle("Phone Assistant")
             .setContentText(Persona.NAME + " is on your screen")
             .setSmallIcon(R.drawable.ic_pip)

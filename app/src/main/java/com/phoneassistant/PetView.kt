@@ -1,5 +1,6 @@
 package com.phoneassistant
 
+import android.animation.ValueAnimator
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
@@ -54,6 +55,38 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
                 invalidate()
             }
         }
+
+    internal var powerPose: PipTransition.Pose? = null
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    internal var toyReach = 0f
+        set(value) { field = value; invalidate() }
+    internal var toyReachSide = 1f
+    internal var toyReachColor = 0xFF99EDFF.toInt()
+    private val toyInk = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    private var doomscrollCue = DoomscrollMotion.Cue.CLEAR
+    private var doomscrollAt = 0L
+    private var doomscrollSide = -1f
+    private val swipeInk = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF99EDFF.toInt()
+        strokeCap = Paint.Cap.ROUND
+    }
+
+    internal fun showDoomscrollCue(cue: DoomscrollMotion.Cue, side: Float = -1f) {
+        val now = SystemClock.uptimeMillis()
+        doomscrollSide = side
+        // If the next reel arrives quickly, let the flick finish and settle into watching.
+        if (cue == DoomscrollMotion.Cue.WATCH && doomscrollCue == DoomscrollMotion.Cue.SWIPE) return
+        doomscrollCue = cue
+        doomscrollAt = now
+        invalidate()
+    }
+
+    private val powerInk = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF99EDFF.toInt() }
 
     private val density = resources.displayMetrics.density
 
@@ -194,6 +227,19 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         val groundY = height - dp(2f)
         val cx = width / 2f
 
+        val attention = if (doomscrollCue == DoomscrollMotion.Cue.CLEAR) null else
+            DoomscrollMotion.pose(doomscrollCue, now - doomscrollAt, ValueAnimator.areAnimatorsEnabled())
+        val transition = powerPose
+        val powerLayer = if (transition != null) {
+            drawPowerSpark(canvas, cx, groundY, transition)
+            if (transition.opacity <= 0f) return
+            val layer = canvas.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(),
+                (255 * transition.opacity).toInt())
+            canvas.translate(0f, -dp(transition.lift))
+            canvas.scale(transition.sx, transition.sy, cx, groundY)
+            layer
+        } else -1
+
         val bob = when {
             sitting -> 0f
             walking -> kotlin.math.abs(kotlin.math.sin(t * 9f)) * dp(2.4f)
@@ -231,7 +277,8 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         canvas.save()
         canvas.translate(cx, bodyCenterY)
         val poseTilt = tilt + gardenLean * 10f
-        canvas.rotate(if (facingRight) poseTilt else -poseTilt)
+        canvas.rotate((if (facingRight) poseTilt else -poseTilt) + toyReachSide * toyReach * 4f +
+            doomscrollSide * (attention?.lean ?: 0f))
 
         // Antenna with a tiny light that brightens while thinking.
         canvas.drawLine(0f, -bodyH / 2f, 0f, -bodyH / 2f - dp(6f), rimPaint)
@@ -250,26 +297,79 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         )
         canvas.drawRoundRect(screenRect, dp(7f), dp(7f), screenPaint)
 
-        drawFace(canvas, t, now)
+        drawFace(canvas, t, now, attention)
+        if (attention != null && attention.arm > 0f) drawScrollFlick(canvas, attention)
+        if (toyReach > 0f) {
+            val end = toyReachSide * dp(20f + 8f * toyReach)
+            val armY = dp(10f - 7f * toyReach)
+            toyInk.color = toyReachColor
+            toyInk.alpha = (255 * toyReach).toInt()
+            canvas.drawLine(toyReachSide * dp(15f), dp(12f), end, armY, facePaint)
+            canvas.drawCircle(end, armY, dp(2.6f), toyInk)
+            canvas.drawCircle(end - toyReachSide * dp(2.5f), armY - dp(7f), dp(1.2f), toyInk)
+            canvas.drawCircle(end, armY + dp(6f), dp(1f), toyInk)
+        }
         if (gardenLean > 0f) {
             val side = if (facingRight) 1f else -1f
             canvas.drawLine(side * dp(17f), dp(8f), side * dp(27f), dp(12f - gardenLean * 9f), facePaint)
             canvas.drawCircle(side * dp(27f), dp(12f - gardenLean * 9f), dp(2.5f), accentPaint)
         }
         canvas.restore()
+        if (powerLayer != -1) canvas.restoreToCount(powerLayer)
     }
 
-    private fun drawFace(canvas: Canvas, t: Float, now: Long) {
+    private fun drawScrollFlick(canvas: Canvas, pose: DoomscrollMotion.Pose) {
+        val side = doomscrollSide
+        val handX = side * dp(21f + 6.5f * pose.arm)
+        val handY = dp(pose.handY)
+        canvas.drawLine(side * dp(17f), dp(12f), handX, handY, facePaint)
+        canvas.drawCircle(handX, handY, dp(2.8f), accentPaint)
+        if (pose.trail <= 0f) return
+        swipeInk.strokeWidth = dp(1.5f)
+        swipeInk.alpha = (230f * pose.trail).toInt()
+        val trailX = side * dp(28.5f)
+        val y = handY + dp(5f)
+        canvas.drawLine(trailX, y, trailX, y + dp(8f), swipeInk)
+        canvas.drawLine(trailX, y, trailX - dp(2.5f), y + dp(2.5f), swipeInk)
+        canvas.drawLine(trailX, y, trailX + dp(2.5f), y + dp(2.5f), swipeInk)
+    }
+
+    private fun drawPowerSpark(canvas: Canvas, cx: Float, groundY: Float, pose: PipTransition.Pose) {
+        if (pose.spark <= 0f) return
+        val halfWidth = dp(7f + 23f * pose.spread)
+        val diameter = dp(2.6f + 8f * pose.spread)
+        powerInk.alpha = (125f * pose.spark).toInt()
+        canvas.drawOval(cx - halfWidth, groundY - diameter, cx + halfWidth, groundY + dp(1f), powerInk)
+        powerInk.alpha = (240f * pose.spark).toInt()
+        for (i in 0..3) {
+            val side = if (i % 2 == 0) -1f else 1f
+            val x = cx + side * dp(9f + pose.spread * (if (i < 2) 20f else 8f))
+            val y = groundY - dp((if (i < 2) 6f else 19f) + pose.spread * 24f)
+            val r = dp(if (i < 2) 2.5f else 1.6f)
+            canvas.drawOval(x - r, y - r * 0.35f, x + r, y + r * 0.35f, powerInk)
+            canvas.drawOval(x - r * 0.35f, y - r, x + r * 0.35f, y + r, powerInk)
+        }
+    }
+
+    private fun drawFace(canvas: Canvas, t: Float, now: Long, attention: DoomscrollMotion.Pose?) {
         val faceCx = screenRect.centerX()
-        val eyeY = screenRect.top + screenRect.height() * 0.36f
+        val gazeCx = faceCx + doomscrollSide * dp(attention?.gazeX ?: 0f)
+        val eyeY = screenRect.top + screenRect.height() * 0.36f + dp(attention?.gazeY ?: 0f)
         val eyeDx = dp(9.5f)
         val eyeR = dp(3.2f)
         val blinking = now < blinkEndsAt
 
         when {
             blinking || mood == Mood.SLEEPY -> {
-                canvas.drawLine(faceCx - eyeDx - eyeR, eyeY, faceCx - eyeDx + eyeR, eyeY, facePaint)
-                canvas.drawLine(faceCx + eyeDx - eyeR, eyeY, faceCx + eyeDx + eyeR, eyeY, facePaint)
+                canvas.drawLine(gazeCx - eyeDx - eyeR, eyeY, gazeCx - eyeDx + eyeR, eyeY, facePaint)
+                canvas.drawLine(gazeCx + eyeDx - eyeR, eyeY, gazeCx + eyeDx + eyeR, eyeY, facePaint)
+            }
+            attention != null -> {
+                for (side in -1..1 step 2) {
+                    val x = gazeCx + side * eyeDx
+                    canvas.drawCircle(x, eyeY, eyeR, accentPaint)
+                    canvas.drawCircle(x + doomscrollSide * dp(1f), eyeY - dp(0.8f), dp(1f), screenPaint)
+                }
             }
             mood == Mood.HAPPY -> {
                 drawHappyEye(canvas, faceCx - eyeDx, eyeY, eyeR)

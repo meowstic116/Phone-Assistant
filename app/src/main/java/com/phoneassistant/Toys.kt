@@ -1,7 +1,7 @@
 package com.phoneassistant
 
-/** Everything Pip can put down on the screen. */
-enum class Toy(val label: String, private val words: List<String>) {
+/** Pip’s props and opt-in toy activities. */
+enum class Toy(val label: String, private val words: List<String>, val spontaneousAnywhere: Boolean = true) {
     LEMONADE(
         "Lemonade stand",
         // Names of the thing itself. "a glass", "the stand" and "thirsty" were too loose:
@@ -23,7 +23,8 @@ enum class Toy(val label: String, private val words: List<String>) {
     PLANT(
         "Plant",
         listOf("plant", "flower", "garden", "water it")
-    );
+    ),
+    DOOMSCROLL("Doomscroll", listOf("doomscroll", "doom scroll"), spontaneousAnywhere = false);
 
     fun mentionedIn(text: String): Boolean = words.any { text.contains(it) }
 
@@ -34,6 +35,7 @@ enum class Toy(val label: String, private val words: List<String>) {
         SOCCER -> prop is Goal || prop is Ball || prop is ScoreBoard
         BUBBLES -> prop is BubbleWrap
         PLANT -> prop is Plant
+        DOOMSCROLL -> false
     }
 }
 
@@ -120,7 +122,8 @@ object Toys {
         val text = raw.lowercase()
         if (text.length > 140) return null
         for (toy in Toy.values()) {
-            if (!toy.mentionedIn(text)) continue
+            // Feed commands have their own strict parser and job lifecycle.
+            if (toy == Toy.DOOMSCROLL || !toy.mentionedIn(text)) continue
             val words = text.trim().split(Regex("\\s+")).size
             val asking = requestVerbs.any { text.contains(it) } || words <= 2
             if (asking) return toy
@@ -281,6 +284,7 @@ object Toys {
         val out = host.propsOnScreen().filter { toy.owns(it) }
 
         return when (toy) {
+            Toy.DOOMSCROLL -> Outcome(host.startDoomscrollToy(), "Doomscrolling is a phone job, not a prop.")
             Toy.LEMONADE -> {
                 val existing = out.filterIsInstance<LemonadeStand>().firstOrNull()
                 val stand = existing ?: openStand(host)
@@ -406,6 +410,7 @@ object Toys {
 
     /** Packs everything away. */
     fun clearAll(host: OverlayService) {
+        host.stopDoomscrollToy()
         host.propsOnScreen().forEach { host.dropProp(it) }
     }
 
@@ -416,6 +421,7 @@ object Toys {
         Toy.SOCCER -> "done running about. folding the pitch up."
         Toy.BUBBLES -> "bubble wrap's finished. into the bin."
         Toy.PLANT -> "giving the plant its space back."
+        Toy.DOOMSCROLL -> "putting the reels down."
     }
 
     /**
@@ -452,7 +458,7 @@ object Toys {
         if (asksForQuiet(text)) {
             val length = quietLength(raw)
             Quiet.start(ctx, length)
-            host.propsOnScreen().forEach { host.dropProp(it) }
+            clearAll(host)
             host.feel(PetView.Mood.ANNOYED, 4000L)
             notes += "they asked you to put your toys away and not get any out for " +
                 "${describeDuration(length)}. you packed everything up and you'll honour " +
@@ -555,8 +561,13 @@ object Toys {
         val ctx = host.stageContext()
         if (!PipSettings.enabled(ctx, PipSettings.Option.SPONTANEOUS)) return
         val toy = Toy.values().filter { PipSettings.toyAllowed(ctx, it) &&
-            (it != Toy.PAINTING || PaintingGallery.pictures(ctx).any { picture -> PaintingGallery.enabled(ctx, picture) })
+            (it != Toy.PAINTING || PaintingGallery.pictures(ctx).any { picture -> PaintingGallery.enabled(ctx, picture) }) &&
+            (it.spontaneousAnywhere || it == Toy.DOOMSCROLL && host.canStartDoomscrollAtHome())
         }.randomOrNull() ?: return
+        if (toy == Toy.DOOMSCROLL) {
+            host.startDoomscrollToy(automatic = true)
+            return
+        }
         if (!summon(host, toy).ok) return
         host.say(
             when (toy) {
@@ -570,6 +581,7 @@ object Toys {
                     "bubble wrap turned up. tiny feet, big plans."
                 Toy.PLANT ->
                     "we have a plant now. tap it to water it."
+                Toy.DOOMSCROLL -> return
             }
         )
     }

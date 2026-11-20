@@ -4,9 +4,53 @@
     <string name="start_at_boot">Start Pip when the phone starts</string>
     <string name="start_at_boot_hint">Starts Pip after you unlock your phone following a restart.</string>
     <string name="start_at_boot_needs_overlay">Automatic start needs “Display over other apps” permission.</string>
-    <string name="ime_watcher_description">Lets Pip work other apps when you ask him to —
-        open one, tap, type, scroll, go back — and see when a keyboard is on screen so he can
-        keep out of its way. He reads the labels of the screen in front only while doing a job
-        you asked for, never a password field, and nothing he reads is kept or sent anywhere
-        except as a list of labels to the AI model you chose.</string>
+    <string name="ime_watcher_description">Optional. Lets Pip tap, type, and scroll in other apps,
+        such as when you ask him to open Reels or play a playlist, and keep clear of their keyboards.
+        Pip doesn’t record your screen or read password fields. For model-assisted tasks, your
+        request and visible on-screen text may be sent to the AI provider you chose.</string>
+    <string name="setup_privacy_heading">Privacy &amp; the API</string>
+    <string name="setup_privacy_local">The developer does not collect what you tell Pip or ask him to save. The app keeps recent chats and Memory notes on your device. You can review or clear them in Chat history and Pip settings → Memory.</string>
+    <string name="setup_privacy_api">Chat goes directly to your chosen AI provider and may include recent messages and Memory notes. If Pip needs help with a task, he may send your request and visible app text. Your provider’s privacy policy applies.</string>
+    <string name="setup_privacy_passwords">Passwords in fields Android identifies as password fields and passwords saved in Pip’s login vault are not sent to the API. Don’t paste passwords into chat or leave them visible as plain text in another app while Pip is working.</string>
+    <string name="setup_access_optional">Accessibility is optional. Leave it off and you can still chat and play with on-screen toys. Pip won’t be able to tap, type, or scroll in other apps for you, so features like Doomscroll and in-app playback controls won’t work. He also won’t be able to see when another app’s keyboard is open.</string>
+    <string name="setup_permissions_intro">API verified. Choose the permissions you want to grant. You can finish setup without granting accessibility, and change permissions later in Pip settings → Permissions.</string>
+    <string name="main_privacy_summary">The developer does not collect your chats or Memory notes. Requests go directly to your selected AI provider and may include chat context or visible app text. Password fields and saved vault passwords aren’t sent; don’t put passwords in chat.</string>
+    <item name="pipSettingsScroll" type="id" />
+    <string name="settings_personal_heading">Personality &amp; data</string>
+    <string name="settings_personality">Personality</string>
+    <string name="settings_memory">Memory</string>
+    <string name="settings_logins">Logins Pip can use</string>
+    <string name="settings_api_heading">API &amp; model</string>
+    <string name="settings_api_description">Pip defaults to Gemini. You can also use another OpenAI-compatible endpoint. Your API key is stored on this device.</string>
+    <string name="settings_api_key_link">Get a Gemini API key</string>
+    <string name="settings_api_base_url">API base URL</string>
+    <string name="settings_api_key">API key</string>
+    <string name="settings_api_model">Model</string>
+    <string name="settings_api_save">Save API settings</string>
+    <string name="settings_api_saved">API settings saved</string>
+    <string name="settings_api_browser_missing">No browser is available to open Google AI Studio.</string>
+    <string name="permissions_heading">Permissions</string>
+    <string name="permissions_overlay">Display over other apps</string>
+    <string name="permissions_overlay_info">Pip needs this to appear on your screen.</string>
+    <string name="permissions_access_switch">Let Pip use accessibility</string>
+    <string name="permissions_access_android">Android accessibility permission</string>
+    <string name="permissions_usage">Usage access · optional</string>
+    <string name="permissions_usage_info">Lets Pip know which app is in front.</string>
+    <string name="permissions_notifications">Notifications · optional</string>
+    <string name="permissions_notifications_info">Turn off notifications in Android without stopping Pip. Android may still show him in its active apps list while he’s running.</string>
+    <string name="permissions_notifications_manage">Manage notifications</string>
+    <string name="permissions_manage">Open Android settings</string>
+    <string name="permissions_status">%1$s · %2$s</string>
+    <string name="permissions_on">On</string>
+    <string name="permissions_off">Off</string>
+    <string name="permissions_action_description">%1$s: %2$s</string>
+    <string name="permissions_settings_unavailable">Open Android Settings to change this permission.</string>
+    <string name="debug_options">Debug options</string>
+    <string name="debug_diagnostics">Diagnostics</string>
+    <string name="debug_diagnostics_hint">See Pip’s status, permission checks, and what happened during his last phone job.</string>
+    <string name="debug_setup">Run setup again</string>
+    <string name="debug_setup_hint">Revisit the welcome, API verification, and permissions screens. This won’t clear your chats, Memory, or other settings.</string>
+    <string name="debug_setup_replay_notice">Your current API settings are filled in. Any API changes are saved only when you finish setup.</string>
+    <string name="debug_setup_exit">Back to Debug options</string>
+    <string name="debug_back">Back to Pip settings</string>
 </resources>

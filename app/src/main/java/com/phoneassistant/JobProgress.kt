@@ -209,7 +209,8 @@ internal object JobProgress {
         var countUnit: String? = null
         var invalid = false
         fun limitSuffix(input: String): String {
-            var text = input.removeSuffix(" for me")
+            // A bare doomscroll command can have a limit but no app before it.
+            var text = (if (doomscroll) " $input" else input).removeSuffix(" for me")
             while (true) {
                 val time = timeSuffix.find(text)
                 val counted = countSuffix.find(text)
@@ -225,7 +226,7 @@ internal object JobProgress {
                 } else if (vagueDuration.containsMatchIn(text)) {
                     text = text.replace(vagueDuration, "").removeSuffix(" for me")
                     continue
-                } else return text
+                } else return text.trim()
                 text = text.substring(0, (time ?: checkNotNull(counted)).range.first).removeSuffix(" for me")
             }
         }
@@ -255,9 +256,10 @@ internal object JobProgress {
             "post", "posts" -> "posts"
             else -> null
         }
-        val appAndSurface = if (countedSurface != null && feedSurface.matchEntire(rawApp) == null) {
-            "$rawApp $countedSurface"
-        } else rawApp
+        val appLabel = if (doomscroll && rawApp.isBlank()) "instagram" else rawApp
+        val appAndSurface = if (countedSurface != null && feedSurface.matchEntire(appLabel) == null) {
+            "$appLabel $countedSurface"
+        } else appLabel
         val (rawLabel, explicitSurface) = feedTarget(appAndSurface) ?: return null
         val app = if (doomscroll && rawLabel == "insta") "instagram" else rawLabel
         val surface = explicitSurface ?: "reels".takeIf { doomscroll && app == "instagram" }
@@ -349,6 +351,59 @@ internal object JobProgress {
             .removePrefix("pip, ").removePrefix("please ")
             .removePrefix("can you ").removePrefix("could you ").removePrefix("would you ")
             .removePrefix("please ").removeSuffix(", please").removeSuffix(" please")
+
+    data class WeatherRequest(val time: String? = null, val place: String? = null, val appOnly: Boolean = false) {
+        val search: String get() = listOfNotNull("weather", time ?: "today", place ?: "near me").joinToString(" ")
+    }
+
+    val platformWeatherPackages = listOf("com.sec.android.daemonapp", "com.google.android.apps.weather")
+    private val weatherAppLabels = setOf("weather", "accuweather", "the weather channel", "weather & radar",
+        "weather and radar", "yahoo weather", "carrot weather", "myradar", "weatherguard", "1weather")
+
+    fun weatherAppRank(label: String, packageName: String): Int? = when {
+        packageName in platformWeatherPackages -> 0
+        normalize(label) == "weather" -> 1
+        normalize(label) in weatherAppLabels -> 2
+        else -> null
+    }
+
+    private val weatherAppOpen = Regex("(?:open|launch|start|show me) (?:my |the )?weather app")
+    private val forecastTime = "(?:right now|now|today|tonight|tomorrow|this (?:morning|afternoon|evening|weekend)|next week)"
+    private val forecastTimeOnly = Regex(forecastTime)
+    private val weatherDefinitions = setOf("what is weather", "what's weather", "what is temperature", "what's temperature")
+    private val placePattern = "[\\p{L}\\p{M}\\p{N}][\\p{L}\\p{M}\\p{N} .,'-]{0,79}"
+    private val forecastCore = "(?:weather(?: forecast)?|forecast|temperature)"
+    private val forecastPrompt = Regex(
+        "(?:(?:what (?:is|was|will)|what's|how (?:is|was)|how's) (?:the |my )?" +
+            "|(?:tell me (?:what(?: is| was)?|how(?: is| was)?)|tell me|check|look up|show me|get) (?:the |my )?)?" +
+            "(?:($forecastTime)'s )?$forecastCore(?: (?:is|was))?(?: like| be like)?" +
+            "(?: ($forecastTime))?(?: (?:(?:in|for|at) ($placePattern)|(?:near me|here)))?"
+    )
+    private val timeAfterPlace = Regex("(.+?) ($forecastTime)")
+    private val precipitationQuestion = Regex("(?:will it|is it going to|is it supposed to) (?:rain|snow)(?: ($forecastTime))?")
+
+    /** Open a forecast, never send a live weather lookup to the conversational model. */
+    fun weatherRequest(message: String): WeatherRequest? {
+        val text = feedText(message).replace('’', '\'')
+            .replace(Regex("\\s+"), " ")
+        if (text in weatherDefinitions) return null
+        if (weatherAppOpen.matches(text)) return WeatherRequest(appOnly = true)
+        precipitationQuestion.matchEntire(text)?.let { return WeatherRequest(time = it.groups[1]?.value) }
+        val forecast = forecastPrompt.matchEntire(text) ?: return null
+        val requestedPlace = forecast.groups[3]?.value
+        val placeTime = requestedPlace?.let(timeAfterPlace::matchEntire)
+        val place = (placeTime?.groupValues?.get(1) ?: requestedPlace)?.takeUnless { it in setOf("here", "near me", "my area") }
+        val time = forecast.groups[1]?.value ?: forecast.groups[2]?.value ?: placeTime?.groupValues?.get(2)
+        // Don't interpret "weather for today" as the name of a city.
+        if (time == null && place != null && forecastTimeOnly.matches(place)) return WeatherRequest(time = place)
+        return WeatherRequest(time, place)
+    }
+
+    fun routesWithoutAccessibility(message: String): Boolean = explicitUrl(message) != null || weatherRequest(message) != null
+
+    fun routePhoneLocally(message: String): Boolean =
+        routesWithoutAccessibility(message) || routeFeedLocally(message) || communicationRequest(message) != null ||
+            SpotifyQuickPlan.playlistRequest(message) != null
 
     private val reelAdBadge = setOf("sponsored", "sponsored ad", "ad", "advertisement", "paid advertisement")
     private val adBadgeIds = setOf("ad_label", "ad_badge", "ad_disclosure", "sponsored_label", "sponsored_badge")
