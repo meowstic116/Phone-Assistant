@@ -245,8 +245,9 @@ Pip doesn't send reply text to a speech provider. The separate chat API still ge
 chat replies when needed, whether or not speech is enabled.
 
 The floating bubble reveals words during playback without resizing. Android engines may
-report word ranges; Kokoro uses estimated timing. If audio is unavailable,
-the full reply is still shown. Kokoro runs in a separate app process so a voice-engine
+report word ranges; Kokoro uses estimated timing. The bubble appears even if audio
+hasn’t started. If it takes more than 2.5 seconds to show the first word, or audio
+is unavailable, the full reply is shown without waiting. Kokoro runs in a separate app process so a voice-engine
 failure doesn’t restart the overlay. If that process stops, Pip pauses automatic Kokoro
 speech for the session; a successful **Preview Pip’s voice** resumes it. The last voice
 issue appears in **Debug options → Diagnostics**, without recording any spoken text.
@@ -287,7 +288,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.175-debug.apk`](dist/phone-assistant-0.175-debug.apk).
+[`phone-assistant-0.176-debug.apk`](dist/phone-assistant-0.176-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by
