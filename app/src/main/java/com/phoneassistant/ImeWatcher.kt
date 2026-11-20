@@ -40,6 +40,7 @@ class ImeWatcher : AccessibilityService() {
      * 400 ms re-read, which is the safety net under this.
      */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (!PipSettings.enabled(this, PipSettings.Option.ACCESSIBILITY)) return
         val type = event?.eventType ?: return
         if (type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             Screen.recordFeedScroll(event)
@@ -74,7 +75,9 @@ class ImeWatcher : AccessibilityService() {
 
     /** Reads the IME window, if the display has one. */
     private fun refresh() {
-        val height = runCatching { imeWindowHeight() }.getOrDefault(0)
+        val height = if (PipSettings.enabled(this, PipSettings.Option.ACCESSIBILITY)) {
+            runCatching { imeWindowHeight() }.getOrDefault(0)
+        } else 0
         ImeWatch.publish(height)
     }
 

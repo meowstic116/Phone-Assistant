@@ -123,8 +123,13 @@ class ChatHistoryActivity : Activity() {
 
     private fun showJobStarted(started: Boolean) {
         addBubble(
-            if (started) "On it — watch the bubble."
-            else "I couldn't start that job. Check that I'm running and accessibility is enabled.",
+            when {
+                started -> "On it — watch the bubble."
+                !OverlayService.running -> "Start Pip first, then try again."
+                !PipSettings.enabled(this, PipSettings.Option.ACCESSIBILITY) ->
+                    "Accessibility use is turned off in Pip settings."
+                else -> "I couldn't start that job. Check that accessibility is enabled."
+            },
             false
         )
         sendButton.isEnabled = true

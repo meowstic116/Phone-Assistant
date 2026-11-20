@@ -2,4 +2,6 @@
 <full-backup-content>
     <exclude domain="sharedpref" path="brain.xml" />
     <exclude domain="sharedpref" path="vault.xml" />
+    <exclude domain="sharedpref" path="startup.xml" />
+    <exclude domain="sharedpref" path="painting_gallery.xml" />
 </full-backup-content>

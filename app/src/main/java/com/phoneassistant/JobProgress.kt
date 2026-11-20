@@ -417,10 +417,11 @@ internal object JobProgress {
 
     enum class ReelWatchResult { WAITING, FINISHED, ESTIMATED }
 
-    class ReelWatch(started: Long, private val estimatedMs: Long = 18_000L) {
+    class ReelWatch(started: Long) {
         private val start = started
         private var lastProgressAt = started
         private var previous: Playback? = null
+        private var sawTimeline = false
 
         fun observe(now: Long, playback: Playback?): ReelWatchResult {
             val sample = playback?.takeIf { it.ended || it.fraction in 0f..1f }
@@ -428,11 +429,14 @@ internal object JobProgress {
             val prior = previous?.takeIf { it.durationSeconds == sample?.durationSeconds }
             previous = sample // Never infer a loop across an unreadable or uncertain sample.
             if (sample != null) {
+                sawTimeline = true
                 if (prior != null && prior.fraction >= 0.60f && sample.fraction <= 0.30f &&
                     prior.fraction - sample.fraction >= 0.45f) return ReelWatchResult.FINISHED
                 if (prior != null && sample.fraction > prior.fraction) lastProgressAt = now
             }
-            return if (now - start >= estimatedMs && now - lastProgressAt >= 8_000L) {
+            // Shorter pause only when no trustworthy playback timeline was exposed.
+            val minimumWatchMs = if (sawTimeline) 18_000L else 12_000L
+            return if (now - start >= minimumWatchMs && now - lastProgressAt >= 8_000L) {
                 ReelWatchResult.ESTIMATED
             } else ReelWatchResult.WAITING
         }

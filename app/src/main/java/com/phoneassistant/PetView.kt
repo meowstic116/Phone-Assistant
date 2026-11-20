@@ -30,6 +30,14 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
             }
         }
 
+    var gardenLean = 0f
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
     var facingRight: Boolean = true
         set(value) {
             if (field != value) {
@@ -222,7 +230,8 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
 
         canvas.save()
         canvas.translate(cx, bodyCenterY)
-        canvas.rotate(if (facingRight) tilt else -tilt)
+        val poseTilt = tilt + gardenLean * 10f
+        canvas.rotate(if (facingRight) poseTilt else -poseTilt)
 
         // Antenna with a tiny light that brightens while thinking.
         canvas.drawLine(0f, -bodyH / 2f, 0f, -bodyH / 2f - dp(6f), rimPaint)
@@ -242,6 +251,11 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         canvas.drawRoundRect(screenRect, dp(7f), dp(7f), screenPaint)
 
         drawFace(canvas, t, now)
+        if (gardenLean > 0f) {
+            val side = if (facingRight) 1f else -1f
+            canvas.drawLine(side * dp(17f), dp(8f), side * dp(27f), dp(12f - gardenLean * 9f), facePaint)
+            canvas.drawCircle(side * dp(27f), dp(12f - gardenLean * 9f), dp(2.5f), accentPaint)
+        }
         canvas.restore()
     }
 

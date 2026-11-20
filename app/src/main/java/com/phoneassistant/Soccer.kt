@@ -1,6 +1,7 @@
 package com.phoneassistant
 
 import android.graphics.Canvas
+import android.graphics.Path
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
@@ -173,6 +174,7 @@ class SoccerGame(private val host: PropHost) {
             ui.postDelayed({ finish() }, 1500L)
         } else {
             ui.postDelayed({
+                if (over || packedAway()) return@postDelayed
                 ball.reset()
                 paused = false
                 nextPipKick = SystemClock.uptimeMillis() + 2200L
@@ -202,7 +204,7 @@ class SoccerGame(private val host: PropHost) {
             return
         }
         if (pipChasing) return
-        if (!ball.atRest()) return
+        if (!ball.atRest() || ball.movingByUser) return
         if (now - ball.restingSince < 1000L) return
         if (now < nextPipKick) return
 
@@ -214,7 +216,7 @@ class SoccerGame(private val host: PropHost) {
             ball.centreY + host.petHeight() / 2f + host.px(6f)
         ) {
             pipChasing = false
-            if (over || paused) return@petWalkTo
+            if (over || paused || packedAway() || ball.movingByUser) return@petWalkTo
             // If they booted it away while he was plodding over, he kicks at nothing.
             if (abs(ball.centreX - aimX) > host.px(26f)) {
                 host.say("...it moved. that's fine. I meant to do that.")
@@ -260,9 +262,8 @@ class SoccerGame(private val host: PropHost) {
     fun clear() {
         // Over first: nothing queued may rebuild a pitch that is being packed away.
         over = true
-        host.propsOnScreen().forEach { prop ->
-            if (prop is Goal || prop is Ball || prop is ScoreBoard) host.dropProp(prop)
-        }
+        // Old match callbacks must never remove the next match's windows.
+        listOf(board, topGoal, bottomGoal, ball).forEach(host::dropProp)
     }
 }
 
@@ -289,10 +290,14 @@ class Goal(host: PropHost, private val game: SoccerGame, val pipDefends: Boolean
     private var originX = 0f
     private var originY = 0f
 
-    private val glass = fill(0x22FFFFFF)
-    private val netPaint = stroke(0x55FFFFFF, 0.7f)
-    private val postPaint = stroke(if (pipDefends) Ink.ALERT else Ink.ACCENT, 3.2f)
-    private val label = text(if (pipDefends) Ink.ALERT else Ink.ACCENT, 7.5f, true)
+    private val ink = stroke(0xFF242146.toInt(), 6.5f)
+    private val frame = stroke(if (pipDefends) 0xFFFF9C76.toInt() else 0xFF76E8CE.toInt(), 3.8f)
+    private val net = stroke(0x997FEBD7.toInt(), 0.9f)
+    private val netBack = fill(0xDD343366.toInt())
+    private val badge = fill(if (pipDefends) 0xFFFFBC96.toInt() else 0xFF9DF6D9.toInt())
+    private val stripe = stroke(0xFFFFFAE8.toInt(), 1.8f)
+    private val label = text(0xFF242146.toInt(), 7.5f, true)
+    private val cage = Path()
 
     /** Where the ball has to cross to count, in screen pixels. */
     val lineY: Float get() = if (pipDefends) posY + dp(13f) else posY + windowH - dp(13f)
@@ -317,33 +322,43 @@ class Goal(host: PropHost, private val game: SoccerGame, val pipDefends: Boolean
     }
 
     override fun onDraw(canvas: Canvas) {
-        val w = width.toFloat()
+        val cx = width / 2f
         val h = height.toFloat()
-        val inner = RectF(dp(8f), dp(8f), w - dp(8f), h - dp(8f))
-
-        canvas.drawRect(inner, glass)
+        val left = dp(12f)
+        val right = width - dp(12f)
+        val mouth = if (pipDefends) dp(13f) else h - dp(13f)
+        val back = if (pipDefends) h - dp(6f) else dp(6f)
+        val taper = dp(18f)
+        cage.reset()
+        cage.moveTo(left, mouth)
+        cage.lineTo(left + taper, back)
+        cage.lineTo(right - taper, back)
+        cage.lineTo(right, mouth)
+        cage.close()
+        canvas.drawPath(cage, netBack)
         canvas.save()
-        canvas.clipRect(inner)
-        var x = inner.left
-        while (x < inner.right) {
-            canvas.drawLine(x, inner.top, x + h, inner.bottom, netPaint)
-            x += dp(9f)
+        canvas.clipPath(cage)
+        for (i in 0..10) {
+            val f = i / 10f
+            canvas.drawLine(left + (right - left) * f, mouth,
+                left + taper + (right - left - 2 * taper) * f, back, net)
         }
-        var y = inner.top
-        while (y < inner.bottom) {
-            canvas.drawLine(inner.left, y, inner.right, y, netPaint)
-            y += dp(8f)
+        for (i in 1..4) {
+            val f = i / 5f
+            val y = mouth + (back - mouth) * f
+            canvas.drawLine(left, y, right, y, net)
         }
         canvas.restore()
-
-        canvas.drawRect(inner, postPaint)
-        if (pipDefends) {
-            canvas.drawLine(inner.left, inner.top, inner.right, inner.top, postPaint)
-            centred(canvas, "PIP'S GOAL", inner.centerX(), inner.bottom - dp(7f), label)
-        } else {
-            canvas.drawLine(inner.left, inner.bottom, inner.right, inner.bottom, postPaint)
-            centred(canvas, "YOUR GOAL", inner.centerX(), inner.top + dp(8f), label)
+        canvas.drawPath(cage, ink)
+        canvas.drawPath(cage, frame)
+        // Two candy-striped posts sit on the actual scoring line.
+        for (i in 0..6) {
+            val x = left + dp(8f) + i * (right - left - dp(16f)) / 6f
+            canvas.drawLine(x - dp(1f), mouth + dp(1f), x + dp(1f), mouth - dp(1f), stripe)
         }
+        val badgeY = if (pipDefends) back - dp(6f) else back + dp(6f)
+        canvas.drawRoundRect(cx - dp(27f), badgeY - dp(6f), cx + dp(27f), badgeY + dp(6f), dp(5f), dp(5f), badge)
+        centred(canvas, if (pipDefends) "PIP'S GOAL" else "YOUR GOAL", cx, badgeY, label)
     }
 
     override fun describe(): String =
@@ -369,9 +384,17 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
     var restingSince = 0L
         private set
 
-    private val leather = fill(0xFFF3F5F8.toInt())
-    private val seam = stroke(0xFF5C6675.toInt(), 1.2f)
-    private val patch = fill(0xFF232936.toInt())
+    private val leather = fill(0xFFFFFAEC.toInt())
+    private val shade = fill(0xFFA8D7FF.toInt())
+    private val seam = stroke(0xFF2B264D.toInt(), 1.15f)
+    private val outline = stroke(0xFF242146.toInt(), 1.9f)
+    private val patch = fill(0xFF4B438E.toInt())
+    private val patchAlt = fill(0xFF5F58A8.toInt())
+    private val highlight = fill(0xC9FFFFFF.toInt())
+    private val shadow = fill(0x66312654)
+    private val panelPath = Path()
+    private val cosines = FloatArray(5) { kotlin.math.cos(Math.toRadians((it * 72 - 90).toDouble())).toFloat() }
+    private val sines = FloatArray(5) { kotlin.math.sin(Math.toRadians((it * 72 - 90).toDouble())).toFloat() }
 
     fun atRest(): Boolean = !moving
 
@@ -408,8 +431,18 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
         }
     }
 
+    override fun onDragStarted() {
+        vx = 0f
+        vy = 0f
+        moving = false
+    }
+
+    override fun onDragFinished() {
+        restingSince = SystemClock.uptimeMillis()
+    }
+
     override fun onFrame() {
-        if (game.isPaused()) return
+        if (game.isPaused() || movingByUser) return
 
         val now = SystemClock.uptimeMillis()
         val dt = ((now - lastAt).coerceIn(0L, 60L)).toFloat() / 1000f
@@ -465,25 +498,39 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
             vy = -vy * 0.7f
         }
 
-        spin += vx * dt * 0.5f
+        spin = (spin + (vx + vy * 0.30f) * dt * 0.5f) % 360f
         moveTo(nx, ny)
         invalidate()
     }
 
+    private fun pentagon(canvas: Canvas, cx: Float, cy: Float, radius: Float, alternate: Boolean) {
+        panelPath.reset()
+        panelPath.moveTo(cx + radius * cosines[0], cy + radius * sines[0])
+        for (i in 1..4) panelPath.lineTo(cx + radius * cosines[i], cy + radius * sines[i])
+        panelPath.close()
+        canvas.drawPath(panelPath, if (alternate) patchAlt else patch)
+        canvas.drawPath(panelPath, seam)
+    }
+
     override fun onDraw(canvas: Canvas) {
-        val r = width / 2f
+        val cx = width / 2f
+        val cy = height / 2f - dp(1f)
+        val radius = cx - dp(3f)
+        canvas.drawOval(cx - dp(14f), cy + dp(11f), cx + dp(16f), cy + dp(20f), shadow)
+        canvas.drawCircle(cx, cy, radius, shade)
+        canvas.drawCircle(cx - dp(1.2f), cy - dp(1.6f), radius - dp(2f), leather)
         canvas.save()
-        canvas.rotate(spin, r, r)
-        canvas.drawCircle(r, r, r - dp(1.5f), leather)
-        canvas.drawCircle(r, r, r - dp(1.5f), seam)
-        canvas.drawCircle(r, r, dp(5.5f), patch)
-        for (i in 0 until 5) {
-            val angle = Math.toRadians((i * 72).toDouble())
-            val px = r + (r * 0.62f) * Math.cos(angle).toFloat()
-            val py = r + (r * 0.62f) * Math.sin(angle).toFloat()
-            canvas.drawCircle(px, py, dp(3.2f), patch)
+        canvas.rotate(spin, cx, cy)
+        for (i in 0..4) {
+            val px = cx + dp(12.5f) * cosines[i]
+            val py = cy + dp(12.5f) * sines[i]
+            canvas.drawLine(cx, cy, px, py, seam)
+            pentagon(canvas, px, py, dp(3.7f), i % 2 == 0)
         }
+        pentagon(canvas, cx, cy, dp(6.4f), false)
         canvas.restore()
+        canvas.drawOval(cx - dp(11f), cy - dp(12f), cx - dp(4f), cy - dp(9f), highlight)
+        canvas.drawCircle(cx, cy, radius, outline)
     }
 
     override fun describe(): String = "the soccer ball"
@@ -495,10 +542,15 @@ class ScoreBoard(host: PropHost, private val game: SoccerGame) : Prop(host) {
     override val boxW = 124f
     override val boxH = 48f
 
-    private val body = fill(Ink.BG)
-    private val edge = stroke(Ink.EDGE, 1f)
-    private val scorePaint = text(Ink.TEXT, 11f, true)
-    private val rulePaint = text(Ink.DIM, 6.8f)
+    private val body = fill(0xFF31305C.toInt())
+    private val edge = stroke(0xFFFFEAC1.toInt(), 1.6f)
+    private val pipTile = fill(0xFFFFAA85.toInt())
+    private val playerTile = fill(0xFF91F1D9.toInt())
+    private val scorePaint = text(0xFF272248.toInt(), 15f, true)
+    private val teamPaint = text(0xFF272248.toInt(), 8f, true)
+    private val rulePaint = text(0xFFFFEAC1.toInt(), 7.6f, true)
+    private val border = RectF()
+    private val pipScores = (0..SoccerGame.TARGET).map(Int::toString)
 
     override fun onFrame() {
         game.referee(SystemClock.uptimeMillis())
@@ -511,15 +563,16 @@ class ScoreBoard(host: PropHost, private val game: SoccerGame) : Prop(host) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        panel(canvas, RectF(dp(1f), dp(1f), width - dp(1f), height - dp(1f)), 12f, edge, body)
-        centred(
-            canvas,
-            "PIP ${game.pipScore}   ·   ${game.youScore} YOU",
-            width / 2f,
-            height * 0.42f,
-            scorePaint
-        )
-        centred(canvas, "first to ${SoccerGame.TARGET}", width / 2f, height * 0.76f, rulePaint)
+        val half = width / 2f
+        border.set(dp(2f), dp(2f), width - dp(2f), height - dp(2f))
+        panel(canvas, border, 11f, edge, body)
+        canvas.drawRoundRect(dp(6f), dp(6f), half - dp(2f), dp(31f), dp(8f), dp(8f), pipTile)
+        canvas.drawRoundRect(half + dp(2f), dp(6f), width - dp(6f), dp(31f), dp(8f), dp(8f), playerTile)
+        centred(canvas, "PIP", dp(24f), dp(18f), teamPaint)
+        centred(canvas, "YOU", width - dp(24f), dp(18f), teamPaint)
+        centred(canvas, pipScores[game.pipScore.coerceIn(0, SoccerGame.TARGET)], half - dp(13f), dp(18f), scorePaint)
+        centred(canvas, pipScores[game.youScore.coerceIn(0, SoccerGame.TARGET)], half + dp(13f), dp(18f), scorePaint)
+        centred(canvas, "★  FIRST TO THREE  ★", half, dp(38f), rulePaint)
     }
 
     override fun describe(): String =

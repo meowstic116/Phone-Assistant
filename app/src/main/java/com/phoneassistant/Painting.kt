@@ -1,6 +1,8 @@
 package com.phoneassistant
 
+import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.os.Handler
@@ -12,9 +14,9 @@ import kotlin.random.Random
  * A canvas Pip painted. The brush fills in as he works, and once it is finished it stays
  * on the screen for the user to look at, drag around, and ask him about.
  */
-class Painting(host: PropHost, val style: Style = Style.values().random()) : Prop(host) {
+internal class Painting(host: PropHost, val picture: PaintingGallery.Picture, private val image: Bitmap?) : Prop(host) {
 
-    enum class Style(val title: String, val blurb: String) {
+    enum class Style(val title: String, val blurb: String, val drawable: Int? = null) {
         DOG_DEBT(
             "The Dog Still Owes Me Twenty Bucks",
             "a portrait of a dog in a tiny hat who refuses to discuss the money"
@@ -34,7 +36,10 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
         FISH_MOON(
             "Fish, But an Astronaut",
             "a fish in a space helmet planting a tiny flag on the moon"
-        )
+        ),
+        SPACE_CAT("One Small Purr for Space", "a crayon astronaut kitten holding a star on the moon", R.drawable.crayon_cat),
+        TEACUP_FROG("The Teacup Regatta", "a frog in a raincoat sailing a teacup", R.drawable.crayon_frog),
+        FLOWER_GHOST("Boo, But Make It a Daisy", "a shy pink ghost holding a giant daisy", R.drawable.crayon_ghost)
     }
 
     override val boxW = 172f
@@ -46,12 +51,20 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
     /** 0 to 1, how much of the painting has been painted. */
     private var brush = 0f
 
-    private val frame = fill(0xFF8A653F.toInt())
-    private val frameEdge = stroke(0xFF5C4126.toInt(), 1.2f)
-    private val cloth = fill(0xFFF7F1E3.toInt())
-    private val clothEdge = stroke(0xFFD9CFBB.toInt(), 1f)
+    private val frame = fill(0xFFAA8EEF.toInt())
+    private val frameEdge = stroke(0xFF3B2D64.toInt(), 2.2f)
+    private val frameShade = fill(0x667339AF)
+    private val cloth = fill(0xFFFFF3D8.toInt())
+    private val clothEdge = stroke(0xFF674C89.toInt(), 1.2f)
+    private val tape = fill(0xFFFFD77D.toInt())
+    private val bobble = fill(0xFFFFF2D5.toInt())
+    private val swatches = intArrayOf(0xFFFF9AAE.toInt(), 0xFFFFDF80.toInt(), 0xFF8FE8C5.toInt(), 0xFF83C8FF.toInt()).map(::fill)
+    private val signature = text(0xFF2E2155.toInt(), 7f, true)
+    private val paperLine = stroke(0x19886B69, 0.7f)
     private val artArea = RectF()
     private val scratch = RectF()
+    private val imageRect = RectF()
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
     /** The frame's outer box, reused: this canvas is redrawn while it is being painted. */
     private val frameRect = RectF()
@@ -88,27 +101,35 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
         val w = width.toFloat()
         val h = height.toFloat()
 
-        frameRect.set(dp(1f), dp(1f), w - dp(1f), h - dp(1f))
-        panel(canvas, frameRect, 4f, frameEdge, frame)
-        artArea.set(dp(8f), dp(8f), w - dp(8f), h - dp(16f))
+        frameRect.set(dp(3f), dp(3f), w - dp(3f), h - dp(3f))
+        panel(canvas, frameRect, 13f, frameEdge, frame)
+        canvas.drawRoundRect(dp(10f), h - dp(22f), w - dp(10f), h - dp(6f), dp(7f), dp(7f), frameShade)
+        artArea.set(dp(10f), dp(10f), w - dp(10f), h - dp(23f))
         canvas.drawRect(artArea, cloth)
-
+        for (i in 1..7) {
+            val y = artArea.top + artArea.height() * i / 8f
+            canvas.drawLine(artArea.left, y, artArea.right, y, paperLine)
+        }
+        val paintedRight = artArea.left + artArea.width() * brush
         canvas.save()
-        // Only reveal as much of the picture as has been painted so far.
-        canvas.clipRect(
-            artArea.left, artArea.top,
-            artArea.left + artArea.width() * brush, artArea.bottom
-        )
+        canvas.clipRect(artArea.left, artArea.top, paintedRight, artArea.bottom)
         drawArt(canvas)
         canvas.restore()
-
         drawSheen(canvas)
-
         canvas.drawRect(artArea, clothEdge)
-        if (finished) {
-            val signature = text(0xFF6B5B45.toInt(), 6.5f)
-            centred(canvas, "- pip", artArea.right - dp(16f), artArea.bottom - dp(1f), signature)
+        if (!finished) {
+            val tipY = artArea.top + artArea.height() * (0.5f + kotlin.math.sin(brush * 23f) * 0.30f)
+            canvas.drawCircle(paintedRight, tipY, dp(3.1f), tape)
         }
+        for (i in swatches.indices) {
+            canvas.drawCircle(dp(19f + 10f * i), h - dp(13f), dp(3.8f), swatches[i])
+        }
+        centred(canvas, if (finished) "SIGNED: PIP" else "PAINTING…", w - dp(36f), h - dp(13f), signature)
+        canvas.save()
+        canvas.rotate(-18f, dp(15f), dp(11f))
+        canvas.drawRoundRect(dp(6f), dp(7f), dp(24f), dp(14f), dp(1.5f), dp(1.5f), tape)
+        canvas.restore()
+        canvas.drawCircle(w - dp(10f), dp(10f), dp(3f), bobble)
     }
 
     /**
@@ -130,7 +151,18 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
     }
 
     private fun drawArt(canvas: Canvas) {
-        when (style) {
+        val bitmap = image
+        if (bitmap != null) {
+            val scale = minOf(artArea.width() / bitmap.width, artArea.height() / bitmap.height)
+            val halfW = bitmap.width * scale / 2f
+            val halfH = bitmap.height * scale / 2f
+            val x = artArea.centerX()
+            val y = artArea.centerY()
+            imageRect.set(x - halfW, y - halfH, x + halfW, y + halfH)
+            canvas.drawBitmap(bitmap, null, imageRect, bitmapPaint)
+            return
+        }
+        when (picture.style) {
             Style.DOG_DEBT -> {
                 canvas.drawRect(artArea, fill(0xFF2C3A4A.toInt()))
                 val cx = artArea.centerX() - dp(4f)
@@ -451,11 +483,12 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
                 path.close()
                 canvas.drawPath(path, fill(0xFFF2796B.toInt()))
             }
+            else -> Unit // Image-backed pictures were drawn above.
         }
     }
 
     override fun describe(): String =
-        "\"${style.title}\", a painting on a canvas — ${style.blurb}"
+        "\"${picture.title}\", a painting on a canvas — ${picture.blurb}"
 
     companion object {
         private const val SHEEN_PERIOD_MS = 7_200L
@@ -469,7 +502,7 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
 
         val TAP_LINES = listOf(
             "careful. one of one, literally.",
-            "the dog in that one owes me twenty.",
+            "the brush did all the difficult bits.",
             "no flash photography. it's shy.",
             "*holds it up* best work. also my only work.",
             "look all you like. I'm not explaining the middle.",
@@ -482,7 +515,7 @@ class Painting(host: PropHost, val style: Style = Style.values().random()) : Pro
  * The whole bit: Pip finds a spot, sits down with a canvas, paints for a few seconds,
  * then gets up and wanders off again, leaving the painting behind.
  */
-class PaintingScene(private val host: PropHost, private val style: Painting.Style) {
+internal class PaintingScene(private val host: PropHost, private val picture: PaintingGallery.Picture) {
 
     private val ui = Handler(Looper.getMainLooper())
 
@@ -493,9 +526,14 @@ class PaintingScene(private val host: PropHost, private val style: Painting.Styl
         val spotY = h * (0.3f + Random.nextFloat() * 0.18f)
 
         host.petWalkTo(spotX, spotY) {
+            val ctx = host.stageContext()
+            if (!PipSettings.toyAllowed(ctx, Toy.PAINTING) || !PaintingGallery.enabled(ctx, picture) ||
+                host.propsOnScreen().any { it is Painting }) return@petWalkTo
+            val bitmap = PaintingGallery.bitmap(ctx, picture)
+            if ((picture.style == null || picture.style.drawable != null) && bitmap == null) return@petWalkTo
             host.petSit(true)
             host.say("*sets up the easel* give me a minute. inspiration is scheduled.")
-            val art = Painting(host, style)
+            val art = Painting(host, picture, bitmap)
             val gap = host.px(6f)
             val halfPet = host.petWidth() / 2f
             val roomRight = w - (spotX + halfPet)
@@ -521,7 +559,7 @@ class PaintingScene(private val host: PropHost, private val style: Painting.Styl
         if (!art.isAttachedToWindow || art.leaving) return
         host.feel(PetView.Mood.HAPPY, 3200L)
         host.say(
-            "done. it's \"${art.style.title}\". *holds it out* still wet, and I'm " +
+            "done. it's \"${art.picture.title}\". *holds it out* still wet, and I'm " +
                 "quietly pleased."
         )
         val w = host.stageWidth().toFloat()

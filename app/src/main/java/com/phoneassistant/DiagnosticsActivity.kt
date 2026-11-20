@@ -163,7 +163,11 @@ class DiagnosticsActivity : Activity() {
         // as off here even though Settings says otherwise, and that is worth seeing.
         line(
             "phone hands",
-            if (Screen.available()) "connected" else "not connected — toggle it in Settings"
+            when {
+                !PipSettings.enabled(this, PipSettings.Option.ACCESSIBILITY) -> "disabled in Pip settings"
+                Screen.available() -> "connected"
+                else -> "not connected — toggle it in Android settings"
+            }
         )
         val ime = ImeWatch.heightPx
         line("IME reported", "${ime}px · ${asDp(ime, density)}dp")

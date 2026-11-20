@@ -3,9 +3,13 @@
     <cloud-backup>
         <exclude domain="sharedpref" path="brain.xml" />
         <exclude domain="sharedpref" path="vault.xml" />
+        <exclude domain="sharedpref" path="startup.xml" />
+        <exclude domain="sharedpref" path="painting_gallery.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="brain.xml" />
         <exclude domain="sharedpref" path="vault.xml" />
+        <exclude domain="sharedpref" path="startup.xml" />
+        <exclude domain="sharedpref" path="painting_gallery.xml" />
     </device-transfer>
 </data-extraction-rules>

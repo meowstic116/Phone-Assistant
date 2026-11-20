@@ -265,6 +265,9 @@ object Toys {
     fun summon(host: OverlayService, toy: Toy): Outcome {
         val ctx = host.stageContext()
 
+        if (!PipSettings.toyAllowed(ctx, toy)) {
+            return Outcome(false, "${toy.label} is disabled in Pip settings. Say so; don't pretend it is out.")
+        }
         if (Quiet.active(ctx)) {
             host.feel(PetView.Mood.ANNOYED, 2000L)
             return Outcome(
@@ -325,12 +328,13 @@ object Toys {
                         "at the one you already made."
                 )
             } else {
-                val style = Painting.Style.values().random()
-                PaintingScene(host, style).begin()
+                val picture = PaintingGallery.pictures(ctx).filter { PaintingGallery.enabled(ctx, it) }.randomOrNull()
+                    ?: return Outcome(false, "There are no enabled pictures. Ask them to enable one in the Painting gallery.")
+                PaintingScene(host, picture).begin()
                 Outcome(
                     true,
                     "you climbed onto the screen with a canvas and are painting " +
-                        "${style.blurb}. answer briefly and tell them to hold on."
+                        "${picture.blurb}. answer briefly and tell them to hold on."
                 )
             }
 
@@ -361,8 +365,8 @@ object Toys {
                     if (wrap.bring(host.stageWidth() * 0.52f, y)) {
                         Outcome(
                             true,
-                            "you put a sheet of bubble wrap on their screen and are pressing " +
-                                "a few of the bubbles yourself. they can pop the rest by tapping."
+                            "you put out a small sheet of bubble wrap and will hop on the bubbles until they're all popped. " +
+                                "they can join in by tapping."
                         )
                     } else {
                         Outcome(
@@ -385,8 +389,8 @@ object Toys {
                     if (plant.bring(host.stageWidth() * 0.18f, y)) {
                         Outcome(
                             true,
-                            "you put a pot plant on their screen. it needs three waterings " +
-                                "per stage to grow, and you are already invested in it."
+                            "you put a pot plant on their screen and will water it yourself if they leave it. " +
+                                "they can help by tapping; each stage takes three waterings."
                         )
                     } else {
                         Outcome(
@@ -548,7 +552,11 @@ object Toys {
     fun spontaneous(host: OverlayService) {
         if (Quiet.active(host.stageContext())) return
         if (host.propsOnScreen().isNotEmpty()) return
-        val toy = Toy.values().random()
+        val ctx = host.stageContext()
+        if (!PipSettings.enabled(ctx, PipSettings.Option.SPONTANEOUS)) return
+        val toy = Toy.values().filter { PipSettings.toyAllowed(ctx, it) &&
+            (it != Toy.PAINTING || PaintingGallery.pictures(ctx).any { picture -> PaintingGallery.enabled(ctx, picture) })
+        }.randomOrNull() ?: return
         if (!summon(host, toy).ok) return
         host.say(
             when (toy) {
@@ -559,7 +567,7 @@ object Toys {
                 Toy.SOCCER ->
                     "first to three. the goals stay where I put them."
                 Toy.BUBBLES ->
-                    "bubble wrap turned up. I've started without you. *pops one*"
+                    "bubble wrap turned up. tiny feet, big plans."
                 Toy.PLANT ->
                     "we have a plant now. tap it to water it."
             }

@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.os.SystemClock
-import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.AccelerateInterpolator
@@ -65,6 +64,13 @@ interface PropHost {
     /** Pip's middle, in screen pixels. Read every frame, so it returns a plain float. */
     fun petCentreX(): Float
 
+    /** Leap toward a toy's target, with his feet landing at the given screen point. */
+    fun petHopOn(owner: Prop, x: Float, y: Float, landed: () -> Unit): Boolean
+
+    /** Approach a plant and animate a pour. A null progress means the pose has ended. */
+    fun petWaterPlant(owner: Prop, x: Float, feetY: Float, facesRight: Boolean,
+                      progress: (Float?) -> Unit, watered: () -> Unit): Boolean
+
     /** Pip walks until his centre sits on (x, y), then runs [done]. */
     fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?)
 
@@ -92,6 +98,8 @@ interface PropHost {
      * finger was on it; now that the finger is gone it can get out of the way like the rest.
      */
     fun propLetGo(prop: Prop)
+    fun userDragAllowed(): Boolean
+    fun propTapped(prop: Prop)
     fun propsOnScreen(): List<Prop>
 }
 
@@ -133,7 +141,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     var leaving = false
         private set
 
-    /** When this prop appeared, so a toy can outstay its welcome and be packed away. */
+    /** Start time for visual effects that animate relative to this prop's arrival. */
     val bornAt: Long = SystemClock.uptimeMillis()
 
     private val density = resources.displayMetrics.density
@@ -145,70 +153,32 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     val centreX: Float get() = posX + windowW / 2f
     val centreY: Float get() = posY + windowH / 2f
 
-    private var downRawX = 0f
-    private var downRawY = 0f
-    private var lastRawX = 0f
-    private var lastRawY = 0f
-    private var travelled = false
-
-    /**
-     * True while a finger is on this prop. A step that starts while a toy is being dragged
-     * leaves that one touchable: taking the touch away mid-drag would drop it out of the hand
-     * holding it.
-     */
-    var held = false
-        private set
-
-    private val touch = View.OnTouchListener { _, event ->
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                downRawX = event.rawX
-                downRawY = event.rawY
-                lastRawX = event.rawX
-                lastRawY = event.rawY
-                travelled = false
-                held = true
-                lift(true)
-                true
-            }
-
-            MotionEvent.ACTION_MOVE -> {
-                if (abs(event.rawX - downRawX) > dp(7f) ||
-                    abs(event.rawY - downRawY) > dp(7f)
-                ) {
-                    travelled = true
-                }
-                if (travelled) {
-                    moveTo(posX + event.rawX - lastRawX, posY + event.rawY - lastRawY)
-                    lastRawX = event.rawX
-                    lastRawY = event.rawY
-                }
-                true
-            }
-
-            MotionEvent.ACTION_UP -> {
-                held = false
-                host.propLetGo(this)
-                lift(false)
-                if (travelled) onDragFinished() else onTap(event.x, event.y)
-                travelled = false
-                true
-            }
-
-            MotionEvent.ACTION_CANCEL -> {
-                held = false
-                host.propLetGo(this)
-                lift(false)
-                travelled = false
-                true
-            }
-
-            else -> false
+    private val drag = WindowDrag(
+        this,
+        position = { DragMotion.Point(posX, posY) },
+        moveTo = ::moveTo,
+        allowed = { !leaving && host.userDragAllowed() },
+        grip = { holding ->
+            if (!holding) host.propLetGo(this)
+            if (!leaving) lift(holding)
+        },
+        dragStarted = ::onDragStarted,
+        dragFinished = ::onDragFinished,
+        tapped = { x, y ->
+            host.propTapped(this)
+            onTap(x, y)
         }
-    }
+    )
 
-    init {
-        setOnTouchListener(touch)
+    val held: Boolean get() = drag.held
+    internal val movingByUser: Boolean get() = drag.moving
+    internal fun cancelDrag() = drag.cancel()
+
+    init { setOnTouchListener(drag) }
+
+    override fun onDetachedFromWindow() {
+        drag.cancel()
+        super.onDetachedFromWindow()
     }
 
     /** Move the window, keeping it on the screen. Safe to call before the window exists. */
@@ -221,8 +191,11 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
         if (!::params.isInitialized) return
         // The window is placed from these params, so they have to carry the new spot:
         // asking for a layout update without them just re-applies where it already was.
-        params.x = posX.toInt()
-        params.y = posY.toInt()
+        val newX = posX.toInt()
+        val newY = posY.toInt()
+        if (params.x == newX && params.y == newY) return
+        params.x = newX
+        params.y = newY
         host.updateProp(this)
     }
 
@@ -253,7 +226,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     /** Shrinks and fades away, for a prop that has already left the stage. */
     fun fadeAway() {
         leaving = true
-        held = false
+        drag.cancel()
         // A prop on its way out must not answer a last tap, and must not be picked up by a
         // finger mid-fade and made opaque again for 170ms.
         setOnTouchListener(null)
@@ -281,6 +254,8 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
 
     /** Called for a tap that was not a drag. Coordinates are inside this prop. */
     protected open fun onTap(x: Float, y: Float) {}
+
+    protected open fun onDragStarted() {}
 
     /** Called when the user finishes dragging this prop somewhere else. */
     protected open fun onDragFinished() {}
