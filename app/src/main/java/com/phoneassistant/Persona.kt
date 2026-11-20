@@ -141,16 +141,17 @@ object Persona {
         appLabel: String?,
         stage: String? = null,
         event: String? = null,
-        canAct: Boolean = false
+        canAct: Boolean = false,
+        includePersonalContext: Boolean = true
     ): String {
         val where = if (appLabel != null) {
             "They currently have $appLabel open."
         } else {
             "You do not know which app they are in right now."
         }
-        val facts = Facts.promptBlock(ctx)
+        val facts = if (includePersonalContext) Facts.promptBlock(ctx) else ""
         return buildString {
-            append(instructions(ctx).trimEnd())
+            append((if (includePersonalContext) instructions(ctx) else DEFAULT_INSTRUCTIONS).trimEnd())
             append("\n\nCURRENT CONTEXT\n- ").append(where)
             if (!stage.isNullOrBlank()) {
                 append("\n\n").append(stage)

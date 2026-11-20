@@ -795,18 +795,30 @@ fun main() {
 
     val textOnlyBubble = ReplyBubbleState(12, spoken = false)
     check(textOnlyBubble.visibleEnd == 12 && !textOnlyBubble.waiting)
-    val spokenBubble = ReplyBubbleState(12, spoken = true)
-    check(spokenBubble.waiting && spokenBubble.visibleEnd == 0)
-    check(!spokenBubble.reveal(0) && spokenBubble.waiting)
-    check(spokenBubble.reveal(5) && spokenBubble.visibleEnd == 5)
-    check(!spokenBubble.showTextIfWaiting()) // Timely speech keeps revealing word by word.
-    check(!spokenBubble.reveal(3) && spokenBubble.visibleEnd == 5)
-    check(spokenBubble.reveal(null) && spokenBubble.visibleEnd == 12)
-    val slowVoice = ReplyBubbleState(12, spoken = true)
-    check(slowVoice.showTextIfWaiting() && slowVoice.visibleEnd == 12)
-    check(!slowVoice.reveal(4) && slowVoice.visibleEnd == 12) // Late audio never hides text again.
+    val wakePhrase = WakePhrase()
+    check(wakePhrase.accept("Ask Pip what he thinks", 1) == null && !wakePhrase.awaiting)
+    check(wakePhrase.accept("Piper, how are you?", 2) == null && !wakePhrase.awaiting)
+    check(wakePhrase.accept("Hey, PIP, tell me a joke!", 3) == "tell me a joke!")
+    check(wakePhrase.accept("Pip.", 100) == null && wakePhrase.awaiting)
+    check(wakePhrase.accept("How are you?", 5_000) == "How are you?" && !wakePhrase.awaiting)
+    check(wakePhrase.accept("Pip", 10_000) == null && wakePhrase.awaiting)
+    check(wakePhrase.expire(18_001) && !wakePhrase.awaiting)
+    check(wakePhrase.accept("This must not send after expiry", 19_000) == null)
+
+    val spokenReply = "One two three"
+    val voiceCaption = checkNotNull(SpeechCaption.from(spokenReply, 420))
+    val spokenBubble = ReplyBubbleState(spokenReply.length, spoken = true)
+    // Repeated zero-progress ticks, even after a long wait, leave the animated dots up.
+    repeat(250) { check(!spokenBubble.reveal(voiceCaption.displayEndForProgress(0f))) }
+    check(spokenBubble.waiting)
+    check(spokenBubble.reveal(voiceCaption.displayEndForProgress(.001f)))
+    check(!spokenBubble.waiting && spokenReply.take(spokenBubble.visibleEnd) == "One")
+    check(spokenBubble.reveal(voiceCaption.displayEndForProgress(.4f)))
+    check(spokenReply.take(spokenBubble.visibleEnd) == "One two")
+    check(!spokenBubble.reveal(voiceCaption.displayEndForProgress(.2f)))
+    check(spokenBubble.reveal(null) && spokenBubble.visibleEnd == spokenReply.length)
     val noAudio = ReplyBubbleState(12, spoken = true)
-    check(noAudio.reveal(null) && !noAudio.waiting && noAudio.visibleEnd == 12)
+    check(noAudio.waiting && noAudio.reveal(null) && !noAudio.waiting && noAudio.visibleEnd == 12)
 
     val captionSource = "  *waves* Hello,   world! *smiles*"
     val captions = checkNotNull(SpeechCaption.from(captionSource, 420))
@@ -815,7 +827,9 @@ fun main() {
     check(captionSource.take(captions.displayEndForRange(7, 12)) == "  *waves* Hello,   world!")
     check(captions.displayEndForRange(6, 7) == 0) // Whitespace alone isn't a new word.
     check(captions.displayEndForProgress(-0.01f) == 0)
-    check(captions.displayEndForProgress(0f) == captions.displayEndForRange(0, 5))
+    check(captions.displayEndForProgress(0f) == 0)
+    check(captions.displayEndForProgress(Float.NaN) == 0)
+    check(captions.displayEndForProgress(.001f) == captions.displayEndForRange(0, 5))
     check(captions.displayEndForProgress(1f) == captions.displayEndForRange(7, 12))
     val reveal = (0..100).map { captions.displayEndForProgress(it / 100f) }
     check(reveal.zipWithNext().all { (a, b) -> a <= b })

@@ -85,7 +85,6 @@ class OverlayService : Service(), PropHost {
 
         /** How long a spoken line keeps him standing there before he gets on with things. */
         private const val SPEAKING_PAUSE_MS = 3_500L
-        private const val BUBBLE_SPEECH_WAIT_MS = 2_500L
 
         /**
          * Height, in dp, of the row a keyboard sits under: a chat's message box, a comment
@@ -137,6 +136,14 @@ class OverlayService : Service(), PropHost {
             else if (VoiceSettings.enabled(context)) PipVoice.reply(context, text)
         }
 
+        internal fun heardVoice(text: String, stillListening: () -> Boolean, done: () -> Unit) {
+            val service = instance
+            if (service == null || service.ending || !running) done()
+            else service.handleVoice(text, stillListening, done)
+        }
+
+        internal fun discardVoiceDraft() { instance?.voiceDraft = null }
+
         /** Main-screen buttons: put one of Pip's toys on the screen. */
         fun bringOut(toy: Toy): Boolean {
             val service = instance?.takeUnless { it.ending } ?: return false
@@ -171,6 +178,7 @@ class OverlayService : Service(), PropHost {
             Agent.cancel()
             instance?.let {
                 it.awaitingReply = false
+                it.voiceDraft = null
                 it.hideThinking()
                 it.hideBubble()
                 it.leaveAttention()
@@ -272,7 +280,6 @@ class OverlayService : Service(), PropHost {
     }
     private var voicedReply: VoicedReply? = null
     private var bubble: ReplyBubbleView? = null
-    private var speechBubbleFallback: Runnable? = null
     private var bubbleParams: WindowManager.LayoutParams? = null
     private data class BubbleExit(val view: ReplyBubbleView, val animation: ValueAnimator)
     private var bubbleExit: BubbleExit? = null
@@ -281,6 +288,7 @@ class OverlayService : Service(), PropHost {
     private var thinking: ThinkingView? = null
     private var thinkingParams: WindowManager.LayoutParams? = null
 
+    private var voiceDraft: Pair<String, Long>? = null
     private var inputBar: LinearLayout? = null
     private var inputField: EditText? = null
     private var inputParams: WindowManager.LayoutParams? = null
@@ -737,6 +745,7 @@ class OverlayService : Service(), PropHost {
         ending = true
         onPowerStateChanged?.invoke()
         // Work stops immediately, not after the decorative exit has finished.
+        WakeListenService.stop(this)
         PipVoice.stop()
         Agent.cancel()
         finishJobWalk(false)
@@ -788,6 +797,7 @@ class OverlayService : Service(), PropHost {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        WakeListenService.stop(this)
         PipVoice.stop()
         cancelPowerAnimation()
         cancelToyReach()
@@ -1654,19 +1664,13 @@ class OverlayService : Service(), PropHost {
         }
     }
 
-    private fun cancelSpeechBubbleFallback() {
-        speechBubbleFallback?.let(handler::removeCallbacks)
-        speechBubbleFallback = null
-    }
-
-    private fun captionReply(text: String) {
+    private fun captionReply(text: String, handsFree: Boolean = false) {
         val reply = VoicedReply(text)
         val presentation = reply.presentation
         voicedReply = reply
-        openBubble(text, presentation.visibleEnd)
-        bubbleHideAt = Long.MAX_VALUE
 
         fun render() {
+            hideThinking()
             val view = bubble
             if (view != null) view.reveal(presentation.visibleEnd)
             else openBubble(text, presentation.visibleEnd)
@@ -1682,35 +1686,30 @@ class OverlayService : Service(), PropHost {
             val previous = presentation.visibleEnd
             val changed = presentation.reveal(end)
             if (end == null) {
-                cancelSpeechBubbleFallback()
                 voicedReply = null
                 if (changed || previous == 0) render()
+                if (previous == 0) startTalking()
                 if (previous < text.length) {
                     val unseen = text.length - previous
                     holdText(if (previous > 0 && unseen <= 16) 3_000L else bubbleLifetime(text.substring(previous)))
                 } else if (bubbleHideAt == Long.MAX_VALUE) holdText(3_000L)
             } else if (changed) {
-                cancelSpeechBubbleFallback()
                 render()
                 bubbleHideAt = Long.MAX_VALUE
                 idleUntil = SystemClock.uptimeMillis() + SPEAKING_PAUSE_MS
-                if (pet?.mood == PetView.Mood.TALKING || pet?.mood == PetView.Mood.NEUTRAL) {
-                    feel(PetView.Mood.TALKING, 950L)
+                if (previous == 0 || pet?.mood == PetView.Mood.TALKING || pet?.mood == PetView.Mood.NEUTRAL) {
+                    startTalking(950L)
                 }
             }
         }
 
-        speechBubbleFallback = Runnable {
-            speechBubbleFallback = null
-            if (voicedReply === reply && !ending && presentation.showTextIfWaiting()) {
-                render()
-                holdText(bubbleLifetime(text))
-            }
-        }.also { handler.postDelayed(it, BUBBLE_SPEECH_WAIT_MS) }
         ChatRecovery.attempt(Unit, {
             Diag.chatFailure("start spoken reply", it)
             onCaption(null)
-        }) { PipVoice.reply(this, text, ::onCaption) }
+        }) { PipVoice.reply(this, text, ::onCaption, allowLocked = handsFree) }
+        // Keep the same animated dots through synthesis. Playback or the voice layer's
+        // bounded failure callback decides when to replace them, not a separate UI timer.
+        if (voicedReply === reply && presentation.waiting) showThinking()
     }
 
     private fun fadeBubble() {
@@ -1754,7 +1753,7 @@ class OverlayService : Service(), PropHost {
 
     private fun hideBubble() {
         clearBubbleExit()
-        cancelSpeechBubbleFallback()
+        if (voicedReply?.presentation?.waiting == true) hideThinking()
         voicedReply = null
         bubble?.let { view ->
             view.animate().cancel()
@@ -1780,7 +1779,7 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun showThinking() {
-        hideThinking()
+        if (thinking != null) return
         val width = dpInt(52f)
         val height = dpInt(26f)
         val view = ThinkingView(this)
@@ -1849,11 +1848,10 @@ class OverlayService : Service(), PropHost {
         idleUntil = SystemClock.uptimeMillis() + 1500L
     }
 
-    private fun sayAloud(text: String, finalReply: Boolean = false) {
+    private fun sayAloud(text: String, finalReply: Boolean = false, handsFree: Boolean = false) {
         // A reply can land after the overlay has been stopped, and a bubble added to a dead
         // service is a window nothing will ever take down again.
         if (ending || !running) return
-        hideThinking()
         // Speaking is a pause, not attention. Attention belongs to the chat bar and to sitting
         // at his easel; claiming it here is what used to root him to the spot, because nothing
         // ever gave it back.
@@ -1866,12 +1864,20 @@ class OverlayService : Service(), PropHost {
         }
         idleUntil = SystemClock.uptimeMillis() + SPEAKING_PAUSE_MS
         hideBubble()
-        if (finalReply && VoiceSettings.enabled(this)) captionReply(text)
-        else openBubble(text)
+        if (finalReply && VoiceSettings.enabled(this)) {
+            captionReply(text, handsFree)
+        } else {
+            hideThinking()
+            openBubble(text)
+            startTalking()
+        }
+    }
+
+    private fun startTalking(durationMs: Long = 1600L) {
         // Being smug or annoyed outranks talking: he wants you to see his face.
         val mood = pet?.mood
         if (mood != PetView.Mood.ANNOYED && mood != PetView.Mood.SMUG) {
-            feel(PetView.Mood.TALKING, 1600L)
+            feel(PetView.Mood.TALKING, durationMs)
         }
     }
 
@@ -2187,6 +2193,70 @@ class OverlayService : Service(), PropHost {
         inputBar = null
         inputField = null
         inputParams = null
+    }
+
+    private fun showVoiceDraft() {
+        val (text, expires) = voiceDraft ?: return
+        if (!WakeListenService.running || SystemClock.elapsedRealtime() >= expires) {
+            voiceDraft = null
+            return
+        }
+        if (!screenUsable() || inputField != null || ending) return
+        showInputBar()
+        inputField?.let {
+            voiceDraft = null
+            it.setText(text)
+            it.setSelection(it.text.length)
+            android.widget.Toast.makeText(this, "Review the voice request and tap Send to confirm.",
+                android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun confirmVoiceRequest(text: String) {
+        voiceDraft = text to (SystemClock.elapsedRealtime() + 60_000L)
+        showVoiceDraft()
+        if (!screenUsable()) PipVoice.reply(this, "Unlock your phone and tap Send to confirm.", allowLocked = true)
+    }
+
+    private fun handleVoice(text: String, stillListening: () -> Boolean, done: () -> Unit) {
+        if (!stillListening() || Agent.running() || inputField != null || awaitingReply) { done(); return }
+        if (JobProgress.routePhoneLocally(text) || PhoneContext.mayInspect(text) || NowPlaying.requested(text)) {
+            confirmVoiceRequest(text)
+            done()
+            return
+        }
+        val turn = ChatTurns.begin()
+        beginReply()
+        if (screenUsable()) startThinking()
+        // No app/screen context, local phone shortcuts, toy reactions or memory changes occur
+        // on an unconfirmed voice turn. Only a later tap on the ordinary Send button can act.
+        AssistantBrain.reply(this, null, turn = turn, voiceMessage = text) { ok, reply ->
+            handler.post {
+                try {
+                    if (instance !== this || ending || !ChatTurns.isCurrent(turn)) return@post
+                    awaitingReply = false
+                    if (!stillListening()) { hideThinking(); leaveAttention(); return@post }
+                    if (reply == "{\"action\":\"confirm_phone\"}") {
+                        hideThinking()
+                        leaveAttention()
+                        confirmVoiceRequest(text)
+                        return@post
+                    }
+                    ChatRecovery.attempt(Unit, { Diag.chatFailure("voice chat history", it) }) {
+                        Memory.append(this, "user", text)
+                        if (ok) Memory.append(this, "assistant", reply)
+                    }
+                    if (screenUsable()) {
+                        leaveAttention()
+                        sayAloud(reply, finalReply = true, handsFree = true)
+                    } else {
+                        hideThinking()
+                        leaveAttention()
+                        PipVoice.reply(this, reply, allowLocked = true)
+                    }
+                } finally { done() }
+            }
+        }
     }
 
     private fun sendMessage() {
@@ -2794,7 +2864,7 @@ class OverlayService : Service(), PropHost {
                         hideBubble()
                         hideThinking()
                     }
-                    PipVoice.stop()
+                    PipVoice.stopUnlessHandsFree()
                     if (ending) {
                         finishExit()
                         return
@@ -2826,6 +2896,7 @@ class OverlayService : Service(), PropHost {
                     pet?.animating = true
                     if (resume) handler.post(tick)
                     settleBreak()
+                    if (intent.action == Intent.ACTION_USER_PRESENT) showVoiceDraft()
                 }
             }
         }

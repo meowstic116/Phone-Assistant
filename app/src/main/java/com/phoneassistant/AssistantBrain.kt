@@ -106,35 +106,39 @@ object AssistantBrain {
         stage: String? = null,
         event: String? = null,
         turn: Long,
+        voiceMessage: String? = null,
         onDone: (Boolean, String) -> Unit
     ) {
         val appContext = ctx.applicationContext
         // Capture this turn's history before a later turn can enqueue another user message.
-        val history = ChatRecovery.attempt<List<Memory.Msg>?>(null, { Diag.chatFailure("chat history", it) }) {
-            Memory.history(appContext)
-        }
+        // A wake phrase is not authentication. Do not give a spoken turn access to
+        // previous conversations or remembered facts, even if the screen is unlocked.
+        val history = if (voiceMessage != null) listOf(Memory.Msg("user", voiceMessage)) else
+            ChatRecovery.attempt<List<Memory.Msg>?>(null, { Diag.chatFailure("chat history", it) }) {
+                Memory.history(appContext)
+            }
         if (history == null) {
             onDone(false, ChatRecovery.REPLY_FAILED)
             return
         }
         executor.execute {
             val result = ChatRecovery.attempt(false to ChatRecovery.REPLY_FAILED, { Diag.chatFailure("chat reply", it) }) {
-                resolveReply(appContext, history, appLabel, stage, event, turn)
+                resolveReply(appContext, history, appLabel, stage, event, turn, voiceMessage != null)
             }
             onDone(result.first, result.second)
         }
     }
 
     private fun resolveReply(appContext: Context, history: List<Memory.Msg>, appLabel: String?,
-                             stage: String?, event: String?, turn: Long): Pair<Boolean, String> {
+                             stage: String?, event: String?, turn: Long, handsFree: Boolean): Pair<Boolean, String> {
         if (!ChatTurns.isCurrent(turn)) return false to ""
         val config = config(appContext)
         val latest = history.lastOrNull()?.takeIf { it.role == "user" }?.content.orEmpty()
-        val explicitlySaved = Facts.rememberExplicitly(appContext, latest)
-        val suggestMemory = !explicitlySaved && PipSettings.enabled(appContext, PipSettings.Option.LEARN_FROM_CHAT) &&
+        val explicitlySaved = !handsFree && Facts.rememberExplicitly(appContext, latest)
+        val suggestMemory = !handsFree && !explicitlySaved && PipSettings.enabled(appContext, PipSettings.Option.LEARN_FROM_CHAT) &&
             MemorySuggestion.maySuggest(latest)
         val memoryRevision = Facts.revision()
-        val mayInspect = Screen.available() && PhoneContext.mayInspect(latest)
+        val mayInspect = !handsFree && Screen.available() && PhoneContext.mayInspect(latest)
 
         // Whether he can actually work other apps right now decides what the prompt says
         // about his hands: promising them while the switch is off would be a lie.
@@ -143,11 +147,16 @@ object AssistantBrain {
             appLabel,
             stage,
             event,
-            canAct = Screen.available()
+            canAct = !handsFree && Screen.available(),
+            includePersonalContext = !handsFree
         )
 
         val result = try {
-            val prompt = if (mayInspect) "$systemPrompt\n\n$INSPECT_INSTRUCTIONS" else systemPrompt
+            val prompt = when {
+                handsFree -> "$systemPrompt\n\nThis is hands-free chat. For requests to use the phone, inspect the screen, change settings, save or delete information, or use a toy, return exactly {\"action\":\"confirm_phone\"}. For ordinary conversation reply in plain text."
+                mayInspect -> "$systemPrompt\n\n$INSPECT_INSTRUCTIONS"
+                else -> systemPrompt
+            }
             request(config, prompt, history, suggestMemory)
         } catch (e: Exception) {
             Diag.apiFailed("did not finish", e.javaClass.simpleName)
@@ -155,6 +164,9 @@ object AssistantBrain {
         }
         if (!result.first) return result
         val (line, payload) = MemorySuggestion.splitReply(result.second)
+        if (handsFree && (line.trimStart().startsWith("{") || Agent.delegated(line) != null)) {
+            return true to "{\"action\":\"confirm_phone\"}"
+        }
         if (line.startsWith("{") && runCatching {
                 JSONObject(line).optString("action") == "inspect_screen"
             }.getOrDefault(false)) {

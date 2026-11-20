@@ -1,9 +1,12 @@
 package com.phoneassistant
 
+import android.Manifest
 import android.app.Activity
+import android.app.NotificationManager
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -32,6 +35,7 @@ class PipSettingsActivity : Activity() {
     private lateinit var voiceSummary: TextView
     private lateinit var kokoroStatus: TextView
     private lateinit var kokoroAction: Button
+    private lateinit var wakeAction: Button
     private val kokoroChanged: () -> Unit = { refreshVoiceSummary() }
     private var refreshApiIfChanged: () -> Unit = {}
     private val permissionStatuses = mutableListOf<() -> Unit>()
@@ -97,6 +101,11 @@ class PipSettingsActivity : Activity() {
             }
         }
 
+        heading("Talk to Pip")
+        text("Say ‘Pip’ or ‘Hey Pip’, then speak in English. Listening runs on your phone, even after locking. It can use battery and stops when you stop Pip or tap Stop listening. Audio is not saved or sent; recognized chat uses your chat API. Phone actions require unlocking and tapping Send. Turn on Read Pip’s replies aloud to hear answers while locked.")
+        wakeAction = button("") { changeWakeListening() }
+        refreshWakeAction()
+
         val toyHeading = addToySettings()
         addPersonalityAndData()
         addPermissions()
@@ -106,6 +115,50 @@ class PipSettingsActivity : Activity() {
         if (savedInstanceState == null && intent.getBooleanExtra(EXTRA_SHOW_TOYS, false)) {
             scroll.post { scroll.scrollTo(0, toyHeading.top) }
         }
+    }
+
+    private fun refreshWakeAction() {
+        if (!::wakeAction.isInitialized) return
+        wakeAction.isEnabled = !WakeModel.busy && (KokoroVoice.supported() || WakeListenService.running)
+        wakeAction.text = when {
+            WakeListenService.running -> "Stop listening for Pip"
+            !KokoroVoice.supported() -> "Offline listening unavailable on this device"
+            WakeModel.busy -> "Downloading offline recognition…"
+            !WakeModel.ready(this) -> "Download offline recognition (57 MB)"
+            else -> "Start listening for Pip"
+        }
+    }
+
+    private fun changeWakeListening() {
+        if (WakeListenService.running) { WakeListenService.stop(this); return }
+        if (!WakeModel.ready(this)) {
+            WakeModel.install(this) { success ->
+                if (isFinishing || isDestroyed) return@install
+                refreshWakeAction()
+                Toast.makeText(this, if (success) "Ready. Tap Start listening for Pip."
+                    else "Couldn’t install offline recognition. Check your connection and free space.", Toast.LENGTH_LONG).show()
+            }
+            refreshWakeAction()
+            return
+        }
+        if (!OverlayService.running || OverlayService.stopping) {
+            Toast.makeText(this, "Start the assistant before turning on listening.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val missing = buildList {
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (missing.isNotEmpty()) {
+            requestPermissions(missing.toTypedArray(), 702)
+            return
+        }
+        if (!getSystemService(NotificationManager::class.java).areNotificationsEnabled()) {
+            Toast.makeText(this, "Enable Pip notifications so the Stop listening control is available.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!WakeListenService.start(this)) Toast.makeText(this, "Android couldn’t start listening. Try again with settings open.", Toast.LENGTH_LONG).show()
     }
 
     private fun refreshVoiceSummary() {
@@ -125,10 +178,13 @@ class PipSettingsActivity : Activity() {
     override fun onStart() {
         super.onStart()
         KokoroVoice.observe(kokoroChanged)
+        WakeListenService.onChanged = ::refreshWakeAction
+        refreshWakeAction()
     }
 
     override fun onStop() {
         KokoroVoice.forget(kokoroChanged)
+        WakeListenService.onChanged = null
         super.onStop()
     }
 
@@ -287,6 +343,7 @@ class PipSettingsActivity : Activity() {
         super.onResume()
         refreshApiIfChanged()
         refreshHints()
+        refreshWakeAction()
     }
 
     private fun refreshHints() {

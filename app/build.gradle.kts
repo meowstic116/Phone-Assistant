@@ -15,6 +15,7 @@ val kokoroPrebuildSha = "ff4f84512559173e6c61bce1c5723028774ba5040a0fa0a2ab5d990
 val prepareKokoroRuntime by tasks.registering {
     inputs.property("url", kokoroPrebuild)
     inputs.property("sha256", kokoroPrebuildSha)
+    inputs.property("bindings", "tts-and-online-2026-11")
     outputs.dir(kokoroRuntime)
     doLast {
         val bundle = File(temporaryDir, "sherpa.tgz")
@@ -31,18 +32,19 @@ val prepareKokoroRuntime by tasks.registering {
                 "Kokoro runtime checksum mismatch"
             }
             val prefix = "package/android/src/main/"
-            val bindings = "kotlin/com/k2fsa/sherpa/onnx/Tts.kt"
+            val bindings = listOf("Tts", "OnlineRecognizer", "OnlineStream", "FeatureConfig",
+                "HomophoneReplacerConfig", "QnnConfig").map { "kotlin/com/k2fsa/sherpa/onnx/$it.kt" }
             project.sync {
                 from(project.tarTree(project.resources.gzip(bundle))) {
-                    include("$prefix$bindings", "${prefix}jniLibs/*/libonnxruntime.so",
-                        "${prefix}jniLibs/*/libsherpa-onnx-jni.so")
+                    include(bindings.map { "$prefix$it" } + listOf("${prefix}jniLibs/*/libonnxruntime.so",
+                        "${prefix}jniLibs/*/libsherpa-onnx-jni.so"))
                     eachFile { path = path.removePrefix(prefix) }
                     includeEmptyDirs = false
                 }
                 into(kokoroRuntime)
             }
             val output = kokoroRuntime.get().asFile
-            check(output.resolve(bindings).isFile)
+            check(bindings.all { output.resolve(it).isFile })
             for (abi in listOf("arm64-v8a", "armeabi-v7a", "x86_64")) {
                 check(output.resolve("jniLibs/$abi/libsherpa-onnx-jni.so").isFile)
                 check(output.resolve("jniLibs/$abi/libonnxruntime.so").isFile)
@@ -69,8 +71,8 @@ android {
         applicationId = "com.phoneassistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 177
-        versionName = "0.177"
+        versionCode = 179
+        versionName = "0.179"
     }
 
     // One committed, self-signed key signs every build, debug and release alike, so the
