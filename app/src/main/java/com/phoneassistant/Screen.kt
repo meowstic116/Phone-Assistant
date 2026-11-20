@@ -2,6 +2,7 @@ package com.phoneassistant
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -13,6 +14,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Telephony
 import android.telecom.TelecomManager
@@ -31,9 +33,8 @@ import kotlin.math.floor
  *
  * All of this goes through the accessibility service, which is the only API that can see
  * another app's screen and press its buttons. Reading is limited to the window in front, and
- * happens only while a job is running — nothing is kept afterwards, and the only thing that
- * leaves the phone is the list of visible labels sent to the model that was asked to choose
- * a step.
+ * happens for jobs. The spontaneous Home check reads window and launcher resource IDs only,
+ * never labels. Nothing is kept afterwards, and only a model-assisted step sends visible labels.
  *
  * Password fields are listed so the model can see they exist, and refused if it tries to
  * type into one. That refusal is here, at the point of typing, rather than only in the
@@ -170,12 +171,13 @@ object Screen {
     /** Whether this node became an item. One that did is kept until its snapshot is released. */
     private fun consider(node: AccessibilityNodeInfo, out: MutableList<Item>, feed: Boolean): Boolean {
         val editable = node.isEditable
+        val password = node.isPassword
         // What a field contains is never put in the listing, and the listing is the one thing
         // that leaves the phone: a username, a search for something private, or a password in
         // a field the app did not flag. Only the field's own label, whether it has anything in
         // it, and the app's placeholder go out — never the text.
         val label = nodeLabel(node)
-        val filled = editable && !node.text.isNullOrEmpty()
+        val filled = editable && !password && !node.text.isNullOrEmpty()
         val scrollable = node.isScrollable
         // Everything that can be pressed, typed into or scrolled, plus plain text: the text
         // is how the model knows it is looking at the right conversation or message.
@@ -194,10 +196,10 @@ object Screen {
             index = out.size + 1,
             role = role,
             label = label,
-            hint = node.hintText?.takeUnless { node.isPassword }?.toString()?.replace(WHITESPACE, " ")?.trim()
+            hint = if (password) "" else node.hintText?.toString()?.replace(WHITESPACE, " ")?.trim()
                 ?.take(HINT_MAX).orEmpty(),
             editable = editable,
-            password = node.isPassword,
+            password = password,
             filled = filled,
             scrollable = scrollable,
             id = id,
@@ -237,12 +239,13 @@ object Screen {
                     item.id != null -> append("id/").append(item.id)
                     else -> append("(no label)")
                 }
-                if (item.editable) {
-                    append(if (item.filled) " · text field, has text" else " · text field, empty")
+                if (item.password) {
+                    append(" · password, never type into it")
+                } else {
+                    if (item.editable) append(if (item.filled) " · text field, has text" else " · text field, empty")
+                    if (item.scrollable) append(" · scrollable")
+                    if (web && item.node.isClickable && !item.editable) append(" · can tap")
                 }
-                if (item.password) append(" · password, never type into it")
-                else if (item.scrollable) append(" · scrollable")
-                if (web && item.node.isClickable && !item.editable) append(" · can tap")
                 append('\n')
             }
         }.trimEnd()
@@ -565,6 +568,27 @@ object Screen {
         return runCatching { ctx.startActivity(entry); true }.getOrDefault(false)
     }
 
+    /** Android has no weather-app role. Prefer a launchable system weather app. */
+    internal fun openWeather(ctx: Context, active: () -> Boolean): String? {
+        val pm = ctx.packageManager
+        for (packageName in JobProgress.platformWeatherPackages) {
+            if (!active()) return null
+            val launch = runCatching { pm.getLaunchIntentForPackage(packageName) }.getOrNull() ?: continue
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (active() && runCatching { ctx.startActivity(launch) }.isSuccess) {
+                return appLabel(ctx, packageName) ?: "Weather"
+            }
+        }
+        val candidates = apps(ctx).mapNotNull { app ->
+            JobProgress.weatherAppRank(app.label, app.packageName)?.let { it to app }
+        }.sortedBy { it.first }
+        for ((_, app) in candidates) {
+            if (!active()) return null
+            if (open(ctx, app)) return app.label
+        }
+        return null
+    }
+
     /** Launches an app, straight to the activity that owns its icon. */
     fun open(ctx: Context, app: AppRef): Boolean {
         val launch = Intent(Intent.ACTION_MAIN)
@@ -662,6 +686,71 @@ object Screen {
             "$app ($kind)"
         }.getOrElse { "window list threw ${it.javaClass.simpleName}" }
     }
+
+    /**
+     * Fail closed: the launcher package alone is not enough (it also owns Recents and the
+     * app drawer). Only inspect visible IDs from the default Home activity's workspace.
+     * No screen text or results from this check are retained or sent to a model.
+     */
+    internal fun clearHomeScreen(ctx: Context): Boolean = runCatching {
+        val svc = service ?: return false
+        if (ctx.getSystemService(PowerManager::class.java)?.isInteractive != true ||
+            ctx.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != false) return false
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val launcher = ctx.packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)
+            ?.activityInfo?.packageName ?: return false
+        val root = svc.rootInActiveWindow ?: return false
+        if (root.packageName?.toString() != launcher) return false
+        val windows = svc.windows
+        val workspace = windows.singleOrNull { it.id == root.windowId && it.isFocused &&
+            it.type == AccessibilityWindowInfo.TYPE_APPLICATION } ?: return false
+        val bounds = Rect().also(workspace::getBoundsInScreen)
+        if (bounds.isEmpty) return false
+        val thinBar = minOf(bounds.width(), bounds.height()) / 9
+        for (window in windows) {
+            if (window.id == workspace.id) continue
+            if (window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD || window.isFocused || window.isActive) return false
+            val rect = Rect().also(window::getBoundsInScreen)
+            val above = window.layer > workspace.layer && Rect.intersects(bounds, rect)
+            if (window.type == AccessibilityWindowInfo.TYPE_APPLICATION || above) {
+                if (window.root?.packageName?.toString() == svc.packageName) continue // Pip's own inert overlay
+                // Inactive status/navigation bars are fine. Dialogs, split-screen, picture-in-
+                // picture, the shade, and other overlays are not a clear Home screen.
+                val horizontalBar = rect.height() in 1..thinBar && rect.width() >= bounds.width() * 0.85f &&
+                    (rect.top <= bounds.top || rect.bottom >= bounds.bottom)
+                val verticalBar = rect.width() in 1..thinBar && rect.height() >= bounds.height() * 0.85f &&
+                    (rect.left <= bounds.left || rect.right >= bounds.right)
+                if (above && window.type == AccessibilityWindowInfo.TYPE_SYSTEM && (horizontalBar || verticalBar)) continue
+                return false
+            }
+        }
+        val ids = HashSet<String>()
+        val nodes = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        var remaining = MAX_NODES
+        while (nodes.isNotEmpty() && remaining-- > 0) {
+            val node = nodes.removeFirst()
+            if (node.isVisibleToUser) {
+                node.viewIdResourceName?.takeIf { it.startsWith("$launcher:id/") }
+                    ?.substringAfter('/')?.let(ids::add)
+                val children = node.childCount
+                // Don't trust an incomplete tree: a blocked surface could be in the skipped branch.
+                if (children > remaining - nodes.size) {
+                    if (node !== root) hand(node)
+                    while (nodes.isNotEmpty()) hand(nodes.removeFirst())
+                    return false
+                }
+                for (child in 0 until children) node.getChild(child)?.let(nodes::add)
+            }
+            if (node !== root) hand(node)
+        }
+        if (nodes.isNotEmpty()) {
+            while (nodes.isNotEmpty()) hand(nodes.removeFirst())
+            return false
+        }
+        if (!HomeScreenPolicy.isWorkspace(ids)) return false
+        val current = svc.rootInActiveWindow ?: return false
+        current.windowId == workspace.id && current.packageName?.toString() == launcher
+    }.getOrDefault(false)
 
     /** The package of the window in front: the app a snapshot would read. */
     fun inFront(): String? {

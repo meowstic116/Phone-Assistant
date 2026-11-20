@@ -1,5 +1,8 @@
 package com.phoneassistant
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -7,15 +10,11 @@ import android.graphics.RectF
 import android.os.SystemClock
 import android.view.View
 import android.view.WindowManager
-import android.view.animation.AccelerateInterpolator
-import android.view.animation.DecelerateInterpolator
+import android.view.animation.LinearInterpolator
 import kotlin.math.abs
 import kotlin.math.hypot
 
-/**
- * How long a toy takes to fade off the screen, and how long its window is kept before it is
- * removed. Both the fade and the removal read this, so a removal can never cut a fade short.
- */
+/** Speech bubble fade duration; toys use their own motion. */
 internal const val FADE_MS = 170L
 
 /**
@@ -135,8 +134,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
 
     /**
      * True from the moment this prop has left the stage, while its window is still fading.
-     * The window is gone for good 170ms later, so anything still holding this prop has to
-     * treat it as gone from here rather than from the detach.
+     * Treat it as gone now rather than waiting for its exit animation to detach the window.
      */
     var leaving = false
         private set
@@ -157,7 +155,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
         this,
         position = { DragMotion.Point(posX, posY) },
         moveTo = ::moveTo,
-        allowed = { !leaving && host.userDragAllowed() },
+        allowed = { !leaving && !inToyMotion && host.userDragAllowed() },
         grip = { holding ->
             if (!holding) host.propLetGo(this)
             if (!leaving) lift(holding)
@@ -178,6 +176,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
 
     override fun onDetachedFromWindow() {
         drag.cancel()
+        cancelToyMotion()
         super.onDetachedFromWindow()
     }
 
@@ -188,15 +187,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
         val maxY = (host.stageHeight() - windowH - host.stageBottom()).toFloat()
             .coerceAtLeast(minY)
         posY = y.coerceIn(minY, maxY)
-        if (!::params.isInitialized) return
-        // The window is placed from these params, so they have to carry the new spot:
-        // asking for a layout update without them just re-applies where it already was.
-        val newX = posX.toInt()
-        val newY = posY.toInt()
-        if (params.x == newX && params.y == newY) return
-        params.x = newX
-        params.y = newY
-        host.updateProp(this)
+        if (!inToyMotion) positionWindow(posX, posY)
     }
 
     /** Position it and add it to the screen in one step. */
@@ -205,40 +196,108 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
         return host.addProp(this)
     }
 
-    /**
-     * A quick pop as a prop arrives, so it lands on the screen instead of just being there.
-     * The slight undershoot on the way in is what makes it read as placed rather than drawn.
-     */
-    fun appear() {
-        if (!isAttachedToWindow) return
-        alpha = 0f
-        scaleX = 0.84f
-        scaleY = 0.84f
-        animate()
-            .alpha(1f)
-            .scaleX(1f)
-            .scaleY(1f)
-            .setDuration(200L)
-            .setInterpolator(DecelerateInterpolator(1.8f))
-            .start()
+    private var toyAnimator: ValueAnimator? = null
+    private var afterMotion: (() -> Unit)? = null
+    internal val inToyMotion: Boolean get() = toyAnimator != null
+
+    internal val motion: ToyMotion get() = when (this) {
+        is LemonadeStand -> ToyMotion.STAND
+        is LemonadeGlass -> ToyMotion.CUP
+        is Painting -> ToyMotion.CANVAS
+        is Goal -> ToyMotion.GOAL
+        is Ball -> ToyMotion.BALL
+        is ScoreBoard -> ToyMotion.SCORE
+        is BubbleWrap -> ToyMotion.WRAP
+        is Plant -> ToyMotion.PLANT
+        else -> ToyMotion.CANVAS
     }
 
-    /** Shrinks and fades away, for a prop that has already left the stage. */
-    fun fadeAway() {
+    private fun positionWindow(x: Float, y: Float) {
+        if (!::params.isInitialized) return
+        val newX = x.toInt()
+        val newY = y.toInt()
+        if (params.x == newX && params.y == newY) return
+        params.x = newX
+        params.y = newY
+        host.updateProp(this)
+    }
+
+    internal fun arriveFrom(origin: DragMotion.Point, delayMs: Long, settled: () -> Unit) {
+        transit(origin.x - windowW / 2f, origin.y - windowH / 2f, posX, posY,
+            entering = true, delayMs = delayMs) {
+            positionWindow(posX, posY)
+            settled()
+        }
+    }
+
+    internal fun leaveFor(hand: DragMotion.Point?, done: () -> Unit) {
         leaving = true
         drag.cancel()
-        // A prop on its way out must not answer a last tap, and must not be picked up by a
-        // finger mid-fade and made opaque again for 170ms.
         setOnTouchListener(null)
-        if (!isAttachedToWindow) return
         animate().cancel()
-        animate()
-            .alpha(0f)
-            .scaleX(0.92f)
-            .scaleY(0.92f)
-            .setDuration(FADE_MS)
-            .setInterpolator(AccelerateInterpolator())
-            .start()
+        cancelToyMotion()
+        if (hand == null || !isAttachedToWindow) {
+            done()
+            return
+        }
+        transit(params.x.toFloat(), params.y.toFloat(), hand.x - windowW / 2f, hand.y - windowH / 2f,
+            entering = false, delayMs = 0L, done = done)
+    }
+
+    /** The temporary window position does not affect the toy's logical position or physics. */
+    private fun transit(x0: Float, y0: Float, x1: Float, y1: Float, entering: Boolean,
+                        delayMs: Long, done: () -> Unit) {
+        val baseX = if (entering) 1f else scaleX
+        val baseY = if (entering) 1f else scaleY
+        val baseAlpha = if (entering) 1f else alpha
+        val baseRotation = if (entering) 0f else rotation
+        val direction = if (x1 >= x0) 1f else -1f
+        val profile = motion
+        fun frame(t: Float) {
+            val pose = profile.pose(entering, t)
+            val endX = if (entering) posX else x1
+            val endY = if (entering) posY else y1
+            positionWindow(x0 + pose.progress * (endX - x0), y0 + pose.progress * (endY - y0) - dp(pose.lift))
+            alpha = pose.alpha * baseAlpha
+            scaleX = pose.xScale * baseX
+            scaleY = pose.yScale * baseY
+            rotation = baseRotation * (1f - t) + pose.turn * direction
+        }
+        afterMotion = done
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            startDelay = delayMs
+            duration = if (entering) profile.duration else 365L
+            interpolator = LinearInterpolator()
+            addUpdateListener { frame(it.animatedValue as Float) }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (toyAnimator === animation) completeToyMotion()
+                }
+            })
+        }
+        toyAnimator = animator
+        frame(0f)
+        animator.start()
+    }
+
+    internal fun completeToyMotion() {
+        val done = afterMotion ?: return
+        cancelToyMotion()
+        if (!leaving) {
+            alpha = 1f
+            scaleX = 1f
+            scaleY = 1f
+            rotation = 0f
+        }
+        done()
+    }
+
+    private fun cancelToyMotion() {
+        afterMotion = null
+        val old = toyAnimator
+        toyAnimator = null
+        old?.removeAllListeners()
+        old?.cancel()
     }
 
     /** Grows a touch while held, so a prop feels picked up rather than scraped along. */

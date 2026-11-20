@@ -6,6 +6,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
 /**
  * Talks to any OpenAI-compatible chat completions endpoint.
@@ -16,6 +17,8 @@ object AssistantBrain {
     data class Config(val baseUrl: String, val apiKey: String, val model: String)
 
     private const val PREFS = "brain"
+    private const val SETUP_VERIFIED = "setupVerified"
+    private const val SETUP_COMPLETE = "setupComplete"
 
     // Gemini's OpenAI-compatible endpoint: a free AI Studio key works with no card.
     private const val DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -25,6 +28,7 @@ object AssistantBrain {
     private const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
 
     private val executor = Executors.newSingleThreadExecutor()
+    private val setupExecutor = Executors.newSingleThreadExecutor()
 
     fun config(ctx: Context): Config {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -35,12 +39,59 @@ object AssistantBrain {
         )
     }
 
-    fun save(ctx: Context, baseUrl: String, apiKey: String, model: String) {
+    fun save(ctx: Context, baseUrl: String, apiKey: String, model: String) =
+        store(ctx, Config(baseUrl, apiKey, model), verified = false)
+
+    private fun store(ctx: Context, config: Config, verified: Boolean) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString("baseUrl", baseUrl.ifBlank { DEFAULT_BASE })
-            .putString("apiKey", apiKey)
-            .putString("model", model.ifBlank { DEFAULT_MODEL })
+            .putString("baseUrl", config.baseUrl.ifBlank { DEFAULT_BASE })
+            .putString("apiKey", config.apiKey)
+            .putString("model", config.model.ifBlank { DEFAULT_MODEL })
+            .putBoolean(SETUP_VERIFIED, verified)
             .apply()
+    }
+
+    internal fun setupComplete(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(SETUP_COMPLETE, false)
+
+    internal fun setupVerified(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(SETUP_VERIFIED, false) &&
+            config(ctx).apiKey.isNotBlank()
+
+    internal fun finishSetup(ctx: Context): Boolean {
+        if (!setupVerified(ctx)) return false
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(SETUP_COMPLETE, true).apply()
+        return true
+    }
+
+    internal fun saveVerifiedSetup(ctx: Context, config: Config) = store(ctx, config, verified = true)
+
+    /** Tests the same endpoint and request format as Pip, with no user data in the prompt. */
+    internal fun verifySetup(config: Config, done: (SetupPolicy.Check) -> Unit): Future<*> = setupExecutor.submit {
+        val result = when {
+            config.apiKey.isBlank() || config.model.isBlank() || config.baseUrl.isBlank() -> SetupPolicy.Check.MISSING
+            !SetupPolicy.validUrl(config.baseUrl) -> SetupPolicy.Check.URL
+            else -> try {
+                val prompt = JSONArray().put(JSONObject().put("role", "user").put("content", "Reply with OK."))
+                val reply = post(config, prompt, 0.2, 96, setup = true)
+                val parsed = reply.body?.let { runCatching { JSONObject(it) }.getOrNull() }
+                val error = parsed?.optJSONObject("error")
+                val detail = error?.optJSONArray("details")
+                val tag = (0 until (detail?.length() ?: 0)).asSequence()
+                    .mapNotNull { detail?.optJSONObject(it)?.optString("reason")?.takeIf(String::isNotBlank) }
+                    .firstOrNull(SetupPolicy::rejectedKeyTag)
+                    ?: error?.optString("code")
+                val completion = error == null && !completionText(parsed).isNullOrBlank()
+                SetupPolicy.response(reply.code, tag, completion)
+            } catch (_: java.io.IOException) {
+                SetupPolicy.Check.NETWORK
+            } catch (_: IllegalArgumentException) {
+                SetupPolicy.Check.MISSING
+            } catch (_: Exception) {
+                SetupPolicy.Check.RESPONSE
+            }
+        }
+        if (!Thread.currentThread().isInterrupted) done(result)
     }
 
     /**
@@ -95,7 +146,7 @@ object AssistantBrain {
     }
 
     fun clearKey(ctx: Context) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove("apiKey").apply()
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove("apiKey").remove(SETUP_VERIFIED).apply()
     }
 
     private fun request(
@@ -104,8 +155,8 @@ object AssistantBrain {
         history: List<Memory.Msg>
     ): Pair<Boolean, String> {
         if (config.apiKey.isBlank()) {
-            Diag.apiFailed("no API key", "add one on the setup screen")
-            return false to "I need an API key before I can think. Add one on the setup screen."
+            Diag.apiFailed("no API key", "add one in Pip settings → API & model")
+            return false to "I need an API key before I can think. Add one in Pip settings → API & model."
         }
 
         val messages = JSONArray()
@@ -131,8 +182,8 @@ object AssistantBrain {
     ): Pair<Boolean, String> {
         val config = config(ctx.applicationContext)
         if (config.apiKey.isBlank()) {
-            Diag.apiFailed("no API key", "add one on the setup screen")
-            return false to "I need an API key before I can work your phone."
+            Diag.apiFailed("no API key", "add one in Pip settings → API & model")
+            return false to "I need an API key before I can work your phone. Add one in Pip settings → API & model."
         }
         val messages = JSONArray()
             .put(JSONObject().put("role", "system").put("content", system))
@@ -146,42 +197,54 @@ object AssistantBrain {
         temperature: Double,
         maxTokens: Int
     ): Pair<Boolean, String> {
+        val response = post(config, messages, temperature, maxTokens)
+        val code = response.code
+        if (code !in 200..299) {
+            val detail = when (code) {
+                in 300..399 -> "Use the provider's final API URL; redirects are disabled."
+                401, 403 -> "Check the API key and its permissions."
+                429 -> "The provider is limiting requests. Try again shortly."
+                else -> "Check the endpoint and model in Settings."
+            }
+            // An external error body can echo secrets or private prompt content.
+            Diag.apiFailed("HTTP $code", detail)
+            return false to "My brain said no ($code). $detail"
+        }
+        val text = completionText(JSONObject(checkNotNull(response.body))) ?: error("API returned no completion text")
+        Diag.apiOk()
+        return true to text.ifBlank { "(silence)" }
+    }
+
+    private fun completionText(json: JSONObject?): String? = json?.optJSONArray("choices")
+        ?.optJSONObject(0)?.optJSONObject("message")?.opt("content")?.let { it as? String }?.trim()
+
+    private data class HttpReply(val code: Int, val body: String?)
+
+    private fun post(config: Config, messages: JSONArray, temperature: Double, maxTokens: Int,
+                     setup: Boolean = false): HttpReply {
         val body = JSONObject()
             .put("model", config.model)
             .put("messages", messages)
             .put("temperature", temperature)
             .put("max_tokens", maxTokens)
-
-        val connection = (URL(endpointFor(config.baseUrl)).openConnection() as HttpURLConnection).apply {
+        val connection = (URL(SetupPolicy.endpoint(config.baseUrl)).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            // Do not forward an authenticated POST or its chat contents to a redirect target.
+            // Never forward the authenticated POST or its contents to redirect targets.
             instanceFollowRedirects = false
-            // Short enough that a request which is never going to be answered does not hold a
-            // job's step — and the floating character — for a minute. Answers are capped at a
-            // couple of hundred tokens, so a good one is nowhere near this long.
             connectTimeout = 10_000
-            readTimeout = 25_000
+            readTimeout = if (setup) 15_000 else 25_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Authorization", "Bearer " + config.apiKey)
         }
-
         try {
-            connection.outputStream.use { it.write(body.toString().toByteArray()) }
-
+            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
-            if (code !in 200..299) {
-                val detail = when (code) {
-                    in 300..399 -> "Use the provider's final API URL; redirects are disabled."
-                    401, 403 -> "Check the API key and its permissions."
-                    429 -> "The provider is limiting requests. Try again shortly."
-                    else -> "Check the endpoint and model in Settings."
-                }
-                // An external error body can echo secrets or private prompt content.
-                Diag.apiFailed("HTTP $code", detail)
-                return false to "My brain said no ($code). $detail"
-            }
-            val raw = connection.inputStream.bufferedReader().use { reader ->
+            val stream = if (code in 200..299) connection.inputStream else if (setup && code == 400) {
+                // Read only to recognize invalid-key error tags; never log or show provider bodies.
+                connection.errorStream
+            } else null
+            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { reader ->
                 buildString {
                     val buffer = CharArray(4096)
                     while (true) {
@@ -192,24 +255,9 @@ object AssistantBrain {
                     }
                 }
             }
-
-            val text = JSONObject(raw)
-                .getJSONArray("choices")
-                .getJSONObject(0)
-                .getJSONObject("message")
-                .getString("content")
-                .trim()
-
-            Diag.apiOk()
-            return true to text.ifBlank { "(silence)" }
+            return HttpReply(code, raw)
         } finally {
             connection.disconnect()
         }
-    }
-
-    private fun endpointFor(baseUrl: String): String {
-        val trimmed = baseUrl.trim().trimEnd('/')
-        if (trimmed.endsWith("/chat/completions")) return trimmed
-        return trimmed + "/chat/completions"
     }
 }

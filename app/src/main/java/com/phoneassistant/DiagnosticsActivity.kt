@@ -280,6 +280,10 @@ class DiagnosticsActivity : Activity() {
                         "${job.actions} actions · ${took}s"
                 }
             )
+            if (job.modelCalls > 0) {
+                line("model wait", "${job.modelMs / 1000.0}s across ${job.modelCalls} calls · " +
+                    "longest ${job.longestModelMs / 1000.0}s")
+            }
             line("why it stopped", job.reason ?: "still working — no ending yet")
             if (job.steps.isEmpty()) {
                 detail("no step was taken")

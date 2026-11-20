@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="8dp"
+    android:background="@drawable/settings_card"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/settings_api_description"
+        android:textColor="@color/textDim"
+        android:textSize="14sp" />
+
+    <Button
+        android:id="@+id/keyLink"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:backgroundTint="@color/surfaceAlt"
+        android:minHeight="48dp"
+        android:text="@string/settings_api_key_link"
+        android:textAllCaps="false"
+        android:textColor="@color/text" />
+
+    <EditText
+        android:id="@+id/baseUrlField"
+        style="@style/Field"
+        android:layout_marginTop="8dp"
+        android:hint="@string/settings_api_base_url"
+        android:inputType="textUri" />
+
+    <EditText
+        android:id="@+id/apiKeyField"
+        style="@style/Field"
+        android:layout_marginTop="8dp"
+        android:hint="@string/settings_api_key"
+        android:importantForAutofill="no"
+        android:inputType="textPassword"
+        android:saveEnabled="false" />
+
+    <EditText
+        android:id="@+id/modelField"
+        style="@style/Field"
+        android:layout_marginTop="8dp"
+        android:hint="@string/settings_api_model"
+        android:inputType="text" />
+
+    <Button
+        android:id="@+id/saveApiButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:backgroundTint="@color/accent"
+        android:minHeight="48dp"
+        android:text="@string/settings_api_save"
+        android:textAllCaps="false"
+        android:textColor="@color/onAccent" />
+</LinearLayout>

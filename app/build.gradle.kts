@@ -11,8 +11,8 @@ android {
         applicationId = "com.phoneassistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 139
-        versionName = "0.139"
+        versionCode = 153
+        versionName = "0.153"
     }
 
     // One committed, self-signed key signs every build, debug and release alike, so the

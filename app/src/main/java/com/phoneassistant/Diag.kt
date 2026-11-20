@@ -67,7 +67,10 @@ object Diag {
         val reason: String? = null,
         val endedAt: Long = 0L,
         val actions: Int = 0,
-        val turns: Int = 0
+        val turns: Int = 0,
+        val modelCalls: Int = 0,
+        val modelMs: Long = 0L,
+        val longestModelMs: Long = 0L
     ) {
         val running: Boolean get() = reason == null
         val omitted: Int get() = actions - steps.size
@@ -111,6 +114,15 @@ object Diag {
                 turn
             )
         )
+    }
+
+    /** Time waiting for the configured API, including retried calls and the final answer. */
+    @Synchronized
+    fun jobModelWait(id: Int, ms: Long) {
+        val current = lastJob ?: return
+        if (current.id != id || !current.running) return
+        lastJob = current.copy(modelCalls = current.modelCalls + 1,
+            modelMs = current.modelMs + ms, longestModelMs = maxOf(current.longestModelMs, ms))
     }
 
     /** Why the job stopped. The first reason wins: only one thing ends a job. */

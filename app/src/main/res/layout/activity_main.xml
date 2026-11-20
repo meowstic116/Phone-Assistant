@@ -27,16 +27,6 @@
             android:textColor="@color/textDim"
             android:textSize="15sp" />
 
-        <TextView
-            style="@style/SectionHeader"
-            android:text="PERMISSIONS" />
-
-        <LinearLayout
-            android:id="@+id/permissionList"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical" />
-
         <Button
             android:id="@+id/startButton"
             android:layout_width="match_parent"
@@ -54,105 +44,22 @@
             android:text="Pip settings" />
 
         <Button
+            android:id="@+id/toysButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="54dp"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/accentDim"
+            android:text="@string/toys_menu"
+            android:textColor="@color/text" />
+
+        <Button
             android:id="@+id/historyButton"
             android:layout_width="match_parent"
             android:layout_height="54dp"
             android:layout_marginTop="10dp"
             android:backgroundTint="@color/surfaceAlt"
             android:text="Chat history"
-            android:textColor="@color/text" />
-
-        <Button
-            android:id="@+id/personaButton"
-            android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:layout_marginTop="10dp"
-            android:backgroundTint="@color/surfaceAlt"
-            android:text="Personality"
-            android:textColor="@color/text" />
-
-        <Button
-            android:id="@+id/memoryButton"
-            android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:layout_marginTop="10dp"
-            android:backgroundTint="@color/surfaceAlt"
-            android:text="Memory"
-            android:textColor="@color/text" />
-
-        <Button
-            android:id="@+id/loginsButton"
-            android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:layout_marginTop="10dp"
-            android:backgroundTint="@color/surfaceAlt"
-            android:text="Logins Pip can use"
-            android:textColor="@color/text" />
-
-        <TextView
-            style="@style/SectionHeader"
-            android:text="TOYS" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Bring something out on the screen. You can also just ask him for it — “open your lemonade stand”, “let's play soccer”, “paint something”. Ask him to put one away (“put the plant away”), or tell him “no toys for half an hour”."
-            android:textColor="@color/textDim"
-            android:textSize="13sp" />
-
-        <LinearLayout
-            android:id="@+id/toyBox"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:orientation="vertical" />
-
-        <Button
-            android:id="@+id/breakButton"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="8dp"
-            android:backgroundTint="@color/surfaceAlt"
-            android:text="Give Pip a break"
-            android:textColor="@color/text"
-            android:textSize="13sp" />
-
-        <LinearLayout
-            android:id="@+id/breakRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:visibility="gone">
-
-            <TextView
-                android:id="@+id/breakStatus"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:textColor="@color/accent"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-
-            <Button
-                android:id="@+id/endBreakButton"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
-                android:layout_marginStart="8dp"
-                android:backgroundTint="@color/surfaceAlt"
-                android:text="End break"
-                android:textColor="@color/text"
-                android:textSize="12sp" />
-        </LinearLayout>
-
-        <Button
-            android:id="@+id/diagnosticsButton"
-            android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:layout_marginTop="10dp"
-            android:backgroundTint="@color/surfaceAlt"
-            android:text="Diagnostics"
             android:textColor="@color/text" />
 
         <TextView
@@ -177,63 +84,11 @@
             android:textColor="@color/text" />
 
         <TextView
-            style="@style/SectionHeader"
-            android:text="BRAIN" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Defaults to Gemini's free tier, which needs no credit card. Any OpenAI-compatible endpoint works too — OpenAI, OpenRouter, Groq, or Ollama on your network. The key is stored only on this phone."
-            android:textColor="@color/textDim"
-            android:textSize="13sp" />
-
-        <TextView
-            android:id="@+id/keyLink"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:layout_marginBottom="12dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="4dp"
-            android:text="Get a free Gemini API key →"
-            android:textColor="@color/accent"
-            android:textSize="13sp" />
-
-        <EditText
-            android:id="@+id/baseUrlField"
-            style="@style/Field"
-            android:hint="API base URL"
-            android:inputType="textUri" />
-
-        <EditText
-            android:id="@+id/apiKeyField"
-            style="@style/Field"
-            android:layout_marginTop="8dp"
-            android:hint="API key"
-            android:inputType="textPassword" />
-
-        <EditText
-            android:id="@+id/modelField"
-            style="@style/Field"
-            android:layout_marginTop="8dp"
-            android:hint="Model"
-            android:inputType="text" />
-
-        <Button
-            android:id="@+id/saveButton"
-            android:layout_width="match_parent"
-            android:layout_height="50dp"
-            android:layout_marginTop="12dp"
-            android:backgroundTint="@color/surfaceAlt"
-            android:text="Save"
-            android:textColor="@color/text" />
-
-        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="28dp"
             android:layout_marginBottom="16dp"
-            android:text="Pip knows which app is open. When you give him a job he reads the visible labels of the app in front to work out what to press, one step at a time, and he never types into a password field. Nothing he reads is stored, and the only thing that leaves the phone is that list of labels, sent to the AI model you chose."
+            android:text="@string/main_privacy_summary"
             android:textColor="@color/textDim"
             android:textSize="12sp" />
     </LinearLayout>

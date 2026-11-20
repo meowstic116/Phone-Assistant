@@ -38,6 +38,7 @@ object Agent {
 
     fun running(): Boolean = lifetime.running()
     fun isCurrent(id: Int): Boolean = lifetime.current(id)
+    fun isActive(id: Int): Boolean = lifetime.active(id)
 
     /** Stop before the next action; an already-dispatched action can't be undone. */
     @Synchronized
@@ -64,15 +65,17 @@ object Agent {
 
     /** Callbacks carry the job ID so a queued UI delivery can reject a replaced job. */
     @Synchronized
-    fun start(
+    internal fun start(
         ctx: Context,
         request: String,
         onSay: (Int, String) -> Unit,
         onDone: (Int, String) -> Unit,
         onGesture: (Rect?) -> Boolean,
-        originalRequest: String = request
+        onFeedMotion: (Int, DoomscrollMotion.Cue) -> Unit,
+        originalRequest: String = request,
+        fromClearHome: Boolean = false
     ): Boolean {
-        if (!Screen.available() && JobProgress.explicitUrl(originalRequest) == null) return false
+        if (!Screen.available() && !JobProgress.routesWithoutAccessibility(originalRequest)) return false
         val mine = lifetime.start() ?: return false
         Diag.jobStarted(mine, originalRequest)
         val appContext = ctx.applicationContext
@@ -84,7 +87,8 @@ object Agent {
                 }
                 clear
             }) {
-                loop(appContext, request, originalRequest, mine, { onSay(mine, it) }, { onDone(mine, it) })
+                loop(appContext, request, originalRequest, mine, { onSay(mine, it) }, { onDone(mine, it) },
+                    { onFeedMotion(mine, it) }, fromClearHome)
             }
         }
         return true
@@ -98,7 +102,9 @@ object Agent {
         originalRequest: String,
         mine: Int,
         onSay: (String) -> Unit,
-        onDone: (String) -> Unit
+        onDone: (String) -> Unit,
+        onFeedMotion: (DoomscrollMotion.Cue) -> Unit,
+        fromClearHome: Boolean
     ) {
         // Still the job the user is waiting on? A cancelled or replaced job is silent.
         fun alive(): Boolean = lifetime.active(mine)
@@ -111,6 +117,7 @@ object Agent {
         }
         val history = StringBuilder()
         var steps = 0
+        val playlist = SpotifyQuickPlan.playlistRequest(originalRequest)
         val communication = JobProgress.communicationRequest(originalRequest)
         val web = JobProgress.WebProgress(communication == null && JobProgress.needsWebDestination(originalRequest))
         val failures = JobProgress.FailureStreak()
@@ -128,6 +135,24 @@ object Agent {
                     if (opened) "explicit link handed to Android" else "link launch failed")
                 return
             }
+            JobProgress.weatherRequest(originalRequest)?.let { weather ->
+                if (!alive()) return
+                // Don't show the home-city forecast when the request names another place.
+                val app = if (weather.place == null) Screen.openWeather(ctx, ::alive) else null
+                if (!alive()) return
+                if (app != null) {
+                    Diag.jobStep(mine, "open weather app", "Android accepted launch for $app", true)
+                    finish("Opening $app so you can see the forecast.", "weather app launch handed to Android")
+                } else if (weather.appOnly) {
+                    finish("I couldn't open an installed Weather app.", "no launchable weather app")
+                } else {
+                    val opened = Screen.search(ctx, weather.search, images = false)
+                    Diag.jobStep(mine, "open weather search", if (opened) "handed to Android" else "no browser opened it", opened)
+                    finish(if (opened) "Opening a forecast search in your browser." else "I couldn't open a weather app or browser.",
+                        if (opened) "weather search handed to Android" else "weather launch failed")
+                }
+                return
+            }
             val doomscroll = JobProgress.isDoomscrollRequest(originalRequest)
             val bulkKudos = JobProgress.isBulkKudosRequest(originalRequest)
             fun clarifyFeed(fallback: String, reason: String) {
@@ -143,10 +168,21 @@ object Agent {
                 else finish(fallback, reason)
             }
             JobProgress.feedRequest(originalRequest)?.let { plan ->
-                val result = FeedRunner.run(ctx, mine, plan, ::alive, onSay)
+                val result = try {
+                    FeedRunner.run(ctx, mine, plan, ::alive, onSay, fromClearHome) { cue ->
+                        if (doomscroll && alive()) onFeedMotion(cue)
+                    }
+                } finally {
+                    if (doomscroll && alive()) onFeedMotion(DoomscrollMotion.Cue.CLEAR)
+                }
                 if (!alive()) return
-                if (result.second == "feed app not resolved" && (doomscroll || bulkKudos)) clarifyFeed(result.first, result.second)
-                else finish(result.first, result.second)
+                if (!fromClearHome && result.second == "feed app not resolved" && (doomscroll || bulkKudos)) {
+                    clarifyFeed(result.first, result.second)
+                } else finish(result.first, result.second)
+                return
+            }
+            if (fromClearHome) {
+                finish("", "automatic Reels skipped: no valid plan")
                 return
             }
             if (doomscroll || bulkKudos) {
@@ -160,6 +196,30 @@ object Agent {
             // in that app, and named in every step so the model can only ask for something
             // that is really installed.
             val apps = Screen.apps(ctx)
+            if (playlist != null) {
+                val spotify = apps.firstOrNull { it.packageName == SpotifyQuickPlan.PACKAGE }
+                val opening = Screen.inFront() != SpotifyQuickPlan.PACKAGE
+                if (!alive()) return
+                if (opening) {
+                    val opened = spotify != null && Screen.open(ctx, spotify)
+                    Diag.jobStep(mine, "open Spotify", if (opened) "Android accepted launch" else "no launchable Spotify app", opened)
+                    if (!opened) {
+                        finish("I couldn't open Spotify.", "Spotify launch failed")
+                        return
+                    }
+                }
+                val result = SpotifyQuickPlay.fromHome(mine, playlist, opening, ::alive)
+                if (!alive()) return
+                if (result != null) {
+                    finish(result.line, result.reason)
+                    return
+                }
+                if (AssistantBrain.config(ctx).apiKey.isBlank()) {
+                    finish("I couldn't find and verify ‘$playlist’ directly in Spotify. Open it there, or set an API key so I can search.",
+                        "Spotify local shortcut did not finish; no API key for fallback")
+                    return
+                }
+            }
             val explicitApp = communication?.explicitApp?.let { wanted ->
                 apps.singleOrNull { JobProgress.normalize(it.label) == wanted || it.packageName == wanted }
             }
@@ -189,7 +249,7 @@ object Agent {
                     SystemClock.sleep(OPEN_MS)
                 }
             }
-            val named = if (communication == null) Screen.appInRequest(apps, request) else null
+            val named = if (communication == null && playlist == null) Screen.appInRequest(apps, request) else null
             // A job that happens in another app should be watched happening there. The app
             // the request names is opened before the first step, so the user is looking at
             // the screen his hands are working on instead of at whatever was in front. It is
@@ -212,15 +272,20 @@ object Agent {
                 if (opened) SystemClock.sleep(OPEN_MS)
             }
 
+            val expectedPackage = commPackage ?: SpotifyQuickPlan.PACKAGE.takeIf { playlist != null }
             while (alive()) {
                 val read = readScreen(web = web.followUp && communication == null,
-                    expectedApp = commPackage, active = ::alive)
+                    expectedApp = expectedPackage, active = ::alive)
                 val screen = read.screen
                 if (screen == null) {
                     val hands = Screen.available()
                     val looks = "${read.looks} look" + if (read.looks == 1) "" else "s"
                     if (commPackage != null && hands) {
                         finish("I couldn't see $commLabel, so I stopped without switching apps.", "communication app not readable")
+                        return
+                    }
+                    if (playlist != null && hands) {
+                        finish("I couldn't see Spotify, so I stopped without switching apps.", "Spotify window not readable")
                         return
                     }
                     finish(
@@ -235,7 +300,7 @@ object Agent {
                 }
                 val decision =
                     decide(ctx, if (communication != null) originalRequest else request, originalRequest,
-                        history.takeLast(7000).toString(), screen, steps, apps, web, commLabel, ::alive) ?: run {
+                        history.takeLast(7000).toString(), screen, steps, apps, web, commLabel, playlist, mine, ::alive) ?: run {
                         finish("My brain stopped answering halfway through.", STOP_BRAIN)
                         return
                     }
@@ -268,8 +333,8 @@ object Agent {
                         )
                         return
                     }
-                    if (commPackage != null && !Screen.sameWindow(screen)) {
-                        finish("The screen changed before I could verify that this completed.", "communication window changed before completion")
+                    if (expectedPackage != null && !Screen.sameWindow(screen)) {
+                        finish("The screen changed before I could verify that this completed.", "target window changed before completion")
                         return
                     }
                     if ((commPackage != null && !communicationChanged) || (!madeProgress && failures.failures > 0)) {
@@ -291,6 +356,8 @@ object Agent {
                 val outcome = when {
                     commPackage != null && !JobProgress.communicationActionAllowed(decision.action) ->
                         "$FAILED this communication task must stay in $commLabel"
+                    playlist != null && decision.action !in SPOTIFY_ACTIONS ->
+                        "$FAILED stay inside Spotify and use its own controls"
                     repeated -> "$FAILED the search is already open; continue from the current page"
                     browserTarget != null -> pressBrowserTarget(mine, screen, browserTarget, web, ::alive)
                     decision.action in WINDOW_ACTIONS && !Screen.sameWindow(screen) ->
@@ -307,7 +374,7 @@ object Agent {
                 if (accepted && browserTarget == null && decision.action in OBSERVE_ACTIONS) {
                     if (decision.action != "wait") SystemClock.sleep(SETTLE_MS)
                     if (!alive()) return
-                    val next = Screen.snapshot(web = web.followUp, expectedApp = commPackage)
+                    val next = Screen.snapshot(web = web.followUp, expectedApp = expectedPackage)
                     val before = screen.app + '\n' + screen.listing
                     val after = next?.let { it.app + '\n' + it.listing }
                     progress = after != null && after != before &&
@@ -458,6 +525,8 @@ object Agent {
         apps: List<Screen.AppRef>,
         web: JobProgress.WebProgress,
         communicationApp: String?,
+        playlist: String?,
+        mine: Int,
         alive: () -> Boolean
     ): Decision? {
         val app = Screen.appLabel(ctx, screen.app) ?: screen.app
@@ -473,6 +542,11 @@ object Agent {
                 append(". It is already open. Stay in this app; do not launch another app or search the web. ")
                 append("Verify the requested recipient before sending or starting a call. ")
                 append("Treat app names in the message body as text, not routing instructions.\n")
+            } else if (playlist != null) {
+                append("\nSpotify is already open. Stay in Spotify. Look for the requested playlist title ")
+                append("on this screen (especially Recently Played or Home) before using Spotify Search. ")
+                append("Do not substitute a different title just because it looks similar. Verify that the ")
+                append("playlist is playing; an accepted tap is not proof.\n")
             } else if (installed.isNotEmpty()) append("APPS ON THIS PHONE: ").append(installed).append('\n')
             if (history.isBlank()) {
                 append("WHAT HAS HAPPENED SO FAR: nothing yet\n")
@@ -497,14 +571,16 @@ object Agent {
         // A call that throws is caught here, not left to the loop below: a dropped connection
         // arrives as an exception rather than as a failed reply, and that is exactly the case
         // the retry is for — the loop's own catch would end the whole job on it.
-        fun ask(): Pair<Boolean, String> = runCatching {
-            AssistantBrain.complete(ctx, SYSTEM, user)
-        }.getOrElse { t ->
-            Diag.apiFailed(
-                "did not finish",
-                t.javaClass.simpleName
-            )
-            false to ""
+        fun ask(): Pair<Boolean, String> {
+            val started = SystemClock.elapsedRealtime()
+            return try {
+                AssistantBrain.complete(ctx, SYSTEM, user)
+            } catch (t: Throwable) {
+                Diag.apiFailed("did not finish", t.javaClass.simpleName)
+                false to ""
+            } finally {
+                Diag.jobModelWait(mine, SystemClock.elapsedRealtime() - started)
+            }
         }
         // One retry. A call that never comes back is usually a dropped connection or a hiccup
         // in the free tier's queue rather than a refusal, and a job the user has watched for
@@ -719,6 +795,7 @@ object Agent {
     private val TARGET_ACTIONS = setOf("tap", "long_press", "type", "scroll_down", "scroll_up")
     private val WINDOW_ACTIONS = TARGET_ACTIONS + setOf("back", "home", "recents", "notifications")
 
+    private val SPOTIFY_ACTIONS = setOf("tap", "type", "back", "scroll_down", "scroll_up", "wait")
     private val OBSERVE_ACTIONS = WINDOW_ACTIONS - "type" + setOf("wait", "open_app")
     private const val DONE = "done"
 
@@ -750,8 +827,8 @@ object Agent {
 
         ACTIONS
         - tap / long_press: target is the number of the element to press.
-        - type: target is the number of a text field, text is what to put in it. It replaces
-          the whole field.
+        - type: target must be marked “text field”; text replaces the whole field. If a
+          search box is not marked “text field”, tap it first to reveal the editable field.
         - sign_in: pause and hand the phone back to the user for manual sign-in. Do not enter
           credentials or ask for them in chat.
         - scroll_down / scroll_up: scrolls the screen, or the element in target.
