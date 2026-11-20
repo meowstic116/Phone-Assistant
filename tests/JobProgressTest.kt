@@ -378,8 +378,12 @@ fun main() {
     check(changedTimeline.observe(750, JobProgress.Playback(0.9f, durationSeconds = 30)) == JobProgress.ReelWatchResult.WAITING)
     check(changedTimeline.observe(1_500, JobProgress.Playback(0.1f, durationSeconds = 60)) == JobProgress.ReelWatchResult.WAITING)
     val unknown = JobProgress.ReelWatch(2_000)
-    check(unknown.observe(19_999, null) == JobProgress.ReelWatchResult.WAITING)
-    check(unknown.observe(20_000, null) == JobProgress.ReelWatchResult.ESTIMATED)
+    check(unknown.observe(13_999, null) == JobProgress.ReelWatchResult.WAITING)
+    check(unknown.observe(14_000, null) == JobProgress.ReelWatchResult.ESTIMATED)
+    val stalledTimeline = JobProgress.ReelWatch(0)
+    check(stalledTimeline.observe(1_000, JobProgress.Playback(0.20f)) == JobProgress.ReelWatchResult.WAITING)
+    check(stalledTimeline.observe(12_000, null) == JobProgress.ReelWatchResult.WAITING)
+    check(stalledTimeline.observe(18_000, null) == JobProgress.ReelWatchResult.ESTIMATED)
     check(JobProgress.ReelWatch(0).observe(3_000, JobProgress.Playback(1f)) == JobProgress.ReelWatchResult.FINISHED)
 
     // Instagram can add, remove, and restore labels while one reel keeps playing.
@@ -395,12 +399,68 @@ fun main() {
     check(reelObservation.observe(7_500, "caption + more counts", true, noMotion) == uncertainReel)
     check(reelTimer.observe(7_500, null) == JobProgress.ReelWatchResult.WAITING)
     check(reelObservation.observe(18_000, "", false, noMotion) == uncertainReel) // readable window, sparse reel
-    check(reelTimer.observe(18_000, null) == JobProgress.ReelWatchResult.ESTIMATED)
+    check(reelTimer.observe(12_000, null) == JobProgress.ReelWatchResult.ESTIMATED)
     check(reelObservation.observe(18_750, "first caption", false, noMotion) == sameReel)
     check(reelObservation.observe(19_500, "next caption", true, verticalMotion) == uncertainReel)
     check(reelObservation.observe(20_250, "next caption", true, verticalMotion) == JobProgress.ReelIdentity.ADVANCED)
     check(reelObservation.observe(26_249, null, false, noMotion) == uncertainReel)
     check(reelObservation.observe(26_250, null, false, noMotion) == JobProgress.ReelIdentity.UNREADABLE)
+
+    val untouchedToy = ToyLifetime(100L)
+    check(!untouchedToy.expired(15_099L, held = false))
+    check(!untouchedToy.expired(15_100L, held = true))
+    check(untouchedToy.expired(15_100L, held = false)) // Dragging didn't extend the clock.
+    val playedToy = ToyLifetime(100L)
+    playedToy.tapped(4_000L)
+    check(!playedToy.expired(15_100L, held = false))
+    check(!playedToy.expired(63_999L, held = false))
+    playedToy.tapped(63_999L)
+    check(!playedToy.expired(123_998L, held = false))
+    check(playedToy.expired(123_999L, held = false))
+
+    val bubbles = PopSheet()
+    check(bubbles.total == 20 && bubbles.nextBubble() == 16)
+    check(bubbles.pop(16, byPip = false) == PopSheet.Milestone.FIRST)
+    check(bubbles.pop(16, byPip = true) == null && bubbles.pipCount == 0)
+    val pipMilestones = mutableListOf<PopSheet.Milestone>()
+    while (true) {
+        val index = bubbles.nextBubble() ?: break
+        pipMilestones += checkNotNull(bubbles.pop(index, byPip = true))
+    }
+    check(bubbles.count == 20 && bubbles.pipCount == 19)
+    check(pipMilestones.filter { it != PopSheet.Milestone.NONE } == listOf(
+        PopSheet.Milestone.FIRST, PopSheet.Milestone.FIVE, PopSheet.Milestone.TEN,
+        PopSheet.Milestone.FIFTEEN, PopSheet.Milestone.COMPLETE
+    ))
+    check(hopLift(0f) == 0f && hopLift(0.5f) == 1f && hopLift(1f) == 0f)
+
+    val garden = PlantGrowth()
+    repeat(PlantGrowth.MAX_STAGE) { stage ->
+        val now = stage * 2_000L
+        check(garden.thirsty && garden.stage == stage && garden.water == 0)
+        repeat(PlantGrowth.WATER_PER_STAGE) { check(garden.water(now + it)) }
+        check(garden.growing && !garden.thirsty && garden.water == PlantGrowth.WATER_PER_STAGE)
+        check(!garden.water(now + 3)) // A tap or another pour can't stack water while growing.
+        check(!garden.advance(now + 621))
+        check(garden.advance(now + 622) && !garden.advance(now + 622))
+    }
+    check(garden.blooming && !garden.water(10_000L) && !garden.advance(10_000L))
+
+    val drag = DragMotion(density = 2f)
+    drag.begin(200f, 400f, 180f, 370f, 1000L)
+    check(!drag.beyondSlop(202f, 403f, 8f))
+    check(drag.beyondSlop(212f, 403f, 8f))
+    check(drag.target(260f, 390f) == DragMotion.Point(240f, 360f))
+    drag.sample(230f, 390f, 1030L)
+    drag.sample(280f, 380f, 1060L)
+    val glide = checkNotNull(drag.coast(1060L))
+    check(glide.x > 0f && glide.y < 0f && kotlin.math.hypot(glide.x, glide.y) <= 104.01f)
+    check(drag.coast(1141L) == null) // A pause before lifting is a placement, not a fling.
+    drag.begin(10f, 10f, 0f, 0f, 2000L)
+    drag.sample(400f, 10f, 2040L)
+    check(checkNotNull(drag.coast(2040L)).x == 104f)
+    check(DragMotion.coastFraction(0f) == 0f && DragMotion.coastFraction(1f) == 1f)
+    check(DragMotion.coastFraction(0.25f) > 0.5f) // Quick start, gentle landing.
 
     println("Job progress tests passed.")
 }

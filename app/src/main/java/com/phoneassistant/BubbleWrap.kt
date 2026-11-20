@@ -9,42 +9,47 @@ import android.graphics.Shader
 import android.os.SystemClock
 import kotlin.math.cos
 import kotlin.math.sin
-import kotlin.random.Random
+import com.phoneassistant.PopSheet.Milestone
+import kotlin.math.abs
 
 /**
- * A sheet of bubble wrap. Tap bubbles to pop them — and Pip has a go too: he walks over,
- * presses a few himself, says something about it, and leaves the rest to you.
+ * A sheet of bubble wrap. You can tap bubbles, or let Pip hop through every bubble left.
  */
 class BubbleWrap(host: PropHost) : Prop(host) {
 
-    override val boxW = 198f
-    override val boxH = 246f
+    override val boxW = 150f
+    override val boxH = 174f
 
-    private val cols = 5
-    private val rows = 7
-    private val total = cols * rows
-
-    private val popped = BooleanArray(total)
+    private val game = PopSheet()
+    private val cols = game.columns
+    private val rows = game.rows
+    private val total = game.total
     private val burstAt = LongArray(total)
-    private var count = 0
     private var removeAt = 0L
-
-    /** His turn: a few bubbles, then he leaves it alone. */
-    private var playStarted = false
-    private var pipPops = 0
     private var nextPipPop = 0L
+    private var lastHopAt = 0L
+
+    // Most sheets finish before the usual 15-second timeout. If play is already going,
+    // let the remaining jumps and the victory line finish instead of cutting him off.
+    internal fun playingThrough(now: Long): Boolean =
+        removeAt > now || (lastHopAt != 0L && now - lastHopAt <= 1_000L && game.count < total)
 
     private val sheet = Paint(Paint.ANTI_ALIAS_FLAG)
     private var sheetHeight = -1f
-    private val sheetEdge = stroke(0xFF93A3B6.toInt(), 1.2f)
-    private val streak = stroke(0x77FFFFFF.toInt(), 2.4f)
+    private val sheetEdge = stroke(0xFF392557.toInt(), 2.2f)
+    private val streak = stroke(0x9CFFFFFF.toInt(), 2.4f)
+    private val labelInk = text(0xFF3B285E.toInt(), 11f, true)
+    private val countInk = text(0xFF3B285E.toInt(), 8f, true)
+    private val header = fill(0xFFFFE187.toInt())
+    private val light = stroke(0xAAFFF9E7.toInt(), 1.2f)
+    private val confetti = intArrayOf(0xFFFF76A3.toInt(), 0xFFFFD16A.toInt(), 0xFF71E6C0.toInt(), 0xFF7ECAFF.toInt())
 
     /** One dome paint, recoloured per bubble so the sheet does not look printed. */
     private val dome = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val tints = intArrayOf(0xFFF8FBFF.toInt(), 0xFFEAF1FC.toInt(), 0xFFF2F8FF.toInt())
-    private val domeBase = fill(0x40859CC4.toInt())
-    private val domeShadow = fill(0x2E3A4A63.toInt())
-    private val domeRim = stroke(0xCCFFFFFF.toInt(), 1.1f)
+    private val tints = intArrayOf(0xFFFFA2C1.toInt(), 0xFFFFD688.toInt(), 0xFF9CF0CA.toInt(), 0xFF94D9FF.toInt(), 0xFFC5A8FF.toInt())
+    private val domeBase = fill(0xD59066C9.toInt())
+    private val domeShadow = fill(0x583B255D)
+    private val domeRim = stroke(0xFF65438E.toInt(), 1.15f)
     private val domeGloss = fill(0xE6FFFFFF.toInt())
 
     /** A band of light that crosses the plastic now and then: the sheet's only idle motion. */
@@ -52,8 +57,8 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     private val sheetClip = Path()
     private val sheetRect = RectF()
 
-    private val crater = fill(0x2A5A6A82.toInt())
-    private val craterRim = stroke(0x3D5A6A82.toInt(), 0.9f)
+    private val crater = fill(0x4A553477)
+    private val craterRim = stroke(0x7F5C3C83, 1.0f)
     private val burstRing = stroke(0xFFFFFFFF.toInt(), 1.3f)
     private val spark = fill(0xFFFFFFFF.toInt())
 
@@ -61,8 +66,11 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     private val area = RectF()
 
     private fun pad(): Float = dp(9f)
+    private fun gridTop(): Float = dp(29f)
+    private fun gridBottom(): Float = height - dp(9f)
     private fun cellW(): Float = (width - pad() * 2f) / cols
-    private fun cellH(): Float = (height - pad() * 2f) / rows
+    private fun cellH(): Float = (gridBottom() - gridTop()) / rows
+    private var counter = "0 / $total"
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
@@ -73,24 +81,28 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         if (sheetHeight != h) {
             sheet.shader = LinearGradient(
                 0f, 0f, w * 0.4f, h,
-                0xFFF9FBFF.toInt(), 0xFFC9D6E9.toInt(), Shader.TileMode.CLAMP
+                0xFFF1C9FF.toInt(), 0xFFC28CE9.toInt(), Shader.TileMode.CLAMP
             )
             sheetHeight = h
         }
         area.set(dp(1f), dp(1f), w - dp(1f), h - dp(1f))
         canvas.drawRoundRect(area, dp(16f), dp(16f), sheet)
         canvas.drawRoundRect(area, dp(16f), dp(16f), sheetEdge)
-        canvas.drawLine(dp(18f), dp(38f), dp(66f), dp(10f), streak)
+        canvas.drawRoundRect(dp(10f), dp(7f), w - dp(10f), dp(25f), dp(8f), dp(8f), header)
+        centred(canvas, "POP CLUB", dp(49f), dp(16f), labelInk)
+        centred(canvas, counter, w - dp(34f), dp(16f), countInk)
+        canvas.drawLine(dp(11f), dp(29f), w - dp(11f), dp(29f), light)
+        canvas.drawLine(dp(12f), h - dp(5f), w - dp(12f), h - dp(5f), streak)
 
         val cw = cellW()
         val ch = cellH()
-        val radius = minOf(cw, ch) * 0.30f
+        val radius = minOf(cw, ch) * 0.39f
         for (row in 0 until rows) {
             for (col in 0 until cols) {
                 val cx = pad() + cw * (col + 0.5f)
-                val cy = pad() + ch * (row + 0.5f)
+                val cy = gridTop() + ch * (row + 0.5f)
                 val index = row * cols + col
-                if (popped[index]) {
+                if (game.popped(index)) {
                     drawCrater(canvas, cx, cy, radius, index, now)
                 } else {
                     drawDome(canvas, cx, cy, radius, index)
@@ -125,13 +137,14 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     private fun drawDome(canvas: Canvas, cx: Float, cy: Float, r: Float, index: Int) {
         canvas.drawCircle(cx + r * 0.06f, cy + r * 0.2f, r * 0.96f, domeShadow)
         canvas.drawCircle(cx, cy, r, domeBase)
-        dome.color = tints[index % tints.size]
+        dome.color = tints[(index / cols + index % cols) % tints.size]
         canvas.drawCircle(cx - r * 0.04f, cy - r * 0.07f, r * 0.84f, dome)
         canvas.drawCircle(cx, cy, r * 0.96f, domeRim)
         area.set(cx - r * 0.6f, cy - r * 0.7f, cx + r * 0.04f, cy - r * 0.14f)
         canvas.drawOval(area, domeGloss)
         area.set(cx - r * 0.62f, cy + r * 0.08f, cx + r * 0.62f, cy + r * 0.96f)
-        canvas.drawArc(area, 25f, 62f, false, domeRim)
+        canvas.drawArc(area, 25f, 62f, false, light)
+        canvas.drawCircle(cx + r * 0.43f, cy - r * 0.33f, r * 0.11f, domeGloss)
     }
 
     /** A flattened bubble, its crease, and a short burst when it has just gone. */
@@ -140,6 +153,7 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         canvas.drawCircle(cx, cy, r * 0.66f, craterRim)
         area.set(cx - r * 0.52f, cy - r * 0.52f, cx + r * 0.52f, cy + r * 0.52f)
         canvas.drawArc(area, 198f, 72f, false, craterRim)
+        canvas.drawLine(cx - r * 0.23f, cy - r * 0.16f, cx + r * 0.24f, cy + r * 0.18f, craterRim)
 
         if (burstAt[index] == 0L) return
         val since = now - burstAt[index]
@@ -149,106 +163,104 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         val spread = r * (0.6f + t * 1.4f)
         burstRing.alpha = ((1f - t) * 200f).toInt()
         canvas.drawCircle(cx, cy, spread, burstRing)
-        spark.alpha = ((1f - t) * 220f).toInt()
-        for (corner in 0 until 4) {
-            val angle = (corner * 90 + 45) * DEGREES
-            canvas.drawCircle(
-                cx + cos(angle) * spread,
-                cy + sin(angle) * spread,
-                dp(0.5f) + dp(1.4f) * (1f - t),
-                spark
-            )
+        for (corner in 0 until 8) {
+            val angle = (corner * 45 + 23) * DEGREES
+            spark.color = confetti[(corner + index) % confetti.size]
+            spark.alpha = ((1f - t) * 245f).toInt()
+            val x = cx + cos(angle) * spread
+            val y = cy + sin(angle) * spread
+            val r1 = dp(0.5f) + dp(2.1f) * (1f - t)
+            canvas.drawRoundRect(x - r1, y - r1, x + r1, y + r1, r1 * 0.35f, r1 * 0.35f, spark)
         }
     }
 
     override fun onTap(x: Float, y: Float) {
         val index = indexAt(x, y) ?: return
-        if (popped[index]) return
+        if (game.popped(index)) return
         pop(index, SystemClock.uptimeMillis(), byPip = false)
     }
 
     private fun indexAt(x: Float, y: Float): Int? {
+        if (x < pad() || x >= width - pad() || y < gridTop() || y >= gridBottom()) return null
         val col = ((x - pad()) / cellW()).toInt()
-        val row = ((y - pad()) / cellH()).toInt()
+        val row = ((y - gridTop()) / cellH()).toInt()
         if (col !in 0 until cols || row !in 0 until rows) return null
         return row * cols + col
     }
 
     private fun pop(index: Int, now: Long, byPip: Boolean) {
-        popped[index] = true
+        val milestone = game.pop(index, byPip) ?: return
         burstAt[index] = now
-        count++
+        counter = "${game.count} / $total"
         invalidate()
 
-        if (count == total) {
+        if (milestone == Milestone.COMPLETE) {
             host.feel(PetView.Mood.HAPPY, 3500L)
-            host.say(Lines.pick(ALL_POPPED_LINES))
+            host.say(Lines.pick(if (byPip) PIP_FINISH_LINES else ALL_POPPED_LINES))
             removeAt = now + CLEAR_DELAY_MS
             return
         }
-        if (byPip) return
-        when (count) {
-            1 -> {
-                host.feel(PetView.Mood.HAPPY, 1200L)
-                host.say(Lines.pick(FIRST_POP_LINES))
-            }
-            10 -> host.say(Lines.pick(TEN_POP_LINES))
-            total / 2 -> host.say(Lines.pick(HALFWAY_LINES))
+        val lines = if (byPip) when (milestone) {
+            Milestone.FIRST -> PIP_POP_LINES
+            Milestone.FIVE -> PIP_FIVE_LINES
+            Milestone.TEN -> PIP_TEN_LINES
+            Milestone.FIFTEEN -> PIP_FIFTEEN_LINES
+            else -> null
+        } else when (milestone) {
+            Milestone.FIRST -> FIRST_POP_LINES
+            Milestone.HALFWAY -> HALFWAY_LINES
+            else -> null
+        }
+        if (lines != null) {
+            host.feel(PetView.Mood.HAPPY, 1_200L)
+            host.say(Lines.pick(lines))
         }
     }
 
     override fun onFrame() {
         val now = SystemClock.uptimeMillis()
 
-        if (removeAt > 0L && now > removeAt) {
+        if (!held && removeAt > 0L && now > removeAt) {
             removeAt = 0L
             host.dropProp(this)
             return
         }
 
-        if (!playStarted && isAttachedToWindow) {
-            playStarted = true
-            nextPipPop = now + 900L
-            // He comes over first, so the bubbles that go are the ones under him.
-            host.petWalkTo(
-                centreX,
-                posY + windowH + host.petHeight() * 0.5f + dp(4f),
-                null
-            )
-        }
-
-        if (pipPops < PIP_POPS && count < total && now > nextPipPop &&
-            host.petIsNear(centreX, posY + windowH, dp(140f))
-        ) {
-            pressBubble(now)
+        if (!held && width > 0 && height > 0 && now >= nextPipPop && now - bornAt >= 450L) {
+            game.nextBubble()?.let { jumpTo(it, now) }
         }
 
         // Repaint for a burst, or while the light is crossing the sheet. Nothing else on an
         // untouched sheet changes, so the rest of the cycle costs nothing.
-        if (burstAt.any { it > 0L && now - it in 0..BURST_MS }) {
-            invalidate()
-        } else if (sheen.visible(now, bornAt)) {
+        var repaintBurst = false
+        for (i in burstAt.indices) {
+            if (burstAt[i] == 0L) continue
+            repaintBurst = true
+            if (now - burstAt[i] > BURST_MS) burstAt[i] = 0L
+        }
+        if (repaintBurst || sheen.visible(now, bornAt)) {
             invalidate()
         }
     }
 
-    /** One bubble, pressed by him: taken from the bottom rows, nearest where he stands. */
-    private fun pressBubble(now: Long) {
-        val nearest = (rows - 1 downTo 0).asSequence()
-            .flatMap { row -> (0 until cols).asSequence().map { col -> row * cols + col } }
-            .filter { !popped[it] }
-            .take(6)
-            .toList()
-        val index = nearest.randomOrNull() ?: return
-        pop(index, now, byPip = true)
-        pipPops++
-        host.feel(PetView.Mood.HAPPY, 900L)
-        if (pipPops == 1) host.say(Lines.pick(PIP_POP_LINES))
-        nextPipPop = now + 1300L + Random.nextLong(900L)
+    private fun jumpTo(index: Int, now: Long) {
+        val sheetX = posX
+        val sheetY = posY
+        val cx = sheetX + pad() + cellW() * (index % cols + 0.5f)
+        val cy = sheetY + gridTop() + cellH() * (index / cols + 0.5f)
+        nextPipPop = now + 100L // Don't retry on every frame if another activity has his attention.
+        if (host.petHopOn(this, cx, cy) {
+                val landedAt = SystemClock.uptimeMillis()
+                nextPipPop = landedAt + 100L
+                if (!leaving && !held && abs(posX - sheetX) < dp(1f) && abs(posY - sheetY) < dp(1f)) {
+                    lastHopAt = landedAt
+                    pop(index, landedAt, byPip = true)
+                }
+            }) lastHopAt = now
     }
 
     override fun describe(): String =
-        "a sheet of bubble wrap with $count of $total bubbles popped, some by you"
+        "a sheet of bubble wrap with ${game.count} of $total bubbles popped, ${game.pipCount} by Pip"
 
     companion object {
         /**
@@ -259,12 +271,6 @@ class BubbleWrap(host: PropHost) : Prop(host) {
             "and so it begins. best sound on this entire phone.",
             "one down. I felt that in my antenna.",
             "that's the ice broken. the sheet is now a project."
-        )
-
-        val TEN_POP_LINES = listOf(
-            "ten. you're a natural. I'm a little jealous.",
-            "ten already. my lemonade business has never moved this fast.",
-            "ten. I've started taking notes on your technique."
         )
 
         val HALFWAY_LINES = listOf(
@@ -279,9 +285,26 @@ class BubbleWrap(host: PropHost) : Prop(host) {
             "finished. I'd offer a trophy, but you'd only pop that too."
         )
 
-        val PIP_POP_LINES = listOf(
-            "*pops one* still undefeated as a sound.",
-            "*presses one* I'm helping. professionally."
+        private val PIP_POP_LINES = listOf(
+            "*hop* that's one. excellent floor.",
+            "first pop. these legs finally have a job."
+        )
+        private val PIP_FIVE_LINES = listOf(
+            "five hops. this is basically a tiny gym.",
+            "five. I would like to thank my left foot."
+        )
+        private val PIP_TEN_LINES = listOf(
+            "ten pops! I'm calling this a performance.",
+            "double digits. the cardboard never stood a chance."
+        )
+        private val PIP_FIFTEEN_LINES = listOf(
+            "fifteen. not even out of pixels.",
+            "fifteen jumps. I'll be accepting an extremely small medal."
+        )
+        private val PIP_FINISH_LINES = listOf(
+            "*sticks the landing* last bubble. that's a clean sheet.",
+            "no bubbles left. my feet would like a tiny round of applause.",
+            "and that's the last hop. I retire undefeated in packaging."
         )
 
         /** How long the little burst stays on screen after a pop. */
@@ -289,9 +312,6 @@ class BubbleWrap(host: PropHost) : Prop(host) {
 
         /** How long the finished sheet stays up before he clears it away. */
         private const val CLEAR_DELAY_MS = 4_200L
-
-        /** How many bubbles he helps with before leaving the rest to them. */
-        private const val PIP_POPS = 3
 
         private const val DEGREES = Math.PI.toFloat() / 180f
 

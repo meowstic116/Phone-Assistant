@@ -72,6 +72,10 @@ class MainActivity : Activity() {
             }
         }
 
+        findViewById<Button>(R.id.pipSettingsButton).setOnClickListener {
+            startActivity(Intent(this, PipSettingsActivity::class.java))
+        }
+
         findViewById<TextView>(R.id.keyLink).setOnClickListener {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey")))
         }
@@ -104,7 +108,6 @@ class MainActivity : Activity() {
             showBreakStatus()
         }
         findViewById<Button>(R.id.breakButton).setOnClickListener { askBreakLength() }
-        buildToyButtons()
 
         updateStatus = findViewById(R.id.updateStatus)
         updateButton = findViewById(R.id.updateButton)
@@ -206,6 +209,7 @@ class MainActivity : Activity() {
     /** One button per thing Pip can put on the screen, so nothing has to be guessed. */
     private fun buildToyButtons() {
         val box = findViewById<LinearLayout>(R.id.toyBox)
+        box.removeAllViews()
         var row: LinearLayout? = null
 
         fun addButton(label: String, action: () -> Boolean) {
@@ -236,7 +240,7 @@ class MainActivity : Activity() {
             )
         }
 
-        Toy.values().forEach { toy ->
+        Toy.values().filter { PipSettings.toyAllowed(this, it) }.forEach { toy ->
             addButton(toy.label) { OverlayService.bringOut(toy) }
         }
         addButton("Tidy up") { OverlayService.tidyUp() }
@@ -253,6 +257,7 @@ class MainActivity : Activity() {
     }
 
     private fun refresh() {
+        buildToyButtons()
         startButton.text = if (OverlayService.running) "Stop assistant" else "Start assistant"
         startButton.backgroundTintList = getColorStateList(
             if (OverlayService.running) R.color.surfaceAlt else R.color.accent
@@ -269,7 +274,7 @@ class MainActivity : Activity() {
         addPermissionRow("Notifications", notificationsGranted()) { askForNotifications() }
         // Optional: without it he still keeps clear of his own keyboard, but he can neither
         // see a keyboard opened in another app nor work another app for the user.
-        addPermissionRow("Pip can work other apps (accessibility)", ImeWatch.enabled(this)) {
+        addPermissionRow("Android accessibility permission", ImeWatch.enabled(this)) {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
     }

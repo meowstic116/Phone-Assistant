@@ -68,17 +68,20 @@ object Screen {
     class Snapshot(val app: String, val windowId: Int, val items: List<Item>, val listing: String)
 
     @Volatile
-    private var service: AccessibilityService? = null
+    private var connectedService: AccessibilityService? = null
+
+    private val service: AccessibilityService?
+        get() = connectedService?.takeIf { PipSettings.enabled(it, PipSettings.Option.ACCESSIBILITY) }
 
     fun connect(service: AccessibilityService) {
-        this.service = service
+        connectedService = service
     }
 
     fun disconnect(service: AccessibilityService) {
-        if (this.service === service) this.service = null
+        if (connectedService === service) connectedService = null
     }
 
-    /** Whether the accessibility service is actually bound, not just switched on. */
+    /** Whether the service is connected and Pip is allowed to use it. */
     fun available(): Boolean = service != null
 
     // -------------------------------------------------------------------- reading

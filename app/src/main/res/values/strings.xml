@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Phone Assistant</string>
+    <string name="start_at_boot">Start Pip when the phone starts</string>
+    <string name="start_at_boot_hint">Starts Pip after you unlock your phone following a restart.</string>
+    <string name="start_at_boot_needs_overlay">Automatic start needs “Display over other apps” permission.</string>
     <string name="ime_watcher_description">Lets Pip work other apps when you ask him to —
         open one, tap, type, scroll, go back — and see when a keyboard is on screen so he can
         keep out of its way. He reads the labels of the screen in front only while doing a job

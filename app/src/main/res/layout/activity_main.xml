@@ -48,6 +48,12 @@
             android:textStyle="bold" />
 
         <Button
+            android:id="@+id/pipSettingsButton"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:text="Pip settings" />
+
+        <Button
             android:id="@+id/historyButton"
             android:layout_width="match_parent"
             android:layout_height="54dp"

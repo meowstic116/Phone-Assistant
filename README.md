@@ -11,6 +11,8 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
 - Everything moves rather than appears: a toy he puts down pops into place and shrinks away
   when it goes, a prop lifts slightly under your finger while you drag it, and the speech
   bubble eases in, then drifts out. A line stays up for as long as it takes to read.
+  Drag Pip or a toy and it follows your finger, with a short glide on release if you
+  were still moving. Pause before lifting to leave it exactly where you put it.
 - He is drawn no more often than there is something to see: a walk gets every frame, the
   idle sway twenty a second, and nothing at all while the screen is off. Drawing the same
   small body sixty times a second to show a 1dp bob was the largest fixed cost on the overlay.
@@ -91,7 +93,7 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   With neither limit specified (including “for a little bit”), Pip picks a random duration
   from 30 seconds to 5 minutes. Pip waits for an exposed playback end or loop before
   deciding whether to like and swipe. With accessible playback data, he checks roughly
-  four times a second to catch the restart. If playback isn't exposed, he pauses for about 18
+  four times a second to catch the restart. If playback isn't exposed, he pauses for about 12
   seconds instead. Missing or conflicting playback readings aren't treated as a loop.
   Changing captions or counters alone don't prove that the next reel
   opened. If the reel is hard to identify but the viewer is still readable, Pip can finish
@@ -138,10 +140,18 @@ out from the **Toys** buttons in the app, ask him for one in chat ("open your le
 stand", "paint something", "let's play soccer"), or just leave the screen alone — he gets
 bored every few minutes and starts something himself.
 
+**Pip settings → Painting gallery** lets you turn individual paintings on or off. Pip
+can paint his original subjects plus three crayon scenes: a space kitten, a frog in a
+teacup, and a ghost holding a daisy. Use **Add pictures** to copy up to 24 images from
+Android's picture picker. These copies are resized and stay on the phone; neither the
+images nor their filenames are sent to the AI. **Remove** deletes Pip's copy without
+changing the original. Only enabled pictures are picked for a new canvas.
+
 He puts things away when you ask ("put the plant away", "pack the lemonade away", "tidy
-up"), and also on his own: once a toy has been out for about four minutes he has had
-enough of it, says so briefly and tidies that one away. The oldest toy goes first, and a
-lemonade stand leaves with its glasses and his place behind the counter.
+up"), and also on his own: an untouched toy goes away after about 15 seconds. Tapping
+or playing with it keeps the whole toy out for about one minute after your last tap.
+Dragging doesn't reset the timer, but Pip waits until you let go. A soccer pitch or
+lemonade stand goes away as a set, not one piece at a time.
 
 He can be sent on a break too: "no toys for half an hour", "take a break for 20 minutes",
 "not now" (which means 15 minutes), or "leave me alone for the evening" (8 hours). He puts
@@ -186,13 +196,15 @@ from work" leaves the lemonade stand alone.
   he walks over and kicks it back at yours. First to three or ninety seconds, and he
   announces the result either way. The goals are draggable, which he notices: he calls it
   cheating (cheerfully), and three goalpost moves and he calls the game off.
-- **Bubble wrap** — a sheet of 35 domed bubbles on a sheet of plastic, each with its own
-  highlight, popped ones left as creases with a small burst as they go. No header and no
-  counter: the sheet itself shows how far along you are. He joins in — walks over, presses
-  three himself with a dry line about it, and leaves you the rest. Pop every one and he
-  clears the sheet away.
-- **Plant** — tap to water it, three waterings per stage and it grows through four stages
-  to a flower. Water it too fast and he accuses you of drowning it.
+- **Bubble wrap** — Pop Club is a compact sheet of 20 candy-colored bubbles with a pop
+  counter and confetti. Tap any bubble, or watch Pip hop across the sheet, popping the
+  remaining bubbles when he lands. He has his own milestone lines and clears the sheet
+  after the last pop. An active round can finish even if the normal toy timer runs out.
+- **Plant** — Pip walks up to the pot, tips his little watering can, and waters it until
+  it flowers. You can help by tapping; fast taps still get a warning. Each plant can be
+  a Pocket Cosmos, Lemon Star, or Blueberry Bell. It bounces as it grows, and a ladybug
+  visits the finished bloom. Pip pauses watering while you're dragging the plant or
+  using chat, and stops when the flower is fully grown.
 
 ## Personality
 
@@ -253,7 +265,18 @@ Tagged builds are also published as GitHub Releases by
    `gemini-3.8-flash` is smarter but its free tier allows only about 20 requests/day.
    Any OpenAI-compatible endpoint works too — OpenAI, OpenRouter, Groq, or Ollama on
    your network.
-4. Press **Start assistant**.
+4. Press **Start assistant**. Open **Pip settings** below that button to change what Pip
+   does. Changes are saved and apply without restarting the overlay.
+
+   - **Movement & startup:** Turn off wandering to keep Pip in place between tasks.
+     You can still drag him, and he can move for his chat box, keyboard, and toys.
+     **Start Pip when the phone starts** is off by default. With **Display over other
+     apps** permission, it starts the overlay after the first unlock, not old jobs.
+   - **Phone access:** Turn off **Let Pip use accessibility** to stop screen-reading,
+     phone actions, and other apps' keyboard tracking. This does not change Android's
+     separate permission. Chat and opening an explicit link do not need accessibility.
+   - **Toys:** Turn off **Allow toys** for no toys, or select individual toys. Turning
+     off **Bring out toys on his own** leaves enabled toys available by request only.
 
 ### Testing phone jobs
 
