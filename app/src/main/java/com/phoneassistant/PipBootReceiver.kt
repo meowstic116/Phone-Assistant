@@ -13,13 +13,7 @@ class PipBootReceiver : BroadcastReceiver() {
 
         // Some devices restrict boot-time background starts. Don't open an activity or
         // keep retrying if Android rejects the foreground service launch.
-        try {
-            OverlayService.start(context)
-        } catch (e: IllegalStateException) {
-            Diag.caught("start Pip at boot", e)
-        } catch (e: SecurityException) {
-            Diag.caught("start Pip at boot", e)
-        }
+        OverlayService.start(context)
     }
 }
 

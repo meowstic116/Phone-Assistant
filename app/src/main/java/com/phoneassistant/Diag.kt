@@ -87,6 +87,10 @@ object Diag {
         lastJob = Job(id, oneLine(request, 200), now())
     }
 
+    @Volatile
+    var lastChatFailure: Event? = null
+        private set
+
     /**
      * One action, as it happened, with what it was aimed at and what came back. [turn] marks
      * the ones the model chose; a press or a scroll the loop made on its own is not one.
@@ -171,6 +175,21 @@ object Diag {
             ms < 3_600_000L -> "${ms / 60_000}m ago"
             else -> "${ms / 3_600_000}h ago"
         }
+    }
+
+    // Exception messages can echo prompts, URLs or phone data. Never include them for chat.
+    fun chatFailure(stage: String, error: Exception) {
+        lastChatFailure = privateFailure(stage, error)
+    }
+
+    fun vaultFailure(error: Exception) {
+        lastCaught = privateFailure("vault", error)
+    }
+
+    private fun privateFailure(stage: String, error: Exception): Event {
+        val origin = error.stackTrace.firstOrNull { it.className.startsWith("com.phoneassistant.") }
+        val where = origin?.let { " · ${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }.orEmpty()
+        return Event("$stage · ${error.javaClass.simpleName}$where", now())
     }
 
     private fun describe(what: String, t: Throwable): String {

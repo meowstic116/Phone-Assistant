@@ -50,6 +50,7 @@
 
     <application
         android:allowBackup="true"
+        android:usesCleartextTraffic="false"
         android:extractNativeLibs="true"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -126,8 +127,8 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
 
-        <!-- Tells the overlay where the keyboard is, whichever app it belongs to. Window
-             bounds only: no window contents are ever read. -->
+        <!-- The keyboard watcher reports bounds. Only requested phone jobs and explicit
+             screen questions use the same service to read visible app labels. -->
         <service
             android:name=".ImeWatcher"
             android:exported="true"

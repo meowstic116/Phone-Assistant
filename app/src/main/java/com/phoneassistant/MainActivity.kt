@@ -19,6 +19,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VoiceSettings.config(this) // Migrate retired speech settings without starting a voice engine.
         if (!AssistantBrain.setupComplete(this)) {
             startActivity(Intent(this, OnboardingActivity::class.java))
             finish()
@@ -54,7 +55,11 @@ class MainActivity : Activity() {
             val release = availableRelease
             val target = release?.downloadUrl ?: release?.pageUrl
             if (release != null && !target.isNullOrBlank()) {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
+                } catch (_: android.content.ActivityNotFoundException) {
+                    Toast.makeText(this, "No browser is available to open the update.", Toast.LENGTH_SHORT).show()
+                }
             } else {
                 checkForUpdates()
             }
@@ -82,6 +87,7 @@ class MainActivity : Activity() {
 
         UpdateChecker.check(this) { result ->
             runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
                 updateButton.isEnabled = true
                 if (result == null) {
                     updateStatus.text = "Couldn't reach GitHub"
@@ -108,7 +114,9 @@ class MainActivity : Activity() {
             PipPermissions.openOverlay(this)
             return
         }
-        OverlayService.start(this)
+        if (!OverlayService.start(this)) {
+            Toast.makeText(this, "Android couldn’t start Pip. Try again with the app open.", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun refreshPowerButton() {

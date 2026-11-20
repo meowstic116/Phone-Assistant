@@ -4,7 +4,8 @@
 
     Window content is readable because a phone job — "open Messages and tell Mum I'm late" —
     needs the labels of the app in front to know what to press. It is read only while a job
-    is running, and password fields are never typed into. The idle Home check looks at
+    is running or the user explicitly asks a screen question, and password fields are never
+    typed into. The idle Home check looks at
     window metadata and launcher resource IDs only, not text. Nothing is stored, and nothing
     leaves the phone except the list of visible labels sent to the model in use.
 -->

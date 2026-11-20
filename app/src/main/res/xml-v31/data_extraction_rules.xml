@@ -2,6 +2,9 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="brain.xml" />
+        <exclude domain="sharedpref" path="memory.xml" />
+        <exclude domain="sharedpref" path="facts.xml" />
+        <exclude domain="sharedpref" path="persona.xml" />
         <exclude domain="sharedpref" path="pip_voice.xml" />
         <exclude domain="sharedpref" path="vault.xml" />
         <exclude domain="sharedpref" path="startup.xml" />
@@ -9,6 +12,9 @@
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="brain.xml" />
+        <exclude domain="sharedpref" path="memory.xml" />
+        <exclude domain="sharedpref" path="facts.xml" />
+        <exclude domain="sharedpref" path="persona.xml" />
         <exclude domain="sharedpref" path="pip_voice.xml" />
         <exclude domain="sharedpref" path="vault.xml" />
         <exclude domain="sharedpref" path="startup.xml" />

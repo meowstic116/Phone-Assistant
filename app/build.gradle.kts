@@ -69,8 +69,8 @@ android {
         applicationId = "com.phoneassistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 173
-        versionName = "0.173"
+        versionCode = 175
+        versionName = "0.175"
     }
 
     // One committed, self-signed key signs every build, debug and release alike, so the
@@ -111,8 +111,5 @@ android {
 }
 
 dependencies {
-    // Hosted VoxCPM2 sends its PCM frames over a TLS WebSocket.
-    implementation("org.java-websocket:Java-WebSocket:1.6.0")
-    implementation("org.slf4j:slf4j-api:2.0.17")
     implementation("org.apache.ant:ant:1.10.15") { isTransitive = false }
 }

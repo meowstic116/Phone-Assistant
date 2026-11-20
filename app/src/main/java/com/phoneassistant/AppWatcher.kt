@@ -34,9 +34,11 @@ object AppWatcher {
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
-    fun currentAppLabel(ctx: Context): String? {
-        val packageName = currentPackage(ctx) ?: return null
-        return labelFor(ctx, packageName) ?: packageName
+    fun currentAppLabel(ctx: Context): String? = try {
+        currentPackage(ctx)?.let { labelFor(ctx, it) ?: it }
+    } catch (_: RuntimeException) {
+        // OEM usage services can fail if access is revoked during a query.
+        null
     }
 
     private fun currentPackage(ctx: Context): String? {

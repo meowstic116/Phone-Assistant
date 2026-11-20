@@ -98,8 +98,14 @@ class OverlayService : Service(), PropHost {
          */
         private const val INPUT_ROW_DP = 60f
 
-        fun start(ctx: Context) {
-            ctx.startForegroundService(Intent(ctx, OverlayService::class.java))
+        fun start(ctx: Context): Boolean = try {
+            ctx.startForegroundService(Intent(ctx, OverlayService::class.java)) != null
+        } catch (e: IllegalStateException) {
+            Diag.caught("start Pip", e)
+            false
+        } catch (e: SecurityException) {
+            Diag.caught("start Pip", e)
+            false
         }
 
         /** Main-screen stop; the notification action reaches the same exit path. */
@@ -127,10 +133,10 @@ class OverlayService : Service(), PropHost {
         }
 
         /** Say something in the overlay bubble, for replies sent from the history screen. */
-        fun speak(context: Context, text: String, allowRemote: Boolean) {
+        fun speak(context: Context, text: String) {
             val overlay = instance?.takeUnless { it.ending }
-            if (overlay != null) overlay.modelSays(text, allowRemote)
-            else PipVoice.reply(context, text, allowRemote)
+            if (overlay != null) overlay.modelSays(text)
+            else if (VoiceSettings.enabled(context)) PipVoice.reply(context, text)
         }
 
         /** Main-screen buttons: put one of Pip's toys on the screen. */
@@ -439,22 +445,7 @@ class OverlayService : Service(), PropHost {
             startForeground(NOTIFICATION_ID, buildNotification())
         }
 
-        val dp = resources.displayMetrics.density
-        screenW = resources.displayMetrics.widthPixels
-        screenH = resources.displayMetrics.heightPixels
-        if (Build.VERSION.SDK_INT >= 30) {
-            val metrics = windowManager.currentWindowMetrics
-            screenW = metrics.bounds.width()
-            screenH = metrics.bounds.height()
-            val insets = metrics.windowInsets
-            topInset = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
-            bottomInset =
-                insets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars()).bottom
-        }
-
-        petW = (64 * dp).toInt()
-        petH = (86 * dp).toInt()
-        speed = 55 * dp
+        readDisplayBounds()
         keyboardHeightPx = Keyboard.rememberedPx(this)
         stillUntil = Still.until(this)
         chipSpot = loadChipSpot()
@@ -507,7 +498,46 @@ class OverlayService : Service(), PropHost {
         registerScreenReceiver()
         ImeWatch.onChange = { ime -> handler.post { onImeChanged(ime) } }
         Still.onChanged = { handler.post { refreshStill() } }
-        handler.post(tick)
+        if (!paused) handler.post(tick)
+    }
+
+    private fun readDisplayBounds() {
+        val density = resources.displayMetrics.density
+        screenW = resources.displayMetrics.widthPixels
+        screenH = resources.displayMetrics.heightPixels
+        if (Build.VERSION.SDK_INT >= 30) {
+            val metrics = windowManager.currentWindowMetrics
+            screenW = metrics.bounds.width()
+            screenH = metrics.bounds.height()
+            val insets = metrics.windowInsets.getInsetsIgnoringVisibility(
+                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            topInset = insets.top
+            bottomInset = insets.bottom
+        }
+        petW = (64 * density).toInt().coerceAtLeast(1)
+        petH = (86 * density).toInt().coerceAtLeast(1)
+        speed = 55 * density
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (ending || pet == null) return
+        readDisplayBounds()
+        petDrag?.cancel()
+        cancelToyHop()
+        cancelGardenVisit()
+        val bottom = (screenH - petH - bottomInset).toFloat()
+        val right = (screenW - petW).toFloat()
+        posX = OverlayBounds.clamp(posX, 0f, right)
+        posY = OverlayBounds.clamp(posY, topInset.toFloat(), bottom)
+        targetX = OverlayBounds.clamp(targetX, 0f, right)
+        targetY = OverlayBounds.clamp(targetY, topInset.toFloat(), bottom)
+        petParams.width = petW
+        petParams.height = petH
+        props.toList().forEach { it.moveTo(it.posX, it.posY) }
+        applyPetPosition()
+        positionJobBar()
+        watchKeyboard()
     }
 
     /**
@@ -844,10 +874,10 @@ class OverlayService : Service(), PropHost {
         replyAskedAt = SystemClock.uptimeMillis()
     }
 
-    private fun modelSays(text: String, allowRemote: Boolean) {
+    private fun modelSays(text: String) {
         awaitingReply = false
         replyUntil = SystemClock.uptimeMillis() + REPLY_HOLD_MS
-        sayAloud(text, speechRemote = allowRemote)
+        sayAloud(text, finalReply = true)
     }
 
     override fun feel(mood: PetView.Mood, ms: Long) {
@@ -1059,9 +1089,8 @@ class OverlayService : Service(), PropHost {
     override fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?) {
         cancelToyHop()
         cancelGardenVisit()
-        targetX = (x - petW / 2f).coerceIn(0f, (screenW - petW).toFloat())
-        targetY = (y - petH / 2f)
-            .coerceIn(topInset + dp(8f), (screenH - petH - bottomInset).toFloat())
+        targetX = OverlayBounds.clamp(x - petW / 2f, 0f, (screenW - petW).toFloat())
+        targetY = OverlayBounds.clamp(y - petH / 2f, topInset + dp(8f), (screenH - petH - bottomInset).toFloat())
         arrive = done
         walking = true
         toyWalk = true
@@ -1248,8 +1277,7 @@ class OverlayService : Service(), PropHost {
     /** Whether anything said right now would actually be seen. */
     private fun screenUsable(): Boolean {
         if (paused) return false
-        val keyguard = getSystemService(KeyguardManager::class.java)
-        return keyguard?.isKeyguardLocked != true
+        return runCatching { getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == false }.getOrDefault(false)
     }
 
     private fun announceBreakOver() {
@@ -1265,8 +1293,9 @@ class OverlayService : Service(), PropHost {
 
     private val tick = object : Runnable {
         override fun run() {
-            if (!paused) step()
-            handler.postDelayed(this, frameMs)
+            if (paused || ending) return
+            step()
+            if (!paused && !ending) handler.postDelayed(this, frameMs)
         }
     }
 
@@ -1323,8 +1352,7 @@ class OverlayService : Service(), PropHost {
         watchCountdown += frameMs
         if (watchCountdown >= 15_000L) {
             watchCountdown = 0L
-            currentAppLabel =
-                if (AppWatcher.hasPermission(this)) AppWatcher.currentAppLabel(this) else null
+            currentAppLabel = AppWatcher.currentAppLabel(this)
         }
 
         // Nothing on screen for a few minutes: he gets bored and makes his own fun.
@@ -1550,8 +1578,7 @@ class OverlayService : Service(), PropHost {
         var x = (posX + petW / 2f - width / 2f).toInt()
         x = x.coerceIn(dpInt(6f), (screenW - width - dpInt(6f)).coerceAtLeast(dpInt(6f)))
 
-        val above = (posY - height - dpInt(8f)).toInt()
-        val y = if (above >= topInset) above else (posY + petH + dpInt(8f)).toInt()
+        val y = OverlayBounds.panelY(posY.toInt(), petH, height, dpInt(8f), topInset, screenH - bottomInset)
 
         params.x = x
         params.y = y
@@ -1591,7 +1618,11 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun openBubble(text: String, end: Int = text.length) {
-        val maxWidth = (screenW - dpInt(12f)).coerceIn(1, dpInt(232f))
+        ChatRecovery.attempt(Unit, { Diag.chatFailure("reply bubble", it) }) { attachBubble(text, end) }
+    }
+
+    private fun attachBubble(text: String, end: Int) {
+        val maxWidth = (screenW - dpInt(12f)).coerceIn(1, dpInt(232f).coerceAtLeast(1))
         val view = TextView(this).apply {
             this.text = text
             textSize = 14f
@@ -1628,7 +1659,7 @@ class OverlayService : Service(), PropHost {
             view.scaleY = 0.96f
             view.translationY = dp(if (above) 6f else -6f)
         }
-        if (runCatching { windowManager.addView(view, params) }.isFailure) return
+        windowManager.addView(view, params)
         bubble = view
         bubbleParams = params
         bubbleHideAt = SystemClock.uptimeMillis() + bubbleLifetime(text)
@@ -1636,12 +1667,12 @@ class OverlayService : Service(), PropHost {
             .setDuration(185L).setInterpolator(DecelerateInterpolator(1.65f)).start()
     }
 
-    private fun captionReply(text: String, allowRemote: Boolean) {
+    private fun captionReply(text: String) {
         // Wait for playback rather than running a typewriter timer from the arrival of the text.
         val reply = VoicedReply(text)
         voicedReply = reply
         showThinking()
-        PipVoice.reply(this, text, allowRemote) caption@{ end ->
+        PipVoice.reply(this, text) caption@{ end ->
             if (voicedReply !== reply || ending) return@caption
             val previouslyVisible = reply.lastEnd.coerceAtLeast(0)
             val revealTo = end ?: reply.text.length
@@ -1783,7 +1814,7 @@ class OverlayService : Service(), PropHost {
         idleUntil = SystemClock.uptimeMillis() + 1500L
     }
 
-    private fun sayAloud(text: String, speechRemote: Boolean? = null) {
+    private fun sayAloud(text: String, finalReply: Boolean = false) {
         // A reply can land after the overlay has been stopped, and a bubble added to a dead
         // service is a window nothing will ever take down again.
         if (ending || !running) return
@@ -1800,7 +1831,7 @@ class OverlayService : Service(), PropHost {
         }
         idleUntil = SystemClock.uptimeMillis() + SPEAKING_PAUSE_MS
         hideBubble()
-        if (speechRemote != null && PipVoice.config(this).enabled) captionReply(text, speechRemote)
+        if (finalReply && VoiceSettings.enabled(this)) captionReply(text)
         else openBubble(text)
         // Being smug or annoyed outranks talking: he wants you to see his face.
         val mood = pet?.mood
@@ -1856,6 +1887,7 @@ class OverlayService : Service(), PropHost {
                 true
             }
             hint = "Say something…"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(Memory.MAX_MESSAGE_CHARS))
             setSingleLine(false)
             maxLines = 3
             textSize = 14f
@@ -1866,7 +1898,9 @@ class OverlayService : Service(), PropHost {
             imeOptions = EditorInfo.IME_ACTION_SEND
             setOnEditorActionListener { _, actionId, _ ->
                 if (actionId == EditorInfo.IME_ACTION_SEND) {
-                    sendMessage()
+                    // Finish the IME callback before removing its focused overlay window.
+                    val editor = this
+                    handler.post { if (inputField === editor) sendMessage() }
                     true
                 } else {
                     false
@@ -2139,18 +2173,26 @@ class OverlayService : Service(), PropHost {
         val turn = ChatTurns.begin()
         if (NowPlaying.requested(text)) {
             Agent.cancel()
-            val reply = PipMediaAccess.answer(this)
-            modelSays(reply, allowRemote = false)
+            val reply = ChatRecovery.attempt(ChatRecovery.REPLY_FAILED, { Diag.chatFailure("now playing reply", it) }) {
+                PipMediaAccess.answer(this)
+            }
+            modelSays(reply)
             handler.postDelayed({
                 if (ChatTurns.isCurrent(turn) && inputBar == null && !Agent.running()) closeChat()
             }, 4000L)
             return
         }
-        Memory.append(this, "user", text)
+        ChatRecovery.attempt(Unit, { Diag.chatFailure("chat history", it) }) {
+            Memory.append(this, "user", text)
+        }
         Agent.cancel()
-        Facts.saveNameRequest(this, text)?.let { reply ->
-            Memory.append(this, "assistant", reply)
-            modelSays(reply, allowRemote = false)
+        ChatRecovery.attempt<String?>(null, { Diag.chatFailure("chat preferred name", it) }) {
+            Facts.saveNameRequest(this, text)
+        }?.let { reply ->
+            ChatRecovery.attempt(Unit, { Diag.chatFailure("chat history", it) }) {
+                Memory.append(this, "assistant", reply)
+            }
+            modelSays(reply)
             handler.postDelayed({
                 if (ChatTurns.isCurrent(turn) && inputBar == null && !Agent.running()) closeChat()
             }, 4000L)
@@ -2168,7 +2210,9 @@ class OverlayService : Service(), PropHost {
             startJob(text, text, turn)
             return
         }
-        val event = Toys.reactTo(this, text)
+        val event = ChatRecovery.attempt<String?>(null, { Diag.chatFailure("chat toy reaction", it) }) {
+            Toys.reactTo(this, text)
+        }
 
         AssistantBrain.reply(this, currentAppLabel, Toys.summary(this), event, turn) { ok, reply ->
             handler.post {
@@ -2179,8 +2223,10 @@ class OverlayService : Service(), PropHost {
                     startJob(job, text, turn)
                     return@post
                 }
-                if (ok) Memory.append(this, "assistant", reply)
-                modelSays(reply, allowRemote = ok)
+                if (ok) ChatRecovery.attempt(Unit, { Diag.chatFailure("chat history", it) }) {
+                    Memory.append(this, "assistant", reply)
+                }
+                modelSays(reply)
                 handler.postDelayed({
                     if (ChatTurns.isCurrent(turn) && inputBar == null && !Agent.running()) closeChat()
                 }, 4000L)
@@ -2224,6 +2270,10 @@ class OverlayService : Service(), PropHost {
 
     private fun startJob(job: String, original: String, turn: Long, fromClearHome: Boolean = false): Boolean {
         if (ending || instance !== this || !ChatTurns.isCurrent(turn)) return false
+        if (!screenUsable()) {
+            if (!fromClearHome) modelSays("Unlock your phone before asking me to work another app.")
+            return false
+        }
         val doomscroll = JobProgress.isDoomscrollRequest(original)
         if (doomscroll && (!PipSettings.toyAllowed(this, Toy.DOOMSCROLL) || Quiet.active(this))) {
             sayAloud(if (Quiet.active(this)) "I'm on a break. you asked." else "Doomscroll is turned off in Pip settings.")
@@ -2256,7 +2306,7 @@ class OverlayService : Service(), PropHost {
                         if (!fromClearHome) {
                             Memory.append(this, "assistant", line)
                         }
-                        sayAloud(line, speechRemote = if (fromClearHome) null else false)
+                        sayAloud(line, finalReply = !fromClearHome)
                         feel(PetView.Mood.HAPPY, 2500L)
                     }
                 }
@@ -2687,9 +2737,10 @@ class OverlayService : Service(), PropHost {
 
     private fun hideKeyboard() {
         handler.removeCallbacks(showKeyboardNudge)
-        val field = inputField ?: return
-        val imm = getSystemService(InputMethodManager::class.java)
-        imm?.hideSoftInputFromWindow(field.windowToken, 0)
+        val token = inputField?.windowToken ?: return
+        ChatRecovery.attempt(Unit, { Diag.chatFailure("chat keyboard", it) }) {
+            getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(token, 0)
+        }
     }
 
     // ------------------------------------------------------------------- window
@@ -2713,7 +2764,8 @@ class OverlayService : Service(), PropHost {
                     cancelToyHop()
                     cancelGardenVisit()
                     paused = true
-                    if (doomscrollJob || jobWalk != null) {
+                    handler.removeCallbacks(tick)
+                    if (Agent.running() || doomscrollJob || jobWalk != null) {
                         Agent.cancel()
                         hideJobBar()
                         endJobWatch()
@@ -2728,8 +2780,10 @@ class OverlayService : Service(), PropHost {
                 // the phone. A locked one is skipped here and caught by USER_PRESENT.
                 Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
                     if (ending) return
+                    val resume = paused
                     paused = false
                     pet?.animating = true
+                    if (resume) handler.post(tick)
                     settleBreak()
                 }
             }
