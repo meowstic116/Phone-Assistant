@@ -18,6 +18,6 @@ kotlinc app/src/main/java/com/phoneassistant/JobProgress.kt \
   app/src/main/java/com/phoneassistant/VoiceChoice.kt app/src/main/java/com/phoneassistant/KokoroHealth.kt \
   app/src/main/java/com/phoneassistant/ChatRecovery.kt app/src/main/java/com/phoneassistant/BoundedText.kt \
   app/src/main/java/com/phoneassistant/UpdatePolicy.kt app/src/main/java/com/phoneassistant/OverlayBounds.kt \
-  tests/JobProgressTest.kt \
+  app/src/main/java/com/phoneassistant/ReplyBubbleState.kt tests/JobProgressTest.kt \
   -include-runtime -d "$tmp/job-progress.jar"
 java -jar "$tmp/job-progress.jar"

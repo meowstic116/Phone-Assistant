@@ -793,6 +793,21 @@ fun main() {
     check(VoiceProtocol.isWav("RIFF....WAVE".toByteArray()))
     check(!VoiceProtocol.isWav("RIFF....WEBP".toByteArray()))
 
+    val textOnlyBubble = ReplyBubbleState(12, spoken = false)
+    check(textOnlyBubble.visibleEnd == 12 && !textOnlyBubble.waiting)
+    val spokenBubble = ReplyBubbleState(12, spoken = true)
+    check(spokenBubble.waiting && spokenBubble.visibleEnd == 0)
+    check(!spokenBubble.reveal(0) && spokenBubble.waiting)
+    check(spokenBubble.reveal(5) && spokenBubble.visibleEnd == 5)
+    check(!spokenBubble.showTextIfWaiting()) // Timely speech keeps revealing word by word.
+    check(!spokenBubble.reveal(3) && spokenBubble.visibleEnd == 5)
+    check(spokenBubble.reveal(null) && spokenBubble.visibleEnd == 12)
+    val slowVoice = ReplyBubbleState(12, spoken = true)
+    check(slowVoice.showTextIfWaiting() && slowVoice.visibleEnd == 12)
+    check(!slowVoice.reveal(4) && slowVoice.visibleEnd == 12) // Late audio never hides text again.
+    val noAudio = ReplyBubbleState(12, spoken = true)
+    check(noAudio.reveal(null) && !noAudio.waiting && noAudio.visibleEnd == 12)
+
     val captionSource = "  *waves* Hello,   world! *smiles*"
     val captions = checkNotNull(SpeechCaption.from(captionSource, 420))
     check(captions.text == "Hello, world!")
