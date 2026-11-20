@@ -73,6 +73,33 @@ internal object JobProgress {
         }
     }
 
+    enum class FeedWait(val firstReadMs: Long, val verifiedMs: Long, val uncertainMs: Long) {
+        EXISTING(0, 150, 150),
+        REACTION(100, 250, 1_100),
+        SCROLL(250, 400, 1_825),
+        BROWSE_SCROLL(700, 925, 1_825),
+        DECLINED_SCROLL(0, 250, 450)
+    }
+
+    class FeedSettleGate(private val wait: FeedWait) {
+        private val stable = StableFeedRead()
+        private val stableEvidence = StableFeedRead()
+
+        fun observe(key: String?, elapsedMs: Long, verified: Boolean): Boolean {
+            val quiet = stable.observe(key, 2)
+            val backed = stableEvidence.observe(key.takeIf { verified }, 2)
+            return if (verified) backed && elapsedMs >= wait.verifiedMs
+                else quiet && elapsedMs >= wait.uncertainMs
+        }
+    }
+
+    /** Reuse the scroll method that actually worked; an accepted no-op doesn't change it. */
+    class FeedScrollStrategy {
+        private var preferTouch = false
+        fun byTouch(retry: Int): Boolean = preferTouch != (retry % 2 != 0)
+        fun advanced(byTouch: Boolean) { preferTouch = byTouch }
+    }
+
     /** Recovery only: a few live labels can change while the same scroll container stays put. */
     fun similarFeedContent(before: Set<String>, after: Set<String>): Boolean {
         val shared = before.count { it in after }
@@ -169,10 +196,12 @@ internal object JobProgress {
                 text = text.substring(0, (time ?: checkNotNull(counted)).range.first).removeSuffix(" for me")
             }
         }
-        val parts = limitSuffix(raw.replace(stopSuffix, "")).split(Regex(",? and (?=like )"), limit = 2)
+        val parts = limitSuffix(raw.replace(stopSuffix, "")).split(likeClause, limit = 2)
         val target = limitSuffix(parts[0])
         val choice = parts.getOrNull(1).orEmpty()
         if (parts.size == 2 && !chooseLikes.matches(choice)) return null
+        // Never interpret the rest of a sentence as an installed app label.
+        if (Regex("[.!?] ").containsMatchIn(target)) return null
         val prefix = countPrefix.matchEntire(target)
         val rawApp = if (prefix == null) {
             val named = surfaceOnApp.matchEntire(target)
@@ -201,8 +230,9 @@ internal object JobProgress {
         return FeedRequest(app, surface, FeedMode.CURATE, Reaction.LIKE.takeIf { choice.isNotEmpty() },
             if (invalid) null else BrowseLimit(duration, screens))
     }
+    private val likeClause = Regex("(?:,? and (?:you (?:may|can) )?|[.!?;] you (?:may|can) )(?=like )")
     private val chooseLikes = Regex(
-        "(?:like (?:any|the)(?: (?:ones?|posts?|reels?|videos?|shorts?|items?))? " +
+        "(?:like (?:(?:any|the)(?: (?:ones?|posts?|reels?|videos?|shorts?|items?))?|(?:posts|reels|videos|shorts|items)) " +
             "(?:that )?you (?:like|enjoy|want|find interesting)|" +
             "like (?:a|the) (?:reel|post|video|short) if you (?:want|like|feel like it))"
     )
@@ -227,12 +257,58 @@ internal object JobProgress {
     fun feedSurfaceChanged(before: Set<String>, after: Set<String>): Boolean =
         (after - before).size >= 2 && (before - after).isNotEmpty()
 
-    /** Only an explicit whole command enables bulk or discretionary reactions. */
-    fun feedRequest(message: String): FeedRequest? {
-        val text = normalize(message).trim('"', '“', '”').trim().trimEnd('.', '!', '?')
+    private val viewerId = Regex("(?:[a-z0-9]+_)*(reels?|shorts?)_(?:view_?pager|pager|viewer|video_player)(?:_container)?")
+
+    private val instagramViewerId = Regex("clips_(?:viewer_(?:view_?pager|pager|root|container)|view_?pager)")
+
+    fun matchesFeedViewer(id: String?, surface: String, appPackage: String? = null): Boolean {
+        val name = id.orEmpty()
+        return viewerId.matchEntire(name)?.groupValues?.get(1)?.trimEnd('s') == surface.trimEnd('s') ||
+            (appPackage == "com.instagram.android" && surface == "reels" && instagramViewerId.matches(name))
+    }
+
+    fun shortVideoSurface(surface: String?) = surface == "reels" || surface == "shorts"
+
+    data class SurfaceRead(
+        val labels: Set<String>, val selected: Boolean, val heading: Boolean,
+        val title: Boolean, val viewer: Boolean
+    )
+
+    enum class SurfaceProof(val description: String) {
+        SELECTED("tab selected"), VIEWER("matching video viewer visible"),
+        TITLE("matching page title appeared"), CONTENT("new page content after tab click")
+    }
+
+    /** Compare observations with the pre-click screen, never with an intermediate loading frame. */
+    fun surfaceProof(before: SurfaceRead, after: SurfaceRead, accepted: Boolean, surface: String): SurfaceProof? = when {
+        after.selected -> SurfaceProof.SELECTED
+        after.viewer -> SurfaceProof.VIEWER
+        !accepted -> null
+        (!before.heading && after.heading) || (!before.title && after.title) -> SurfaceProof.TITLE
+        // A dialog or a refresh can change the labels without opening a video viewer.
+        !shortVideoSurface(surface) && feedSurfaceChanged(before.labels, after.labels) -> SurfaceProof.CONTENT
+        else -> null
+    }
+
+    /** A malformed doomscroll command must not fall through to free-form phone actions. */
+    fun isDoomscrollRequest(message: String): Boolean {
+        val text = feedText(message)
+        val command = (openApp.matchEntire(text) ?: appFirst.matchEntire(text))
+            ?.groupValues?.get(2)?.removePrefix("then ") ?: text
+        return doomscrollStart.containsMatchIn(command)
+    }
+
+    private val doomscrollStart = Regex("^(?:doomscroll|doom scroll)\\b")
+
+    private fun feedText(message: String): String =
+        normalize(message).trim('"', '“', '”').trim().trimEnd('.', '!', '?')
             .removePrefix("pip, ").removePrefix("please ")
             .removePrefix("can you ").removePrefix("could you ").removePrefix("would you ")
             .removePrefix("please ").removeSuffix(", please").removeSuffix(" please")
+
+    /** Only an explicit whole command enables bulk or discretionary reactions. */
+    fun feedRequest(message: String): FeedRequest? {
+        val text = feedText(message)
         browse.matchEntire(text)?.let {
             return browseRequest(it.groupValues[2], it.groupValues[1].startsWith("doom"))
         }
@@ -253,6 +329,29 @@ internal object JobProgress {
         }
         val (app, surface) = feedTarget(target) ?: return null
         return FeedRequest(app, surface, FeedMode.ALL_MISSING, reaction)
+    }
+
+    class SurfaceWatch(private val originalWindow: Int) {
+        private var consecutive = 0
+        private var contentKey: Set<String>? = null
+        private var candidateWindow: Int? = null
+        var canRetryTap = true
+            private set
+
+        fun observe(window: Int?, proof: SurfaceProof?, sameTab: Boolean, labels: Set<String> = emptySet()): Boolean {
+            if (window != originalWindow || proof != null || !sameTab) canRetryTap = false
+            val key = labels.takeIf { proof == SurfaceProof.CONTENT }
+            if (proof == null || window == null) {
+                consecutive = 0
+                candidateWindow = null
+                contentKey = null
+                return false
+            }
+            consecutive = if (window == candidateWindow && key == contentKey) consecutive + 1 else 1
+            candidateWindow = window
+            contentKey = key
+            return consecutive >= 2
+        }
     }
 
     /** Success resets the retry budget; there is no total step budget. */
@@ -288,7 +387,7 @@ internal object JobProgress {
         fun enter(viewport: String): Boolean = visited.add(viewport)
 
         fun movement(previous: String, next: String): FeedMovement = when {
-            next == previous -> FeedMovement.UNCHANGED
+            next.isBlank() || next == previous -> FeedMovement.UNCHANGED
             visited.contains(next) -> FeedMovement.REVISIT
             else -> FeedMovement.NEW_VIEWPORT
         }

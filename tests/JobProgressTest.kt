@@ -82,6 +82,49 @@ fun main() {
     check(!JobProgress.matchesFeedTab("Create a reel", "reels"))
     check(JobProgress.feedSurfaceChanged(setOf("Home", "post A"), setOf("Reels", "clip B")))
     check(!JobProgress.feedSurfaceChanged(setOf("Home", "post A"), setOf("Home", "post B")))
+    // The permission may be a separate sentence, but still authorizes only selective likes.
+    val optionalSentence = "Open Instagram and doomscroll for 1 minute. You may like reels you like"
+    check(plan(optionalSentence) == selective.copy(browseLimit = JobProgress.BrowseLimit(durationMs = 60_000)))
+    check(plan("Doomscroll Instagram Reels for 2.5 minutes. You can like any reels you enjoy!") ==
+        selective.copy(browseLimit = JobProgress.BrowseLimit(durationMs = 150_000)))
+    check(JobProgress.feedRequest("Open Instagram and doomscroll for 1 minute. You may like every reel") == null)
+    check(JobProgress.feedRequest("$optionalSentence and follow the authors") == null)
+    check(JobProgress.feedRequest("Open Instagram and doomscroll for 1 minute. Send a message") == null)
+
+    val home = JobProgress.SurfaceRead(setOf("Home", "Reels", "Post A"), false, false, false, false)
+    val pendingReels = home.copy(labels = setOf("Reels", "Loading"))
+    val sparseReels = pendingReels.copy(labels = setOf("Reels"), title = true)
+    check(JobProgress.surfaceProof(home, pendingReels, accepted = true, surface = "reels") == null)
+    check(JobProgress.surfaceProof(home, sparseReels, accepted = true, surface = "reels") == JobProgress.SurfaceProof.TITLE)
+    check(JobProgress.surfaceProof(home, sparseReels, accepted = false, surface = "reels") == null)
+    check(JobProgress.surfaceProof(home, home.copy(viewer = true), accepted = false, surface = "reels") == JobProgress.SurfaceProof.VIEWER)
+    check(JobProgress.surfaceProof(home, home.copy(selected = true), accepted = true, surface = "reels") == JobProgress.SurfaceProof.SELECTED)
+    check(JobProgress.matchesFeedViewer("clips_reels_view_pager", "reels"))
+    check(!JobProgress.matchesFeedViewer("reels_viewer_button", "reels"))
+    check(!JobProgress.matchesFeedViewer("reel_tab", "reels"))
+    check(!JobProgress.matchesFeedViewer("shorts_view_pager", "reels"))
+
+    val dialog = home.copy(labels = setOf("Settings", "Allow", "Cancel"))
+    check(JobProgress.surfaceProof(home, dialog, accepted = true, surface = "reels") == null)
+    check(JobProgress.matchesFeedViewer("clips_viewer_view_pager", "reels", "com.instagram.android"))
+    check(!JobProgress.matchesFeedViewer("clips_viewer_view_pager", "reels", "another.app"))
+    val waiting = JobProgress.SurfaceWatch(7)
+    check(!waiting.observe(7, null, sameTab = true))
+    check(waiting.canRetryTap) // Home refreshed, but the original tab stayed present.
+    check(!waiting.observe(null, null, sameTab = false))
+    check(!waiting.canRetryTap)
+    check(!waiting.observe(8, JobProgress.SurfaceProof.TITLE, sameTab = false))
+    check(waiting.observe(8, JobProgress.SurfaceProof.VIEWER, sameTab = false))
+    val transientProof = JobProgress.SurfaceWatch(7)
+    check(!transientProof.observe(7, JobProgress.SurfaceProof.SELECTED, sameTab = true))
+    check(!transientProof.observe(7, null, sameTab = true))
+    check(!transientProof.observe(7, JobProgress.SurfaceProof.SELECTED, sameTab = true))
+    check(!transientProof.canRetryTap)
+    check(JobProgress.isDoomscrollRequest("Open Instagram and doomscroll. You may like every reel"))
+    check(JobProgress.feedRequest("Open Instagram and doomscroll. You may like every reel") == null)
+    check(JobProgress.isDoomscrollRequest("Pip, please doomscroll Instagram then send a message"))
+    check(!JobProgress.isDoomscrollRequest("Tell me why I doomscroll on Instagram"))
+
     val feedRetries = JobProgress.FailureStreak(JobProgress.FEED_FAILURES_BEFORE_STOP)
     repeat(4) { check(!feedRetries.record(false)) }
     check(!feedRetries.record(true))
@@ -140,6 +183,29 @@ fun main() {
     check(!delayedScroll.observe("new viewport", 2))
     check(delayedScroll.observe("new viewport", 2))
 
+    // Fast path only after two samples show evidence; keep the longer grace period for a no-op.
+    val reactionWait = JobProgress.FeedSettleGate(JobProgress.FeedWait.REACTION)
+    check(!reactionWait.observe("still ready", 100, verified = false))
+    check(!reactionWait.observe("applied", 250, verified = true))
+    check(reactionWait.observe("applied", 400, verified = true))
+    val immediateReaction = JobProgress.FeedSettleGate(JobProgress.FeedWait.REACTION)
+    check(!immediateReaction.observe("applied", 100, verified = true))
+    check(immediateReaction.observe("applied", 250, verified = true))
+    val scrolling = JobProgress.FeedSettleGate(JobProgress.FeedWait.SCROLL)
+    check(!scrolling.observe("same feed", 250, verified = false))
+    check(!scrolling.observe("same feed", 1_824, verified = false))
+    check(scrolling.observe("same feed", 1_825, verified = false))
+    val moving = JobProgress.FeedSettleGate(JobProgress.FeedWait.SCROLL)
+    check(!moving.observe("in motion", 250, verified = true))
+    check(!moving.observe("landed", 400, verified = true))
+    check(moving.observe("landed", 550, verified = true))
+    val strategy = JobProgress.FeedScrollStrategy()
+    check(!strategy.byTouch(0) && strategy.byTouch(1))
+    strategy.advanced(byTouch = true)
+    check(strategy.byTouch(0) && !strategy.byTouch(1))
+    strategy.advanced(byTouch = false)
+    check(!strategy.byTouch(0))
+
     // A run with blank or already-reacted screens can still reach a later eligible card.
     val feed = JobProgress.FeedTraversal()
     val viewports = listOf("first ready", "no controls 1", "no controls 2", "no controls 3",
@@ -150,6 +216,7 @@ fun main() {
         check(feed.enter(after))
     }
     check(feed.movement(viewports.last(), viewports.last()) == JobProgress.FeedMovement.UNCHANGED)
+    check(feed.movement(viewports.last(), "") == JobProgress.FeedMovement.UNCHANGED)
     check(feed.movement(viewports.last(), viewports.first()) == JobProgress.FeedMovement.REVISIT)
     check(!feed.enter(viewports.first()))
 

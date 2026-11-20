@@ -1747,7 +1747,7 @@ class OverlayService : Service(), PropHost {
         startThinking()
         // Some things are done, not said: stands get opened, games get started, and
         // criticism gets taken personally.
-        if (JobProgress.feedRequest(text) != null || JobProgress.explicitUrl(text) != null) {
+        if (JobProgress.feedRequest(text) != null || JobProgress.isDoomscrollRequest(text) || JobProgress.explicitUrl(text) != null) {
             startJob(text, text, turn)
             return
         }
