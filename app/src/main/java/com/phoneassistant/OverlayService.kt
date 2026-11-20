@@ -274,6 +274,8 @@ class OverlayService : Service(), PropHost {
     private var bubble: ReplyBubbleView? = null
     private var speechBubbleFallback: Runnable? = null
     private var bubbleParams: WindowManager.LayoutParams? = null
+    private data class BubbleExit(val view: ReplyBubbleView, val animation: ValueAnimator)
+    private var bubbleExit: BubbleExit? = null
     private var bubbleHideAt = 0L
 
     private var thinking: ThinkingView? = null
@@ -523,6 +525,7 @@ class OverlayService : Service(), PropHost {
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         if (ending || pet == null) return
+        clearBubbleExit()
         readDisplayBounds()
         petDrag?.cancel()
         cancelToyHop()
@@ -1615,6 +1618,7 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun attachBubble(text: String, end: Int) {
+        clearBubbleExit()
         val widthLimit = (screenW - dpInt(12f)).coerceIn(1, dpInt(232f).coerceAtLeast(1))
         val view = ReplyBubbleView(this, text, widthLimit)
         view.measure(View.MeasureSpec.makeMeasureSpec(widthLimit, View.MeasureSpec.AT_MOST),
@@ -1711,24 +1715,45 @@ class OverlayService : Service(), PropHost {
 
     private fun fadeBubble() {
         val view = bubble ?: return
-        val above = (bubbleParams?.y ?: 0) + view.height <= posY
+        clearBubbleExit()
         bubble = null
         bubbleParams = null
         bubbleHideAt = 0L
         view.animate().cancel()
-        if (!ValueAnimator.areAnimatorsEnabled()) {
-            runCatching { windowManager.removeView(view) }
+        // Fix the entry transform before exiting. The exit only changes opacity; shrinking
+        // or translating here made the text jump when Pip started walking again.
+        view.scaleX = 1f
+        view.scaleY = 1f
+        view.translationY = 0f
+        if (!ValueAnimator.areAnimatorsEnabled() || !view.isAttachedToWindow) {
+            runCatching { windowManager.removeViewImmediate(view) }
             return
         }
-        fading += view
-        view.animate().alpha(0f).scaleX(0.97f).scaleY(0.97f)
-            .translationY(dp(if (above) 4f else -4f))
-            .setDuration(135L).setInterpolator(LinearInterpolator())
-            .withEndAction { if (fading.remove(view)) runCatching { windowManager.removeView(view) } }
-            .start()
+        val animation = ValueAnimator.ofFloat(view.alpha, 0f).apply {
+            duration = 180L
+            interpolator = LinearInterpolator()
+            addUpdateListener { view.alpha = it.animatedValue as Float }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (bubbleExit?.view !== view) return
+                    bubbleExit = null
+                    runCatching { windowManager.removeViewImmediate(view) }
+                }
+            })
+        }
+        bubbleExit = BubbleExit(view, animation)
+        animation.start()
+    }
+
+    private fun clearBubbleExit() {
+        val outgoing = bubbleExit ?: return
+        bubbleExit = null
+        outgoing.animation.cancel()
+        runCatching { windowManager.removeViewImmediate(outgoing.view) }
     }
 
     private fun hideBubble() {
+        clearBubbleExit()
         cancelSpeechBubbleFallback()
         voicedReply = null
         bubble?.let { view ->
@@ -2485,7 +2510,7 @@ class OverlayService : Service(), PropHost {
         pet?.let { if (!duckLayout(it, petParams, overlaps(it), DUCK_ALPHA)) ok = false }
         if (!setHudDucked(hud?.let(::overlaps) == true)) ok = false
         props.forEach { prop -> if (!duckLayout(prop, prop.params, overlaps(prop))) ok = false }
-        (fading + listOfNotNull(bubble, thinking)).forEach { view ->
+        (fading + listOfNotNull(bubble, bubbleExit?.view, thinking)).forEach { view ->
             val params = view.layoutParams as? WindowManager.LayoutParams
             if (params != null) {
                 val wasHidden = params.alpha == 0f

@@ -840,8 +840,8 @@ fun main() {
     check(voiceWorker.automaticAllowed)
     voiceWorker.completed(KokoroFailure.STOPPED)
     check(!voiceWorker.automaticAllowed && voiceWorker.lastProblem == KokoroFailure.STOPPED)
-    voiceWorker.completed(KokoroFailure.NO_AUDIO)
-    check(!voiceWorker.automaticAllowed && voiceWorker.lastProblem == KokoroFailure.STOPPED)
+    voiceWorker.completed(KokoroFailure.PLAYBACK)
+    check(!voiceWorker.automaticAllowed && voiceWorker.lastProblem == KokoroFailure.PLAYBACK)
     voiceWorker.completed(null)
     check(voiceWorker.automaticAllowed && voiceWorker.lastProblem == null)
     voiceWorker.completed(KokoroFailure.TIMEOUT)
@@ -851,6 +851,12 @@ fun main() {
     check(VoiceProtocol.isWav(kokoroWav) && audio.getInt(24) == 24_000 && audio.getInt(40) == 6)
     check(audio.getShort(44) == 0.toShort() && audio.getShort(46) == (-32767).toShort())
     check(audio.getShort(48) == 32767.toShort())
+    val decodedPcm = checkNotNull(KokoroPcm.parse(kokoroWav))
+    check(decodedPcm.frames == 3 && decodedPcm.sampleRate == 24_000)
+    check(KokoroPcm.parse(kokoroWav.copyOf(44)) == null)
+    check(KokoroPcm.parse(kokoroWav.copyOf().apply { this[22] = 2 }) == null) // stereo
+    check(KokoroPcm.parse(kokoroWav.copyOf().apply { this[40] = 0 }) == null) // invalid length
+    check(KokoroPcm.parse(kokoroWav.copyOf().apply { this[36] = 'l'.code.toByte() }) == null)
     check(pcmWav(floatArrayOf(), 24_000) == null)
     println("Job progress tests passed.")
 }

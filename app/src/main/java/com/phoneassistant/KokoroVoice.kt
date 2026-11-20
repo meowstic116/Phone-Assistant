@@ -18,15 +18,15 @@ internal object KokoroVoice {
     private var stage: String? = null
     private var error: String? = null
 
-    fun supported() = Build.SUPPORTED_ABIS.any { it in setOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+    fun supported() = Build.VERSION.SDK_INT >= 27 && Build.SUPPORTED_ABIS.any { it in setOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     fun modelDir(ctx: Context) = File(ctx.noBackupFilesDir, KokoroFiles.PACK)
     fun ready(ctx: Context) = KokoroFiles.ready(modelDir(ctx))
     fun busy() = stage != null
     fun status(ctx: Context): String = when {
-        !supported() -> "Kokoro is not available on this phone’s processor."
+        !supported() -> "Kokoro needs Android 8.1 or later and a supported processor."
         stage != null -> stage.orEmpty()
         error != null -> error.orEmpty()
-        ready(ctx) -> KokoroIpc.lastProblem?.message ?: "Kokoro is installed and works offline."
+        ready(ctx) -> KokoroIpc.lastProblem?.message ?: "Kokoro is installed. Tap Preview to test audio."
         else -> "Kokoro needs a one-time 110 MB download."
     }
 

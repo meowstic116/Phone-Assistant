@@ -5,14 +5,15 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.os.PowerManager
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
+import java.util.concurrent.Executors
 
 /** Final replies only. Toy banter and agent progress stay silent, and private phone results stay local. */
 internal object PipVoice {
@@ -23,7 +24,8 @@ internal object PipVoice {
     }
     private var sequence = 0L
     private var kokoroRequest: KokoroIpc.Request? = null
-    private var player: MediaPlayer? = null
+    private var player: KokoroPlayback? = null
+    private val clipReader = Executors.newSingleThreadExecutor()
     private var engine: TextToSpeech? = null
     private var engineStatus: Int? = null
     private var localPending: ((Int) -> Unit)? = null
@@ -53,9 +55,9 @@ internal object PipVoice {
         report?.invoke(null)
     }
 
-    private fun timeLimit(id: Long, delay: Long) {
+    private fun timeLimit(id: Long, delay: Long, onTimeout: () -> Unit = {}) {
         speechDeadline?.let(main::removeCallbacks)
-        speechDeadline = Runnable { if (id == sequence) stop() }.also { main.postDelayed(it, delay) }
+        speechDeadline = Runnable { if (id == sequence) { stop(); onTimeout() } }.also { main.postDelayed(it, delay) }
     }
 
     private fun estimate(id: Long, line: SpeechCaption, every: Long = 40L, progress: () -> Float?) {
@@ -83,7 +85,7 @@ internal object PipVoice {
     }
 
     private fun releaseAudio() {
-        runCatching { player?.release() }
+        player?.close()
         player = null
         focus?.let { (manager, request) -> runCatching { manager.abandonAudioFocusRequest(request) } }
         focus = null
@@ -150,11 +152,7 @@ internal object PipVoice {
                     unavailable(problem?.message ?: "Kokoro couldn’t play this preview on your phone.")
                     return@complete
                 }
-                timeLimit(id, 8_000L)
-                val failed = { unavailable("Kokoro generated audio, but Android couldn’t play it.") }
-                if (!play(ctx, id, line, report, "Playing Kokoro offline.", failed) { media ->
-                    media.setDataSource(clip.fileDescriptor, 0L, clip.statSize)
-                }) failed()
+                playKokoro(ctx, id, line, clip, report)
             }
             kokoroRequest = request
             request.begin()
@@ -247,42 +245,49 @@ internal object PipVoice {
         }
     }
 
-    private fun play(ctx: Context, id: Long, line: SpeechCaption, report: ((String) -> Unit)?, success: String,
-                     failure: () -> Unit, dataSource: (MediaPlayer) -> Unit): Boolean {
-        return runCatching {
-            val media = MediaPlayer()
-            player = media
-            dataSource(media)
-            media.setAudioAttributes(attrs)
-            media.setOnPreparedListener {
-                if (player === media && mayPlay(ctx, id) && takeFocus(ctx, id)) {
-                    runCatching { media.start() }.onSuccess {
-                        timeLimit(id, 60_000L)
-                        estimate(id, line) {
-                            if (player !== media) null else runCatching {
-                                media.currentPosition / media.duration.coerceAtLeast(1).toFloat()
-                            }.getOrNull()
-                        }
-                        report?.invoke(success)
-                    }.onFailure { releaseAudio(); failure() }
-                } else if (player === media) {
-                    releaseAudio()
-                    finishCaptions()
-                    report?.invoke("Pip couldn’t get permission to play audio right now.")
+    private fun playKokoro(ctx: Context, id: Long, line: SpeechCaption, clip: ParcelFileDescriptor,
+                           report: ((String) -> Unit)?) {
+        fun failed(problem: KokoroFailure) {
+            KokoroIpc.playbackResult(problem)
+            releaseAudio()
+            finishCaptions()
+            report?.invoke(problem.message)
+        }
+        val reader = runCatching { ParcelFileDescriptor.dup(clip.fileDescriptor) }.getOrNull()
+        if (reader == null) { failed(KokoroFailure.CLIP); return }
+        timeLimit(id, 10_000L) { failed(KokoroFailure.CLIP) }
+        clipReader.execute {
+            val pcm = runCatching {
+                ParcelFileDescriptor.AutoCloseInputStream(reader).use { input ->
+                    // The writer and duplicated reader share an open-file position. Read from zero.
+                    input.channel.position(0L)
+                    val size = reader.statSize
+                    if (size !in KokoroPcm.MIN_WAV_BYTES.toLong()..VoiceProtocol.MAX_WAV.toLong()) return@use null
+                    val bytes = ByteArray(size.toInt())
+                    java.io.DataInputStream(input).readFully(bytes)
+                    KokoroPcm.parse(bytes)
                 }
-            }
-            media.setOnCompletionListener {
-                if (player === media) { releaseAudio(); finishCaptions() }
-            }
-            media.setOnErrorListener { _, _, _ ->
-                if (player === media) {
-                    releaseAudio()
-                    failure()
+            }.getOrNull()
+            main.post {
+                if (id != sequence) return@post
+                if (!mayPlay(ctx, id)) { stop(); return@post }
+                if (pcm == null) { failed(KokoroFailure.CLIP); return@post }
+                if (!takeFocus(ctx, id)) { failed(KokoroFailure.FOCUS); return@post }
+                val playback = KokoroPlayback.create(pcm, main, attrs) { ok ->
+                    if (id != sequence) return@create
+                    if (ok) {
+                        KokoroIpc.playbackResult(null)
+                        releaseAudio()
+                        finishCaptions()
+                        report?.invoke("Kokoro preview played offline.")
+                    } else failed(KokoroFailure.PLAYBACK)
                 }
-                true
+                if (playback == null) { failed(KokoroFailure.PLAYBACK); return@post }
+                player = playback
+                if (runCatching { playback.play() }.isFailure) { failed(KokoroFailure.PLAYBACK); return@post }
+                timeLimit(id, pcm.frames * 1000L / pcm.sampleRate + 8_000L) { failed(KokoroFailure.PLAYBACK) }
+                estimate(id, line) { runCatching { playback.progress() }.getOrNull() }
             }
-            media.prepareAsync()
-        }.onFailure { releaseAudio() }.isSuccess
+        }
     }
-
 }
