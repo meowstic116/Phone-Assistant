@@ -152,6 +152,15 @@ class DiagnosticsActivity : Activity() {
             out.append("    ").append(text).append('\n')
         }
 
+        section("VOICE")
+        val voice = PipVoice.config(this)
+        line("voice source", voice.source.label)
+        line("spoken replies", if (voice.enabled) "on" else "off")
+        if (voice.source == VoiceSource.KOKORO) {
+            line("Kokoro model", if (KokoroVoice.ready(this)) "installed" else "not installed")
+            KokoroIpc.lastProblem?.let { line("last voice issue", it.name) }
+        }
+
         section("KEYBOARD — what Android reports")
 
         val watching = ImeWatch.enabled(this)

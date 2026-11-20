@@ -50,12 +50,18 @@
 
     <application
         android:allowBackup="true"
+        android:extractNativeLibs="true"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@drawable/ic_pip"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Pip">
+
+        <service
+            android:name=".KokoroSpeechService"
+            android:exported="false"
+            android:process=":kokoro" />
 
         <activity
             android:name=".MainActivity"

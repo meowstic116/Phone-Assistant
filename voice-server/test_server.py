@@ -13,8 +13,8 @@ class ProtocolTest(unittest.TestCase):
         self.token = "only-a-test-token-not-a-secret"
         self.wav = b"RIFF\x00\x00\x00\x00WAVE"
 
-        def synth(text):
-            self.received.append(text)
+        def synth(text, style):
+            self.received.append((text, style))
             return self.wav
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.token, synth))
@@ -40,13 +40,16 @@ class ProtocolTest(unittest.TestCase):
 
     def test_request(self):
         self.assertEqual(self.request({"model": MODEL, "input": "Hello!"}), (200, "audio/wav", self.wav))
-        self.assertEqual(self.received, ["Hello!"])
+        self.assertEqual(self.received, [("Hello!", None)])
+        self.assertEqual(self.request({"input": "Hi", "instructions": "Dry male voice"})[0], 200)
+        self.assertEqual(self.received[-1], ("Hi", "Dry male voice"))
 
     def test_rejects_invalid_inputs_before_synthesis(self):
         self.assertEqual(self.request({"input": "Hi"}, token="wrong")[0], 401)
         self.assertEqual(self.request({"input": "a" * 421})[0], 400)
         self.assertEqual(self.request({"input": "a" * 5000})[0], 413)
         self.assertEqual(self.request({"input": "Hi", "response_format": "mp3"})[0], 400)
+        self.assertEqual(self.request({"input": "Hi", "instructions": "(nested style)"})[0], 400)
         self.assertEqual(self.received, [])
 
 

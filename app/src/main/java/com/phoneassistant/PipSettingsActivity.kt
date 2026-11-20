@@ -8,11 +8,16 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.InputFilter
 import android.text.InputType
+import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -26,6 +31,10 @@ class PipSettingsActivity : Activity() {
     private lateinit var content: LinearLayout
     private lateinit var bootHint: TextView
     private lateinit var accessHint: TextView
+    private lateinit var voiceSummary: TextView
+    private lateinit var kokoroStatus: TextView
+    private lateinit var kokoroAction: Button
+    private val kokoroChanged: () -> Unit = { refreshVoiceSummary() }
     private var refreshApiIfChanged: () -> Unit = {}
     private val permissionStatuses = mutableListOf<() -> Unit>()
     private val toySwitches = mutableListOf<Switch>()
@@ -65,11 +74,28 @@ class PipSettingsActivity : Activity() {
 
         heading("Voice")
         toggle("Read Pip’s replies aloud", PipVoice.config(this).enabled) { PipVoice.setEnabled(this, it) }
-        text("Uses an installed Android voice unless you connect a VoxCPM server. With VoxCPM, the text of ordinary replies is sent to your configured server. On-device phone results use the Android voice only.")
-        button("Configure VoxCPM server") { configureVoiceServer() }
+        voiceSummary = text("")
+        text("Kokoro speaks offline. Only VoxCPM2 modes send ordinary reply text to a speech service; private phone results never go to a speech service. If a voice can’t play, Pip shows text without switching voices.")
+        button("Choose Pip’s voice") { configureVoice() }
+        kokoroStatus = text("")
+        kokoroAction = button("Download Kokoro") {
+            if (KokoroVoice.ready(this)) {
+                AlertDialog.Builder(this).setTitle("Remove Kokoro?")
+                    .setMessage("You can download it again later to hear Pip offline.")
+                    .setNegativeButton("Cancel", null).setPositiveButton("Remove") { _, _ -> KokoroVoice.remove(this) }.show()
+            } else {
+                AlertDialog.Builder(this).setTitle("Download Kokoro?")
+                    .setMessage("Downloads about 110 MB from GitHub. Wi-Fi is recommended. Pip won’t need the internet for speech after setup.")
+                    .setNegativeButton("Cancel", null).setPositiveButton("Download") { _, _ -> KokoroVoice.install(this) }.show()
+            }
+        }
+        refreshVoiceSummary()
         button("Preview Pip’s voice") {
             PipVoice.preview(this) { result ->
-                if (!isFinishing && !isDestroyed) Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+                if (!isFinishing && !isDestroyed) {
+                    refreshVoiceSummary()
+                    Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+                }
             }
         }
 
@@ -84,37 +110,128 @@ class PipSettingsActivity : Activity() {
         }
     }
 
-    private fun configureVoiceServer() {
+    private fun refreshVoiceSummary() {
+        val config = PipVoice.config(this)
+        voiceSummary.text = when (config.source) {
+            VoiceSource.KOKORO -> "${config.kokoro.label} · Kokoro offline"
+            VoiceSource.WIRO -> "${config.style.label} · VoxCPM2 via Wiro" +
+                if (config.wiroKey.isBlank()) " · API key needed" else ""
+            VoiceSource.SERVER -> "${config.style.label} · Custom VoxCPM2 server"
+            VoiceSource.ANDROID -> "Offline Android voice"
+        }
+        val showKokoro = config.source == VoiceSource.KOKORO || KokoroVoice.busy() || KokoroVoice.ready(this)
+        kokoroStatus.visibility = if (showKokoro) View.VISIBLE else View.GONE
+        kokoroStatus.text = KokoroVoice.status(this)
+        kokoroAction.visibility = if (showKokoro && KokoroVoice.supported()) View.VISIBLE else View.GONE
+        kokoroAction.isEnabled = !KokoroVoice.busy()
+        kokoroAction.text = if (KokoroVoice.ready(this)) "Remove Kokoro download" else "Download Kokoro"
+    }
+
+    override fun onStart() {
+        super.onStart()
+        KokoroVoice.observe(kokoroChanged)
+    }
+
+    override fun onStop() {
+        KokoroVoice.forget(kokoroChanged)
+        super.onStop()
+    }
+
+    private fun configureVoice() {
         val saved = PipVoice.config(this)
         val fields = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(4), dp(20), dp(8))
+            setPadding(dp(20), dp(8), dp(20), dp(14))
         }
-        val endpoint = EditText(this).apply {
-            hint = "https://your-server.example/v1/audio/speech"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+        fun chooser(values: List<String>, index: Int) = Spinner(this).apply {
+            adapter = ArrayAdapter(this@PipSettingsActivity, android.R.layout.simple_spinner_item, values).also {
+                it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            setSelection(index)
+            minimumHeight = dp(48)
+        }
+        fun field(label: String, value: String, type: Int) = EditText(this).apply {
+            hint = label
+            inputType = type
             setSingleLine(true)
-            setText(saved.endpoint)
+            setText(value)
         }
-        val token = EditText(this).apply {
-            hint = "Voice server token (if required)"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setSingleLine(true)
-            setText(saved.token)
+        val sources = VoiceSource.values()
+        val styles = PipVoiceStyle.values()
+        val source = chooser(sources.map { it.label }, saved.source.ordinal).apply { contentDescription = "Voice service" }
+        val style = chooser(styles.map { it.label }, saved.style.ordinal).apply { contentDescription = "Voice style" }
+        val custom = field("Describe a voice (e.g. crisp, lightly robotic)", saved.custom, InputType.TYPE_CLASS_TEXT).apply {
+            filters = arrayOf(InputFilter.LengthFilter(PipVoiceStyle.MAX_DESCRIPTION))
         }
-        fields.addView(endpoint)
-        fields.addView(token)
-        val dialog = AlertDialog.Builder(this).setTitle("VoxCPM server")
-            .setMessage("Enter the full HTTPS speech URL. Leave it blank to use only the Android voice. This is separate from the chat API.")
-            .setView(fields).setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
+        val presets = KokoroPreset.values()
+        val preset = chooser(presets.map { it.label }, saved.kokoro.ordinal).apply { contentDescription = "Kokoro voice" }
+        val secret = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        val wiroKey = field("Wiro API key (not your chat API key)", saved.wiroKey, secret)
+        val endpoint = field("https://your-server.example/v1/audio/speech", saved.endpoint,
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        val token = field("Server token (if required)", saved.token, secret)
+        val keyLink = Button(this).apply {
+            text = "Get a Wiro API key"
+            isAllCaps = false
+            setOnClickListener {
+                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wiro.ai/panel/project/new"))) }
+                catch (_: ActivityNotFoundException) { Toast.makeText(this@PipSettingsActivity, "No browser available.", Toast.LENGTH_SHORT).show() }
+            }
+        }
+        val help = TextView(this).apply { setPadding(0, dp(4), 0, dp(4)) }
+        listOf(source, help, preset, wiroKey, keyLink, endpoint, token, style, custom).forEach { fields.addView(it) }
+        fun refreshFields() {
+            val selected = sources[source.selectedItemPosition.coerceAtLeast(0)]
+            fun visible(view: View, show: Boolean) { view.visibility = if (show) View.VISIBLE else View.GONE }
+            visible(wiroKey, selected == VoiceSource.WIRO)
+            visible(keyLink, selected == VoiceSource.WIRO)
+            visible(endpoint, selected == VoiceSource.SERVER)
+            visible(token, selected == VoiceSource.SERVER)
+            val remote = selected == VoiceSource.WIRO || selected == VoiceSource.SERVER
+            visible(preset, selected == VoiceSource.KOKORO)
+            visible(style, remote)
+            visible(custom, remote && style.selectedItemPosition == PipVoiceStyle.CUSTOM.ordinal)
+            help.text = when (selected) {
+                VoiceSource.KOKORO -> "On-device English voices. No speech API key or server. Download Kokoro in Voice settings before previewing it."
+                VoiceSource.WIRO -> "No server setup. Enter a Wiro project key. Your Wiro account may be charged for speech, including previews."
+                VoiceSource.SERVER -> "Connect to a VoxCPM2 server over HTTPS. The server must support style instructions to honor your selection."
+                VoiceSource.ANDROID -> "Uses an installed offline voice. Change its sound in Android’s text-to-speech settings."
+            }
+        }
+        val listener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = refreshFields()
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        source.onItemSelectedListener = listener
+        style.onItemSelectedListener = listener
+        refreshFields()
+        val dialog = AlertDialog.Builder(this).setTitle("Choose Pip’s voice")
+            .setView(ScrollView(this).apply { addView(fields) })
+            .setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val selected = sources[source.selectedItemPosition.coerceAtLeast(0)]
+                val chosen = styles[style.selectedItemPosition.coerceAtLeast(0)]
+                val key = wiroKey.text.toString().trim()
                 val address = endpoint.text.toString().trim()
-                if (address.isNotEmpty() && VoiceProtocol.endpoint(address) == null) {
-                    endpoint.error = "Use an HTTPS URL ending in /v1/audio/speech."
-                } else {
-                    PipVoice.setServer(this, address, if (address.isEmpty()) "" else token.text.toString().trim())
-                    dialog.dismiss()
+                val bearer = token.text.toString().trim()
+                val description = PipVoiceStyle.clean(custom.text.toString())
+                when {
+                    selected == VoiceSource.WIRO && (key.isBlank() || key.any { it.isWhitespace() || it.isISOControl() }) ->
+                        wiroKey.error = "Enter a Wiro project key without spaces."
+                    selected == VoiceSource.SERVER && VoiceProtocol.endpoint(address) == null ->
+                        endpoint.error = "Use an HTTPS URL ending in /v1/audio/speech."
+                    selected == VoiceSource.SERVER && bearer.any { it.isWhitespace() || it.isISOControl() } ->
+                        token.error = "Enter the server token without spaces."
+                    (selected == VoiceSource.WIRO || selected == VoiceSource.SERVER) && chosen == PipVoiceStyle.CUSTOM && description.isBlank() ->
+                        custom.error = "Describe how you want Pip to sound."
+                    else -> {
+                        PipVoice.save(this, saved.copy(source = selected, endpoint = address, token = bearer,
+                            wiroKey = key, style = chosen, custom = description,
+                            kokoro = presets[preset.selectedItemPosition.coerceAtLeast(0)]))
+                        refreshVoiceSummary()
+                        dialog.dismiss()
+                    }
                 }
             }
         }

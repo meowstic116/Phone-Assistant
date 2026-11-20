@@ -29,16 +29,18 @@ small OpenAI-compatible speech endpoint. No reference recording is required.
    }
    ```
 
-3. In **Pip settings → Voice → Configure VoxCPM server**, use the full public-facing
+3. In **Pip settings → Voice → Choose Pip’s voice**, select **Custom VoxCPM2 server**
+   and use the full public-facing
    URL (such as `https://voice.example.com/v1/audio/speech`) and your voice token. Try
    **Preview Pip’s voice**, then turn on **Read Pip’s replies aloud**. An existing
    OpenAI-compatible VoxCPM2 server is also supported if it returns WAV for model
    `openbmb/VoxCPM2`, voice `default`.
 
-Optional: set `PIP_VOICE_STYLE` to a short description of the voice you want and restart
-this bridge. That sets a voice style, not a guarantee of an identical timbre every time.
-The server doesn't store replies or WAV files. It handles one synthesis at a time; Android
-uses its offline voice when the server is busy, unreachable, or too slow. Configure any
+The bridge honors a client’s `instructions` field for voice style. Set `PIP_VOICE_STYLE`
+to change the default when that field is omitted. A style description is not a guarantee
+of an identical timbre every time. Third-party servers may ignore style instructions.
+The bridge doesn't store replies or WAV files. It handles one synthesis at a time; Pip
+shows text without audio if the service is busy, unreachable, or too slow. Configure any
 reverse proxy not to log headers or request bodies and restrict access to trusted clients.
 
 Run protocol tests without a model or GPU: `python -m unittest discover -s voice-server -v`
