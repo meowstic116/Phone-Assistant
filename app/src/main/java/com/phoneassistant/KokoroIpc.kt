@@ -20,6 +20,8 @@ internal object KokoroIpc {
     const val SYNTHESIZE = 1
     const val READY = 2
     const val FAILED = 3
+    const val SYNTHESIZING = 4
+    const val FAILURE = "failure"
     const val TEXT = "text"
     const val PRESET = "preset"
     const val OUTPUT = "output"
@@ -28,6 +30,7 @@ internal object KokoroIpc {
     private val health = KokoroHealth()
     val lastProblem get() = health.lastProblem
     val automaticAllowed get() = health.automaticAllowed
+    fun playbackResult(problem: KokoroFailure?) = health.completed(problem)
 
     class Request(private val ctx: Context, private val text: String, private val preset: KokoroPreset,
                   private val done: (ParcelFileDescriptor?, KokoroFailure?) -> Unit) : ServiceConnection {
@@ -37,9 +40,12 @@ internal object KokoroIpc {
         private val deadline = Runnable { finish(KokoroFailure.TIMEOUT) }
         private val incoming = Messenger(Handler(Looper.getMainLooper()) { result ->
             if (finished) return@Handler true
-            val valid = result.what == READY &&
-                (clip?.statSize ?: 0L) in 44L..VoiceProtocol.MAX_WAV.toLong()
-            finish(if (valid) null else KokoroFailure.NO_AUDIO)
+            when (result.what) {
+                SYNTHESIZING -> armDeadline(40_000L)
+                READY -> finish(if ((clip?.statSize ?: 0L) in KokoroPcm.MIN_WAV_BYTES.toLong()..VoiceProtocol.MAX_WAV.toLong()) null else KokoroFailure.CLIP)
+                FAILED -> finish(KokoroFailure.values().firstOrNull { it.name == result.data.getString(FAILURE) }
+                    ?: KokoroFailure.NO_AUDIO)
+            }
             true
         })
 
@@ -53,11 +59,16 @@ internal object KokoroIpc {
             if (clip == null) { finish(KokoroFailure.BINDING); return }
             val connected = runCatching {
                 val result = ctx.bindService(Intent(ctx, KokoroSpeechService::class.java), this,
-                    Context.BIND_AUTO_CREATE or Context.BIND_NOT_FOREGROUND)
+                    Context.BIND_AUTO_CREATE)
                 bound = true // Android requires an unbind even when the call returns false.
                 result
             }.getOrDefault(false)
-            if (connected) main.postDelayed(deadline, 20_000L) else finish(KokoroFailure.BINDING)
+            if (connected) armDeadline(50_000L) else finish(KokoroFailure.BINDING)
+        }
+
+        private fun armDeadline(ms: Long) {
+            main.removeCallbacks(deadline)
+            main.postDelayed(deadline, ms)
         }
 
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -93,7 +104,7 @@ internal object KokoroIpc {
 
         private fun finish(failure: KokoroFailure?) {
             if (finished) return
-            health.completed(failure)
+            if (failure != null) health.completed(failure)
             try { done(clip.takeIf { failure == null }, failure) }
             finally { close() }
         }

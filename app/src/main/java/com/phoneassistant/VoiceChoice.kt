@@ -17,9 +17,9 @@ internal enum class KokoroPreset(val label: String, val speakerId: Int) {
 }
 
 internal fun pcmWav(samples: FloatArray, rate: Int): ByteArray? {
-    if (rate !in 8_000..48_000 || samples.isEmpty() || samples.size > (VoiceProtocol.MAX_WAV - 44) / 2) return null
+    if (rate !in 8_000..48_000 || samples.isEmpty() || samples.size > (VoiceProtocol.MAX_WAV - KokoroPcm.HEADER_BYTES) / 2) return null
     val bytes = samples.size * 2
-    val wav = java.nio.ByteBuffer.allocate(44 + bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    val wav = java.nio.ByteBuffer.allocate(KokoroPcm.HEADER_BYTES + bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
     wav.put("RIFF".toByteArray(Charsets.US_ASCII)).putInt(36 + bytes)
     wav.put("WAVEfmt ".toByteArray(Charsets.US_ASCII)).putInt(16)
     wav.putShort(1).putShort(1).putInt(rate).putInt(rate * 2).putShort(2).putShort(16)

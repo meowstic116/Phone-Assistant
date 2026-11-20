@@ -236,9 +236,10 @@ is disabled stays in the catalog, with a note explaining why it can’t be launc
 In **Pip settings → Voice**, **Kokoro** is the default for new voice setups, with the
 male **Adam** preset. Tap **Download Kokoro** (about 110 MB from GitHub), then **Preview
 Pip’s voice**. Turn on **Read Pip’s replies aloud** if you want spoken replies; it’s off
-by default. **Choose Pip’s voice** also offers Michael and Bella. Kokoro is English-only:
-it runs on your phone after setup, with no speech API key, server, or per-use cost. You
-can remove the download from Voice settings. An existing explicit voice choice stays selected.
+by default. **Choose Pip’s voice** also offers Michael and Bella. Kokoro is English-only
+and needs Android 8.1 or newer. It runs on your phone after setup, with no speech API
+key, server, or per-use cost. You can remove the download from Voice settings. An
+existing explicit voice choice stays selected.
 
 **Offline Android voice** uses an installed system voice and is never a fallback.
 Pip doesn't send reply text to a speech provider. The separate chat API still generates
@@ -247,10 +248,12 @@ chat replies when needed, whether or not speech is enabled.
 The floating bubble reveals words during playback without resizing. Android engines may
 report word ranges; Kokoro uses estimated timing. The bubble appears even if audio
 hasn’t started. If it takes more than 2.5 seconds to show the first word, or audio
-is unavailable, the full reply is shown without waiting. Kokoro runs in a separate app process so a voice-engine
-failure doesn’t restart the overlay. If that process stops, Pip pauses automatic Kokoro
-speech for the session; a successful **Preview Pip’s voice** resumes it. The last voice
-issue appears in **Debug options → Diagnostics**, without recording any spoken text.
+is unavailable, the full reply is shown without waiting. The bubble fades without
+shrinking or moving. Kokoro runs in a separate app process so a voice-engine failure
+doesn’t restart the overlay. If that process stops, Pip pauses automatic Kokoro
+speech for the session; a successful **Preview Pip’s voice** resumes it. Preview
+reports whether a failure happens during voice generation or playback. The last voice
+issue also appears in **Debug options → Diagnostics**, without recording any spoken text.
 Kokoro’s runtime is bundled for arm64-v8a, armeabi-v7a and
 x86_64. Its weights are not bundled with the APK or committed to Git. See
 [third-party notices](app/src/main/assets/voice-licenses/README.txt) for source and licenses.
@@ -288,7 +291,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.176-debug.apk`](dist/phone-assistant-0.176-debug.apk).
+[`phone-assistant-0.177-debug.apk`](dist/phone-assistant-0.177-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by

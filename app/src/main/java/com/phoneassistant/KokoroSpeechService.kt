@@ -14,10 +14,13 @@ import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Only this private Android process loads the model and calls native speech code. */
 class KokoroSpeechService : Service() {
+    private val main = Handler(Looper.getMainLooper())
     private var cancelled: AtomicBoolean? = null
     private val incoming = Messenger(Handler(Looper.getMainLooper()) { request ->
         if (request.what != KokoroIpc.SYNTHESIZE) return@Handler false
@@ -29,22 +32,41 @@ class KokoroSpeechService : Service() {
         val preset = KokoroPreset.restore(request.data.getString(KokoroIpc.PRESET))
         if (reply == null || cancelled != null || text.isBlank() || text.length > VoiceProtocol.MAX_TEXT) {
             output.closeQuietly()
-            reply?.let { sendResult(it, false) }
+            reply?.let { sendResult(it, KokoroFailure.NO_AUDIO) }
             return@Handler true
         }
         val stop = AtomicBoolean()
         cancelled = stop
         worker.execute {
-            val ok = runCatching {
+            val failure = try {
                 ParcelFileDescriptor.AutoCloseOutputStream(output).use { stream ->
-                    if (stop.get()) return@use false
-                    val wav = synthesize(text, preset, stop) ?: return@use false
-                    if (stop.get()) return@use false
+                    if (stop.get()) return@use KokoroFailure.NO_AUDIO
+                    val tts = try { engine() } catch (_: LinkageError) {
+                        return@use KokoroFailure.ENGINE
+                    } catch (_: Exception) {
+                        return@use KokoroFailure.MODEL
+                    }
+                    if (stop.get()) return@use KokoroFailure.NO_AUDIO
+                    reply.send(Message.obtain(null, KokoroIpc.SYNTHESIZING))
+                    if (preset.speakerId !in 0 until tts.numSpeakers()) return@use KokoroFailure.MODEL
+                    val audio = tts.generate(text.replace('’', '\''), preset.speakerId, 1.03f)
+                    val wav = pcmWav(audio.samples, audio.sampleRate) ?: return@use KokoroFailure.NO_AUDIO
+                    if (stop.get()) return@use KokoroFailure.NO_AUDIO
                     stream.write(wav)
-                    true
+                    null
                 }
-            }.getOrDefault(false)
-            if (!stop.get()) sendResult(reply, ok)
+            } catch (_: LinkageError) {
+                KokoroFailure.ENGINE
+            } catch (_: Exception) {
+                KokoroFailure.NO_AUDIO
+            } finally {
+                unload?.cancel(false)
+                unload = worker.schedule({ releaseEngine() }, 30L, TimeUnit.SECONDS)
+            }
+            main.post {
+                if (cancelled === stop) cancelled = null
+                if (!stop.get()) sendResult(reply, failure)
+            }
         }
         true
     })
@@ -62,30 +84,41 @@ class KokoroSpeechService : Service() {
         super.onDestroy()
     }
 
-    private fun synthesize(text: String, preset: KokoroPreset, stop: AtomicBoolean): ByteArray? {
+    private fun engine(): OfflineTts {
         val dir = KokoroVoice.modelDir(this)
-        if (!KokoroFiles.ready(dir)) return null
-        // Reduce peak memory on devices where Android may have killed the previous in-process engine.
-        val tts = OfflineTts(config = OfflineTtsConfig(model = OfflineTtsModelConfig(
+        check(KokoroFiles.ready(dir))
+        val stamp = File(dir, KokoroFiles.MODEL).lastModified()
+        val cached = cachedEngine
+        if (cached != null && stamp == modelStamp) return cached
+        releaseEngine()
+        return OfflineTts(config = OfflineTtsConfig(model = OfflineTtsModelConfig(
             kokoro = OfflineTtsKokoroModelConfig(model = File(dir, KokoroFiles.MODEL).path,
                 voices = File(dir, KokoroFiles.VOICES).path, tokens = File(dir, KokoroFiles.TOKENS).path,
-                lexicon = File(dir, KokoroFiles.LEXICON).path, lang = "en-us"), numThreads = 1)))
-        try {
-            if (stop.get() || preset.speakerId !in 0 until tts.numSpeakers()) return null
-            // Avoid calling into Kotlin from a native synthesis callback.
-            val audio = tts.generate(text.replace('’', '\''), preset.speakerId, 1.03f)
-            return if (stop.get()) null else pcmWav(audio.samples, audio.sampleRate)
-        } finally {
-            tts.free()
+                lexicon = File(dir, KokoroFiles.LEXICON).path), numThreads = 2))).also {
+            cachedEngine = it
+            modelStamp = stamp
         }
     }
 
-    private fun sendResult(reply: Messenger, ok: Boolean) {
-        runCatching { reply.send(Message.obtain(null, if (ok) KokoroIpc.READY else KokoroIpc.FAILED)) }
+    private fun sendResult(reply: Messenger, failure: KokoroFailure?) {
+        runCatching {
+            reply.send(Message.obtain(null, if (failure == null) KokoroIpc.READY else KokoroIpc.FAILED).apply {
+                if (failure != null) data.putString(KokoroIpc.FAILURE, failure.name)
+            })
+        }
     }
 
     private companion object {
-        // A cancelled native call may still be unwinding when Android rebinds. Never load two models.
-        val worker = Executors.newSingleThreadExecutor()
+        // One native session on one thread, even if a cancelled request is still unwinding.
+        val worker = Executors.newSingleThreadScheduledExecutor()
+        var cachedEngine: OfflineTts? = null
+        var modelStamp = 0L
+        var unload: ScheduledFuture<*>? = null
+
+        fun releaseEngine() {
+            val previous = cachedEngine
+            cachedEngine = null
+            runCatching { previous?.free() }
+        }
     }
 }
