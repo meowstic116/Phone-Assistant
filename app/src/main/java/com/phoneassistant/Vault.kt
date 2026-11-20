@@ -30,22 +30,31 @@ object Vault {
 
     private const val MAX_LOGINS = 60
 
+    // null means unavailable, not empty. Never overwrite stored data after a failed read.
     @Synchronized
-    fun all(ctx: Context): List<Login> = read(ctx)
+    fun all(ctx: Context): List<Login>? = read(ctx)
 
-    /** Adds or replaces the login for a site: one per site, so saving again is changing it. */
+    enum class SaveResult { SAVED, INVALID, FULL, UNAVAILABLE }
+
+    /** Adds or replaces the login for a site without silently evicting older logins. */
     @Synchronized
-    fun save(ctx: Context, site: String, username: String, password: String): Boolean {
-        val cleanSite = site.trim().take(200)
-        val cleanUser = username.trim().take(120)
-        if (cleanSite.isEmpty() || cleanUser.isEmpty() || password.isEmpty()) return false
-        val kept = all(ctx).filterNot { host(it.site) == host(cleanSite) }
-        return write(ctx, (kept + Login(cleanSite, cleanUser, password)).takeLast(MAX_LOGINS))
+    fun save(ctx: Context, site: String, username: String, password: String): SaveResult {
+        val cleanSite = site.trim()
+        val cleanUser = username.trim()
+        val siteHost = host(cleanSite)
+        if (siteHost.isEmpty() || siteHost.any { it.isWhitespace() } || cleanSite.length > 200 ||
+            cleanUser.isEmpty() || cleanUser.length > 120 || password.isEmpty()) return SaveResult.INVALID
+        val current = read(ctx) ?: return SaveResult.UNAVAILABLE
+        val kept = current.filterNot { host(it.site) == siteHost }
+        if (kept.size >= MAX_LOGINS) return SaveResult.FULL
+        return if (write(ctx, kept + Login(cleanSite, cleanUser, password))) SaveResult.SAVED else SaveResult.UNAVAILABLE
     }
 
     @Synchronized
-    fun remove(ctx: Context, site: String): Boolean =
-        write(ctx, all(ctx).filterNot { host(it.site) == host(site) })
+    fun remove(ctx: Context, site: String): Boolean {
+        val current = read(ctx) ?: return false
+        return write(ctx, current.filterNot { host(it.site) == host(site) })
+    }
 
     /**
      * The site as a host: lower case, no scheme, no "www.", no port, no path. It is only used
@@ -64,22 +73,21 @@ object Vault {
 
     // ------------------------------------------------------------------- storage
 
-    private fun read(ctx: Context): List<Login> {
-        val blob = prefs(ctx).getString(KEY, null) ?: return emptyList()
+    private fun read(ctx: Context): List<Login>? {
         return try {
+            val blob = prefs(ctx).getString(KEY, null) ?: return emptyList()
             val json = JSONArray(String(decrypt(blob), Charsets.UTF_8))
-            (0 until json.length()).mapNotNull { index ->
-                val item = json.optJSONObject(index) ?: return@mapNotNull null
-                val site = item.optString("site")
-                val username = item.optString("username")
-                val password = item.optString("password")
-                if (site.isEmpty() || password.isEmpty()) null else Login(site, username, password)
+            (0 until json.length()).map { index ->
+                val item = json.getJSONObject(index)
+                val site = item.getString("site")
+                val username = item.getString("username")
+                val password = item.getString("password")
+                check(site.isNotEmpty() && username.isNotEmpty() && password.isNotEmpty())
+                Login(site, username, password)
             }
         } catch (t: Throwable) {
-            // A vault that cannot be opened is empty, not broken: it must never fall back to
-            // anything less protected than what it was stored with.
             Diag.caught("vault", t)
-            emptyList()
+            null
         }
     }
 

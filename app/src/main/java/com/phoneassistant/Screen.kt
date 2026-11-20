@@ -83,7 +83,7 @@ object Screen {
 
     // -------------------------------------------------------------------- reading
 
-    fun snapshot(web: Boolean = false, feed: Boolean = false): Snapshot? {
+    fun snapshot(web: Boolean = false, feed: Boolean = false, expectedApp: String? = null): Snapshot? {
         val svc = service ?: return null
         // No window at all and a framework that refused are the same thing to a caller — both
         // are a screen it cannot read — but only one of them is normal, and the record says
@@ -97,6 +97,7 @@ object Screen {
         // Read before the walk: the walk gives its nodes back as it goes, the root included.
         val app = root.packageName?.toString()?.takeIf { it.isNotBlank() && it != svc.packageName }
             ?: return null
+        if (expectedApp != null && app != expectedApp) return null
         val windowId = root.windowId
         val items = ArrayList<Item>()
         val localFeed = feed
@@ -351,17 +352,16 @@ object Screen {
 
     internal fun playback(item: Item): JobProgress.Playback? {
         if (item.editable || item.password) return null
-        val id = item.id.orEmpty()
+        val id = item.id.orEmpty().lowercase()
         val relevantId = id.contains("progress") && (id.contains("playback") || id.contains("video") || id.contains("reel"))
         val timeline = item.role == "SeekBar" || relevantId
         val labels = listOf(item.node.contentDescription, item.node.text)
-        labels.firstNotNullOfOrNull { JobProgress.playbackLabel(it?.toString().orEmpty(), timeline) }?.let { return it }
+        labels.firstNotNullOfOrNull { JobProgress.playbackLabel(it?.toString().orEmpty(), timeline, item.node.isClickable) }?.let { return it }
         val described = labels.any { JobProgress.normalize(it?.toString().orEmpty()) in
             setOf("reel progress", "video progress", "playback progress", "playback position") }
         if (!relevantId && !described) return null
         val range = item.node.rangeInfo ?: return null
-        if (!range.current.isFinite() || !range.min.isFinite() || !range.max.isFinite() || range.max <= range.min) return null
-        return JobProgress.Playback(((range.current - range.min) / (range.max - range.min)).coerceIn(0f, 1f))
+        return JobProgress.playbackRange(range.current, range.min, range.max)
     }
 
     internal fun feedScroller(screen: Snapshot): Item? = screen.items.filter { it.scrollable }

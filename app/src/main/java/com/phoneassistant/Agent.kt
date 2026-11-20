@@ -111,10 +111,12 @@ object Agent {
         }
         val history = StringBuilder()
         var steps = 0
-        val web = JobProgress.WebProgress(JobProgress.needsWebDestination(originalRequest))
+        val communication = JobProgress.communicationRequest(originalRequest)
+        val web = JobProgress.WebProgress(communication == null && JobProgress.needsWebDestination(originalRequest))
         val failures = JobProgress.FailureStreak()
         val transitions = JobProgress.RecentVisits()
         var madeProgress = false
+        var communicationChanged = false
         var searched = false
         var correctedEarlyFinish = false
         try {
@@ -158,7 +160,6 @@ object Agent {
             // in that app, and named in every step so the model can only ask for something
             // that is really installed.
             val apps = Screen.apps(ctx)
-            val communication = JobProgress.communicationRequest(originalRequest)
             val explicitApp = communication?.explicitApp?.let { wanted ->
                 apps.singleOrNull { JobProgress.normalize(it.label) == wanted || it.packageName == wanted }
             }
@@ -213,7 +214,7 @@ object Agent {
 
             while (alive()) {
                 val read = readScreen(web = web.followUp && communication == null,
-                    expectedApp = commPackage.takeIf { steps == 0 }, active = ::alive)
+                    expectedApp = commPackage, active = ::alive)
                 val screen = read.screen
                 if (screen == null) {
                     val hands = Screen.available()
@@ -230,11 +231,6 @@ object Agent {
                             STOP_NO_HANDS
                         }
                     )
-                    return
-                }
-                if (commPackage != null && screen.app != commPackage) {
-                    finish("I left $commLabel, so I stopped. I can't verify that the task completed.",
-                        "foreground left requested communication app; no actions in another app")
                     return
                 }
                 val decision =
@@ -272,7 +268,11 @@ object Agent {
                         )
                         return
                     }
-                    if (!madeProgress && failures.failures > 0) {
+                    if (commPackage != null && !Screen.sameWindow(screen)) {
+                        finish("The screen changed before I could verify that this completed.", "communication window changed before completion")
+                        return
+                    }
+                    if ((commPackage != null && !communicationChanged) || (!madeProgress && failures.failures > 0)) {
                         finish("I couldn't verify that this worked.", "model finished without observable progress")
                         return
                     }
@@ -307,7 +307,7 @@ object Agent {
                 if (accepted && browserTarget == null && decision.action in OBSERVE_ACTIONS) {
                     if (decision.action != "wait") SystemClock.sleep(SETTLE_MS)
                     if (!alive()) return
-                    val next = Screen.snapshot(web = web.followUp)
+                    val next = Screen.snapshot(web = web.followUp, expectedApp = commPackage)
                     val before = screen.app + '\n' + screen.listing
                     val after = next?.let { it.app + '\n' + it.listing }
                     progress = after != null && after != before &&
@@ -321,6 +321,9 @@ object Agent {
                 Diag.jobStep(mine, decision.summary(screen), detail, progress, turn = true)
                 steps++
                 madeProgress = madeProgress || progress
+                // Typing or waiting successfully does not show that a message was sent or
+                // a call started. Require a visible change after a tap before trusting Done.
+                if (commPackage != null && decision.action == "tap" && progress) communicationChanged = true
                 if (search && accepted) {
                     searched = true
                     if (web.searchFinishes(decision.more)) {
@@ -428,7 +431,7 @@ object Agent {
         while (looks < READ_TRIES) {
             looks++
             if (!active()) return Read(null, looks)
-            Screen.snapshot(web = web)?.takeIf { expectedApp == null || it.app == expectedApp }?.let { return Read(it, looks) }
+            Screen.snapshot(web = web, expectedApp = expectedApp)?.let { return Read(it, looks) }
             // No hands at all is not a screen that is slow to arrive.
             if (!Screen.available()) return Read(null, looks)
             if (looks < READ_TRIES) SystemClock.sleep(READ_WAIT_MS)

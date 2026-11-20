@@ -354,11 +354,16 @@ internal object JobProgress {
     private val playbackClock = Regex("([0-9]{1,3}):([0-5][0-9]) (?:/|of) ([0-9]{1,3}):([0-5][0-9])")
     private val playbackEnded = setOf("reel ended", "video ended", "playback ended", "replay reel", "replay video")
 
-    data class Playback(val fraction: Float = 0f, val ended: Boolean = false)
+    data class Playback(val fraction: Float = 0f, val ended: Boolean = false, val durationSeconds: Int? = null)
 
-    fun playbackLabel(raw: String, timeline: Boolean): Playback? {
+    fun playbackRange(current: Float, min: Float, max: Float): Playback? {
+        if (!current.isFinite() || !min.isFinite() || !max.isFinite() || max <= min || current !in min..max) return null
+        return Playback(((current.toDouble() - min) / (max.toDouble() - min)).toFloat())
+    }
+
+    fun playbackLabel(raw: String, timeline: Boolean, replayControl: Boolean = false): Playback? {
         val label = normalize(raw).trimEnd('.')
-        if (label in playbackEnded) return Playback(ended = true)
+        if (label in playbackEnded && (timeline || replayControl)) return Playback(ended = true)
         val withoutPrefix = label.replace(playbackPrefix, "")
         if (!timeline && withoutPrefix == label) return null
         val match = playbackClock.matchEntire(withoutPrefix) ?: return null
@@ -366,7 +371,28 @@ internal object JobProgress {
         val position = minutes.toInt() * 60 + seconds.toInt()
         val duration = totalMinutes.toInt() * 60 + totalSeconds.toInt()
         if (duration <= 0 || position > duration) return null
-        return Playback(position.toFloat() / duration)
+        return Playback(position.toFloat() / duration, durationSeconds = duration)
+    }
+
+    enum class ReelIdentity { SAME, UNCERTAIN, ADVANCED, UNREADABLE }
+
+    /** Labels can change while one clip plays. They are not movement or window evidence. */
+    class ReelObservation(private val original: String, started: Long) {
+        private var lastReadable = started
+        private val candidate = StableFeedRead()
+
+        fun observe(now: Long, key: String?, newViewport: Boolean, motion: SwipeEvidence): ReelIdentity {
+            if (key == null) {
+                candidate.observe(null, 2)
+                return if (now - lastReadable >= 6_000L) ReelIdentity.UNREADABLE else ReelIdentity.UNCERTAIN
+            }
+            lastReadable = now
+            val distinct = key.isNotBlank() && key != original && newViewport
+            val stable = candidate.observe(key.takeIf { distinct }, 2)
+            if (stable && motion == SwipeEvidence.DOWN_FEED) return ReelIdentity.ADVANCED
+            return if (key.isNotBlank() && key == original && motion == SwipeEvidence.NONE) ReelIdentity.SAME
+                else ReelIdentity.UNCERTAIN
+        }
     }
 
     enum class ReelWatchResult { WAITING, FINISHED, ESTIMATED }
@@ -374,19 +400,19 @@ internal object JobProgress {
     class ReelWatch(started: Long, private val estimatedMs: Long = 18_000L) {
         private val start = started
         private var lastProgressAt = started
-        private var previous: Float? = null
+        private var previous: Playback? = null
+
         fun observe(now: Long, playback: Playback?): ReelWatchResult {
-            if (playback?.ended == true || playback != null && playback.fraction >= 0.995f) return ReelWatchResult.FINISHED
-            if (playback != null) {
-                val prior = previous
-                // Reels generally loop instead of showing an ended screen.
-                if (prior != null && prior >= 0.65f && playback.fraction <= 0.20f && prior - playback.fraction >= 0.50f) {
-                    return ReelWatchResult.FINISHED
-                }
-                if (prior == null || playback.fraction > prior) lastProgressAt = now
-                previous = playback.fraction
+            val sample = playback?.takeIf { it.ended || it.fraction in 0f..1f }
+            if (sample?.ended == true || sample != null && sample.fraction >= 0.995f) return ReelWatchResult.FINISHED
+            val prior = previous?.takeIf { it.durationSeconds == sample?.durationSeconds }
+            previous = sample // Never infer a loop across an unreadable or uncertain sample.
+            if (sample != null) {
+                if (prior != null && prior.fraction >= 0.65f && sample.fraction <= 0.20f &&
+                    prior.fraction - sample.fraction >= 0.50f) return ReelWatchResult.FINISHED
+                if (prior != null && sample.fraction > prior.fraction) lastProgressAt = now
             }
-            return if (now - start >= estimatedMs && (previous == null || now - lastProgressAt >= 8_000L)) {
+            return if (now - start >= estimatedMs && now - lastProgressAt >= 8_000L) {
                 ReelWatchResult.ESTIMATED
             } else ReelWatchResult.WAITING
         }

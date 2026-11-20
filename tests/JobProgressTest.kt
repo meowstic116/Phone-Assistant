@@ -343,16 +343,47 @@ fun main() {
     check(JobProgress.playbackLabel("Playback progress: 0:15 / 0:30", false)?.fraction == 0.5f)
     check(JobProgress.playbackLabel("0:15 / 0:30", false) == null)
     check(JobProgress.playbackLabel("0:15 / 0:30", true)?.fraction == 0.5f)
-    check(JobProgress.playbackLabel("Video ended", false)?.ended == true)
+    check(JobProgress.playbackLabel("Video ended", false) == null)
+    check(JobProgress.playbackLabel("Replay video", false, replayControl = true)?.ended == true)
+    check(JobProgress.playbackRange(120f, 0f, 100f) == null)
+    check(JobProgress.playbackRange(0f, -Float.MAX_VALUE, Float.MAX_VALUE)?.fraction == 0.5f)
+    check(JobProgress.playbackRange(Float.NaN, 0f, 100f) == null)
     check(JobProgress.playbackLabel("0:40 of 0:30", true) == null)
     val watch = JobProgress.ReelWatch(0)
     check(watch.observe(15_000, JobProgress.Playback(0.45f)) == JobProgress.ReelWatchResult.WAITING)
     check(watch.observe(25_000, JobProgress.Playback(0.86f)) == JobProgress.ReelWatchResult.WAITING)
     check(watch.observe(27_000, JobProgress.Playback(0.11f)) == JobProgress.ReelWatchResult.FINISHED)
+    val interruptedPlayback = JobProgress.ReelWatch(0)
+    check(interruptedPlayback.observe(750, JobProgress.Playback(0.9f)) == JobProgress.ReelWatchResult.WAITING)
+    check(interruptedPlayback.observe(1_500, null) == JobProgress.ReelWatchResult.WAITING)
+    check(interruptedPlayback.observe(2_250, JobProgress.Playback(0.1f)) == JobProgress.ReelWatchResult.WAITING)
+    val changedTimeline = JobProgress.ReelWatch(0)
+    check(changedTimeline.observe(750, JobProgress.Playback(0.9f, durationSeconds = 30)) == JobProgress.ReelWatchResult.WAITING)
+    check(changedTimeline.observe(1_500, JobProgress.Playback(0.1f, durationSeconds = 60)) == JobProgress.ReelWatchResult.WAITING)
     val unknown = JobProgress.ReelWatch(2_000)
     check(unknown.observe(19_999, null) == JobProgress.ReelWatchResult.WAITING)
     check(unknown.observe(20_000, null) == JobProgress.ReelWatchResult.ESTIMATED)
     check(JobProgress.ReelWatch(0).observe(3_000, JobProgress.Playback(1f)) == JobProgress.ReelWatchResult.FINISHED)
+
+    // Instagram can add, remove, and restore labels while one reel keeps playing.
+    val noMotion = JobProgress.SwipeEvidence.NONE
+    val verticalMotion = JobProgress.SwipeEvidence.DOWN_FEED
+    val sameReel = JobProgress.ReelIdentity.SAME
+    val uncertainReel = JobProgress.ReelIdentity.UNCERTAIN
+    val reelObservation = JobProgress.ReelObservation("first caption", 0)
+    val reelTimer = JobProgress.ReelWatch(0)
+    check(reelObservation.observe(0, "first caption", false, noMotion) == sameReel)
+    check(reelObservation.observe(750, "caption + counts", true, noMotion) == uncertainReel)
+    check(reelObservation.observe(1500, "caption + counts", true, noMotion) == uncertainReel)
+    check(reelObservation.observe(7_500, "caption + more counts", true, noMotion) == uncertainReel)
+    check(reelTimer.observe(7_500, null) == JobProgress.ReelWatchResult.WAITING)
+    check(reelObservation.observe(18_000, "", false, noMotion) == uncertainReel) // readable window, sparse reel
+    check(reelTimer.observe(18_000, null) == JobProgress.ReelWatchResult.ESTIMATED)
+    check(reelObservation.observe(18_750, "first caption", false, noMotion) == sameReel)
+    check(reelObservation.observe(19_500, "next caption", true, verticalMotion) == uncertainReel)
+    check(reelObservation.observe(20_250, "next caption", true, verticalMotion) == JobProgress.ReelIdentity.ADVANCED)
+    check(reelObservation.observe(26_249, null, false, noMotion) == uncertainReel)
+    check(reelObservation.observe(26_250, null, false, noMotion) == JobProgress.ReelIdentity.UNREADABLE)
 
     println("Job progress tests passed.")
 }
