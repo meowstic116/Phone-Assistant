@@ -735,18 +735,30 @@ fun main() {
         PlantSpecies.BLUEBELL.id == "blueberry_bell")
     val completeCollection = regularPlants.associateWith { 1L }
     check(!PlantSelection.goldenEligible(blooms))
+    check(PlantSelection.collectionProgress(emptyMap()) == (0 to 10))
     // Even a deliberately favorable roll cannot yield gold if any one variety is missing.
     for (missing in regularPlants) {
         val incomplete = completeCollection - missing
         check(!PlantSelection.goldenEligible(incomplete))
+        check(PlantSelection.collectionProgress(incomplete) == (9 to 10))
+        check(PlantSelection.collectionProgress(incomplete + (PlantSpecies.GOLDEN to 7L)) == (9 to 10))
         check(PlantSelection.pick(incomplete) { 0 } in regularPlants)
         check(!PlantSelection.goldenEligible(incomplete + (PlantSpecies.GOLDEN to 7L)))
     }
     check(PlantSelection.goldenEligible(completeCollection))
+    check(PlantSelection.collectionProgress(completeCollection) == (10 to 11))
+    check(PlantSelection.collectionProgress(completeCollection + (PlantSpecies.GOLDEN to 1L)) == (11 to 11))
     check(PlantSelection.pick(completeCollection) { 0 } == PlantSpecies.GOLDEN)
     val outcomes = (0 until PlantSelection.GOLDEN_ROLLS).map { roll -> PlantSelection.pick(completeCollection) { roll } }
     check(outcomes.count { it == PlantSpecies.GOLDEN } == 1)
     check(regularPlants.indices.map { index -> PlantSelection.pick(emptyMap()) { index } } == regularPlants)
+
+    // Phone-width pitch: the old top-left board overlapped the centered goal.
+    val phoneScore = SoccerLayout.scoreboard(360f, 24f, 109f, 78f, 124f, 10f, 8f)
+    check(phoneScore == DragMotion.Point(10f, 86f))
+    val wideScore = SoccerLayout.scoreboard(480f, 24f, 169f, 78f, 124f, 10f, 8f)
+    check(wideScore == DragMotion.Point(10f, 34f) && wideScore.x + 124f + 8f <= 169f)
+    check(SoccerLayout.scoreboard(426f, 44f, 142f, 98f, 124f, 10f, 8f) == DragMotion.Point(10f, 54f))
 
     println("Job progress tests passed.")
 }

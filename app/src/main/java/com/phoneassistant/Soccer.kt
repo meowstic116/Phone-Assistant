@@ -145,8 +145,12 @@ class SoccerGame(private val host: PropHost) {
         val top = pitchTop
         val bottom = pitchBottom
 
-        board.bring(host.px(10f), top + host.px(10f))
-        topGoal.bring(w / 2f - topGoal.windowW / 2f, top + host.px(4f))
+        val goalLeft = (w - topGoal.windowW) / 2f
+        val goalTop = top + host.px(4f)
+        val score = SoccerLayout.scoreboard(w, top, goalLeft, goalTop + topGoal.windowH,
+            board.windowW.toFloat(), margin = host.px(10f), gap = host.px(8f))
+        board.bring(score.x, score.y)
+        topGoal.bring(goalLeft, goalTop)
         bottomGoal.bring(
             w / 2f - bottomGoal.windowW / 2f,
             bottom - bottomGoal.windowH - host.px(4f)

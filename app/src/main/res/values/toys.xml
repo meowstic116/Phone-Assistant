@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <item name="toyMenuScroll" type="id" />
+    <item name="plantCollectionScroll" type="id" />
     <string name="toys_menu">Toys</string>
     <string name="toys_back">Back</string>
     <string name="toys_title">Pip’s toys</string>
@@ -40,9 +41,10 @@
     <string name="toy_plant_action">Grow a plant</string>
     <string name="toy_doomscroll_action">Watch Reels</string>
     <string name="plant_collection_title">Plant Collection</string>
+    <string name="plant_collection_back">Back to Toys</string>
+    <string name="plant_collection_summary">%1$d of %2$d plants discovered</string>
     <string name="plant_collection_regular_progress">%1$d of %2$d regular plants discovered</string>
     <string name="plant_collection_bonus">RARE BONUS</string>
-    <string name="plant_collection_golden_locked">Grow all ten regular plants at least once to unlock the chance to grow a Golden Bloom.</string>
     <string name="plant_collection_golden_eligible">All ten regular plants discovered! Every new pot has a 1 in 10 chance of growing a Golden Bloom.</string>
     <string name="plant_collection_golden_found">Golden Bloom discovered! It can still appear in new pots.</string>
     <string name="plant_collection_count">Grown %1$d</string>

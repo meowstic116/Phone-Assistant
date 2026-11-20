@@ -225,10 +225,11 @@ is disabled stays in the catalog, with a note explaining why it can’t be launc
   after the last pop. An active round can finish even if the normal toy timer runs out.
 - **Plant** — Grow a flower together. Pip spaces out his pours, and you need to tap the
   pot to water it at least once before it can bloom. Fast taps still get a warning. A finished bloom gets a shimmering nameplate beneath
-  its pot and a ladybug visit. **Plant Collection**, at the top of **Toys**, tracks ten
+  its pot and a ladybug visit. Open **Toys → Plant Collection** to see all ten
   regular varieties and how many times each has reached full bloom. First blooms get a
   special color and animation. Once all ten are discovered, each new pot has a 1 in 10
-  chance of growing the rare **Golden Bloom**. Existing bloom counts carry over.
+  chance of growing the rare **Golden Bloom**, which only then appears in the collection.
+  Existing bloom counts carry over.
 
 ## Personality
 
@@ -263,7 +264,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.165-debug.apk`](dist/phone-assistant-0.165-debug.apk).
+[`phone-assistant-0.168-debug.apk`](dist/phone-assistant-0.168-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by

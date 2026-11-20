@@ -32,6 +32,13 @@ internal object PlantSelection {
 
     fun goldenEligible(counts: Map<PlantSpecies, Long>) = regular.all { (counts[it] ?: 0L) >= 1L }
 
+    fun collectionProgress(counts: Map<PlantSpecies, Long>): Pair<Int, Int> {
+        val revealGolden = goldenEligible(counts)
+        val found = regular.count { (counts[it] ?: 0L) > 0L }
+        val goldFound = revealGolden && (counts[PlantSpecies.GOLDEN] ?: 0L) > 0L
+        return (found + if (goldFound) 1 else 0) to (regular.size + if (revealGolden) 1 else 0)
+    }
+
     fun pick(counts: Map<PlantSpecies, Long>, nextInt: (Int) -> Int): PlantSpecies {
         if (goldenEligible(counts) && nextInt(GOLDEN_ROLLS) == 0) return PlantSpecies.GOLDEN
         return regular[nextInt(regular.size)]
