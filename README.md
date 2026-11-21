@@ -348,7 +348,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.185-debug.apk`](dist/phone-assistant-0.185-debug.apk).
+[`phone-assistant-0.186-debug.apk`](dist/phone-assistant-0.186-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by
@@ -385,8 +385,9 @@ Tagged builds are also published as GitHub Releases by
    - **Phone access:** **Let Pip use accessibility** controls phone actions and other apps’
      keyboard tracking without changing Android’s grant. Chat and explicit links don’t need it.
    - **Toys:** Turn off **Allow toys** for no toys, or select individual toys. Turning off
-     **Bring out toys on his own** leaves enabled toys available by request only. Open the
-     **Painting gallery** directly below the toy switches.
+     **Bring out toys on his own** leaves enabled toys available by request only. Pip skips the
+     last toy when picking on his own, and waits if there’s no other eligible toy. You can
+     still request the same toy yourself. Open the **Painting gallery** below the toy switches.
    - **Personality & data:** Edit Pip’s personality, review his memory, or open his login vault.
    - **Permissions:** Manage overlay, Android accessibility, usage access, and notifications.
      To turn off notifications while Pip keeps running, open **Manage notifications** and
