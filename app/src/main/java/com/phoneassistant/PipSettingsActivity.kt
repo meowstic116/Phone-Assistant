@@ -1,12 +1,9 @@
 package com.phoneassistant
 
-import android.Manifest
 import android.app.Activity
-import android.app.NotificationManager
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -110,6 +107,13 @@ class PipSettingsActivity : Activity() {
 
         heading("Talk to Pip")
         text("Speak in English and address him by name, like ‘Hey Pip, tell me a joke’ or ‘Good one, Pip.’ Listening runs on your phone, even after locking. It can use battery and stops when you stop Pip or tap Stop listening. Audio is not saved or sent; recognized chat uses your chat API. Phone actions require unlocking and tapping Send. Turn on Read Pip’s replies aloud to hear answers while locked.")
+        toggle("Start listening when Pip starts", PipStartup.listenOnStart(this)) { enabled ->
+            PipStartup.setListenOnStart(this, enabled)
+            if (enabled) WakeListenService.startProblem(this)?.let {
+                Toast.makeText(this, it, Toast.LENGTH_LONG).show()
+            }
+        }.isEnabled = KokoroVoice.supported()
+        text("Only starts the microphone when you tap Start assistant in the app, not at phone boot. Requires the offline model and microphone and notification permissions. You can still stop listening at any time.")
         wakeAction = button("") { changeWakeListening() }
         wakeStatus = text("")
         wakeSpeak = button("Speak now (no wake word)") {
@@ -118,6 +122,27 @@ class PipSettingsActivity : Activity() {
             }
         }
         refreshWakeAction()
+
+        heading("Hands-free driving")
+        text("Set up and test while parked. With Android Auto connected, use ‘Pip, navigate to [destination]’ or ‘Pip, pause Spotify.’ Google Maps must be installed; Spotify needs an active session and Pip’s Now playing permission. Enable spoken replies to hear the result. Other phone actions still need review when parked.")
+        toggle("Allow hands-free driving commands", VoiceSettings.drivingEnabled(this)) {
+            VoiceSettings.setDrivingEnabled(this, it)
+        }
+        button("Set or clear driving home destination") {
+            val destination = EditText(this).apply {
+                hint = "Street address or destination"
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS
+                filters = arrayOf(android.text.InputFilter.LengthFilter(180))
+                setSingleLine(true)
+                setText(VoiceSettings.drivingHome(this@PipSettingsActivity))
+            }
+            AlertDialog.Builder(this).setTitle("Driving home destination")
+                .setMessage("Used for ‘Pip, navigate home.’ Saved on this phone and sent to Google Maps only when requested.")
+                .setView(destination).setNegativeButton("Cancel", null)
+                .setNeutralButton("Clear") { _, _ -> VoiceSettings.setDrivingHome(this, "") }
+                .setPositiveButton("Save") { _, _ -> VoiceSettings.setDrivingHome(this, destination.text.toString()) }
+                .show()
+        }
 
         val toyHeading = addToySettings()
         addPersonalityAndData()
@@ -162,17 +187,13 @@ class PipSettingsActivity : Activity() {
             Toast.makeText(this, "Start the assistant before turning on listening.", Toast.LENGTH_LONG).show()
             return
         }
-        val missing = buildList {
-            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) add(Manifest.permission.RECORD_AUDIO)
-            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
-                add(Manifest.permission.POST_NOTIFICATIONS)
-        }
+        val missing = WakeListenService.missingPermissions(this)
         if (missing.isNotEmpty()) {
             requestPermissions(missing.toTypedArray(), 702)
             return
         }
-        if (!getSystemService(NotificationManager::class.java).areNotificationsEnabled()) {
-            Toast.makeText(this, "Enable Pip notifications so the Stop listening control is available.", Toast.LENGTH_LONG).show()
+        WakeListenService.startProblem(this)?.let {
+            Toast.makeText(this, it, Toast.LENGTH_LONG).show()
             return
         }
         if (!WakeListenService.start(this)) Toast.makeText(this, "Android couldn’t start listening. Try again with settings open.", Toast.LENGTH_LONG).show()

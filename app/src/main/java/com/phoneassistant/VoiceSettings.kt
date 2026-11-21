@@ -10,6 +10,15 @@ internal object VoiceSettings {
     private fun prefs(context: Context) = context.getSharedPreferences("pip_voice", Context.MODE_PRIVATE)
     fun enabled(context: Context) = prefs(context).all["enabled"] == true
 
+    fun drivingEnabled(context: Context) = prefs(context).getBoolean("driving_commands", false)
+    fun setDrivingEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean("driving_commands", enabled).apply()
+    }
+    fun drivingHome(context: Context) = prefs(context).getString("driving_home", "").orEmpty()
+    fun setDrivingHome(context: Context, address: String) {
+        prefs(context).edit().putString("driving_home", address.trim().take(180)).apply()
+    }
+
     fun config(context: Context): Config {
         val prefs = prefs(context)
         val saved = prefs.all

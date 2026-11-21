@@ -795,6 +795,25 @@ fun main() {
 
     val textOnlyBubble = ReplyBubbleState(12, spoken = false)
     check(textOnlyBubble.visibleEnd == 12 && !textOnlyBubble.waiting)
+    check(WakeStartupPolicy.shouldStart(fromOpenApp = true, optedIn = true, pipReady = true))
+    check(!WakeStartupPolicy.shouldStart(fromOpenApp = true, optedIn = false, pipReady = true))
+    check(!WakeStartupPolicy.shouldStart(fromOpenApp = true, optedIn = true, pipReady = false))
+    check(!WakeStartupPolicy.shouldStart(fromOpenApp = false, optedIn = true, pipReady = true)) // Boot/recovery.
+
+    check(CarCommand.parse("Navigate home") == CarCommand.Navigate("home"))
+    check(CarCommand.parse("Please navigate to 123 Main Street.") == CarCommand.Navigate("123 Main Street"))
+    check(CarCommand.parse("Take me to Denver International Airport") == CarCommand.Navigate("Denver International Airport"))
+    check(CarCommand.parse("Please pause SPOTIFY!") == CarCommand.Spotify.PAUSE)
+    check(CarCommand.parse("resume Spotify") == CarCommand.Spotify.PLAY)
+    check(CarCommand.parse("Next song on Spotify") == CarCommand.Spotify.NEXT)
+    check(CarCommand.parse("Previous track on Spotify") == CarCommand.Spotify.PREVIOUS)
+    check(CarCommand.parse("Could you ask her to pause Spotify") == null)
+    check(CarCommand.parse("Play Spotify and send a message") == null)
+    check(CarCommand.parse("Navigate to Main Street and then send a message") == null)
+    check(CarCommand.parse("navigate to test&mode=w") == null)
+    check(CarCommand.parse("navigate to https://example.com/") == null)
+    check(CarCommand.parse("pause YouTube") == null)
+
     val wakePhrase = WakePhrase()
     check(wakePhrase.accept("Ask Pip what he thinks", 1) == null && !wakePhrase.awaiting)
     check(wakePhrase.accept("Piper, how are you?", 2) == null && !wakePhrase.awaiting)

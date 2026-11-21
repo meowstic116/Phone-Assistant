@@ -275,7 +275,13 @@ If he doesn't respond, check the live status under **Talk to Pip** or in the lis
 notification. **Speak now (no wake word)** opens a short window to say one message without
 the name, useful for checking that the microphone and chat work independently of wake detection.
 
-Listening is opt-in for each session. It can continue after locking and uses battery; Android
+Listening is off by default. To skip the extra tap each session, turn on **Start listening when
+Pip starts** under **Talk to Pip**. The next time you tap **Start assistant** in the app,
+Pip will start listening if the offline model and permissions are ready. If they aren't,
+Pip still appears with the mic off. This setting doesn't open the mic at phone boot or
+automatic service recovery.
+
+Listening can continue after locking and uses battery; Android
 or the phone maker may suspend it. The persistent notification has a **Stop listening** action,
 and stopping the assistant also stops listening. The microphone is paused while Pip replies so
 he won’t normally wake himself. Microphone audio is processed in memory on the phone, not
@@ -283,11 +289,31 @@ saved or sent to a server. Only recognized messages addressed to Pip enter the r
 flow and use your configured chat API. Pip checks locally whether speech sounds addressed to him. For an unlocked follow-up, he can use
 the previous spoken exchange for up to 90 seconds; he doesn’t read typed chat history or saved
 facts. This temporary context clears when you lock the phone or stop listening. Phone actions and screen
-access require unlocking, reviewing the transcript, and tapping **Send**. Neither boot nor service recovery starts listening.
+access require unlocking, reviewing the transcript, and tapping **Send**.
 
 Offline recognition uses the English [Kroko community model](https://github.com/kroko-ai/kroko-onnx)
 [distributed by sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models),
 under the model’s CC BY-SA terms. The pinned weights are downloaded separately, not bundled.
+
+## Hands-free driving (experimental)
+
+Set up and test **while parked**. Enable **Pip settings → Hands-free driving → Allow
+hands-free driving commands**, turn on spoken replies, and start keyword listening.
+Connect Android Auto and try:
+
+- **“Pip, navigate to 123 Main Street.”** Google Maps receives a standard directions
+  intent. Set a local home destination in Pip settings for **“Pip, navigate home.”**
+- **“Pip, pause Spotify,” “resume Spotify,” “next song on Spotify,”** or **“previous
+  track on Spotify.”** Start Spotify while parked and grant **Now playing access** so
+  Pip can control the existing local session. It cannot search for songs in this mode.
+
+Pip checks the Android Auto projection connection and handles only these commands on the
+phone, without the chat model or accessibility automation. Google Maps and Android decide
+whether a navigation handoff can open or appear on the car display, especially while locked.
+Spotify controls require an active session that offers the requested action. Pip does not
+unlock the phone or control the car screen. Test your mic, audio routing, and each command
+while parked before relying on them. If a command doesn’t work while driving, wait until
+parked rather than reaching for the phone.
 
 ## Personality
 
@@ -322,7 +348,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.183-debug.apk`](dist/phone-assistant-0.183-debug.apk).
+[`phone-assistant-0.185-debug.apk`](dist/phone-assistant-0.185-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by

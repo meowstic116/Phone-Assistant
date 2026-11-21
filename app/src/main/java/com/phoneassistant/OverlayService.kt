@@ -96,8 +96,15 @@ class OverlayService : Service(), PropHost {
          */
         private const val INPUT_ROW_DP = 60f
 
-        fun start(ctx: Context): Boolean = try {
-            ctx.startForegroundService(Intent(ctx, OverlayService::class.java)) != null
+        private const val START_FROM_APP = "com.phoneassistant.START_FROM_APP"
+
+        fun start(ctx: Context): Boolean = requestStart(ctx, null)
+
+        /** Only the visible Start assistant button uses this path, never the boot receiver. */
+        internal fun startFromApp(activity: android.app.Activity): Boolean = requestStart(activity, START_FROM_APP)
+
+        private fun requestStart(ctx: Context, action: String?): Boolean = try {
+            ctx.startForegroundService(Intent(ctx, OverlayService::class.java).setAction(action)) != null
         } catch (e: IllegalStateException) {
             Diag.caught("start Pip", e)
             false
@@ -519,6 +526,7 @@ class OverlayService : Service(), PropHost {
         val added = runCatching { windowManager.addView(host, petParams) }.isSuccess
         if (added) layoutPetOverlay()
         if (!added) {
+            petHost = null
             stopSelf()
             return
         }
@@ -731,6 +739,13 @@ class OverlayService : Service(), PropHost {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) beginExit()
+        if (WakeStartupPolicy.shouldStart(intent?.action == START_FROM_APP, PipStartup.listenOnStart(this),
+                petHost != null && !ending) && !WakeListenService.running) {
+            val problem = WakeListenService.startProblem(this)
+            val message = problem ?: if (WakeListenService.start(this)) null else
+                "Android couldn’t start listening. Start it from Pip settings → Talk to Pip."
+            if (message != null) android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+        }
         return if (ending) START_NOT_STICKY else START_STICKY
     }
 
@@ -2125,14 +2140,44 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun handleVoice(text: String, stillListening: () -> Boolean, done: (WakeFeedback) -> Unit) {
+        if (!VoiceSettings.drivingEnabled(this)) {
+            handleOrdinaryVoice(text, stillListening, done, driving = false)
+            return
+        }
+        val command = CarCommand.parse(text)
+        DrivingVoice.projected(this) { projected ->
+            if (instance !== this || ending || !stillListening()) { done(WakeFeedback.BUSY); return@projected }
+            if (!VoiceSettings.drivingEnabled(this)) {
+                handleOrdinaryVoice(text, stillListening, done, driving = false)
+                return@projected
+            }
+            if (command != null) {
+                // Never let the chat model or accessibility agent execute an unconfirmed car action.
+                val response = if (projected == true) DrivingVoice.execute(this, command) else
+                    "I couldn’t verify an Android Auto connection. Try again when parked."
+                PipVoice.reply(this, response, allowLocked = true)
+                done(WakeFeedback.CAR_COMMAND)
+            } else {
+                // Unknown projection status is treated conservatively: no phone UI for confirmations.
+                handleOrdinaryVoice(text, stillListening, done, driving = projected != false)
+            }
+        }
+    }
+
+    private fun handleOrdinaryVoice(text: String, stillListening: () -> Boolean, done: (WakeFeedback) -> Unit,
+                                    driving: Boolean) {
+        fun review(): WakeFeedback {
+            if (!driving) { confirmVoiceRequest(text); return WakeFeedback.REVIEW }
+            PipVoice.reply(this, "That’s not a hands-free driving command. Try again when parked.", allowLocked = true)
+            return WakeFeedback.CAR_COMMAND
+        }
         val waiting = awaitingReply && SystemClock.uptimeMillis() - replyAskedAt < 15_000L
         if (!stillListening() || Agent.running() || waiting) { done(WakeFeedback.BUSY); return }
         if (!inputField?.text.isNullOrBlank()) { done(WakeFeedback.DRAFT); return }
         // Tapping Pip first opens an empty composer. It shouldn't swallow a spoken request.
         if (inputBar != null) closeChat()
         if (JobProgress.routePhoneLocally(text) || PhoneContext.mayInspect(text) || NowPlaying.requested(text)) {
-            confirmVoiceRequest(text)
-            done(WakeFeedback.REVIEW)
+            done(review())
             return
         }
         val turn = ChatTurns.begin()
@@ -2153,8 +2198,7 @@ class OverlayService : Service(), PropHost {
                     if (reply == "{\"action\":\"confirm_phone\"}") {
                         hideThinking()
                         leaveAttention()
-                        confirmVoiceRequest(text)
-                        result = WakeFeedback.REVIEW
+                        result = review()
                         return@post
                     }
                     ChatRecovery.attempt(Unit, { Diag.chatFailure("voice chat history", it) }) {

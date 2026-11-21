@@ -24,6 +24,8 @@
 
     <!-- Needed on Android 11+ to resolve the label of whatever app is in front. -->
     <queries>
+        <provider android:authorities="androidx.car.app.connection" />
+        <package android:name="com.google.android.apps.maps" />
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
