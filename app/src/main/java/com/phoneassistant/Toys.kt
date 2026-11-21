@@ -554,16 +554,28 @@ object Toys {
         return blocks.joinToString("\n\n")
     }
 
+    private const val LAST_TOY = "last_toy"
+
+    private fun history(host: OverlayService) = host.stageContext()
+        .getSharedPreferences("toy_history", android.content.Context.MODE_PRIVATE)
+
+    /** Count a toy only once it comes out, including toys requested by the user. */
+    internal fun rememberArrival(host: OverlayService, toy: Toy) {
+        history(host).edit().putString(LAST_TOY, toy.name).apply()
+    }
+
     /** Pip starts something by himself when the screen has been empty for a while. */
     fun spontaneous(host: OverlayService) {
         if (Quiet.active(host.stageContext())) return
         if (host.propsOnScreen().isNotEmpty()) return
         val ctx = host.stageContext()
         if (!PipSettings.enabled(ctx, PipSettings.Option.SPONTANEOUS)) return
-        val toy = Toy.values().filter { PipSettings.toyAllowed(ctx, it) &&
+        val eligible = Toy.values().filter { PipSettings.toyAllowed(ctx, it) &&
             (it != Toy.PAINTING || PaintingGallery.pictures(ctx).any { picture -> PaintingGallery.enabled(ctx, picture) }) &&
             (it.spontaneousAnywhere || it == Toy.DOOMSCROLL && host.canStartDoomscrollAtHome())
-        }.randomOrNull() ?: return
+        }
+        val last = history(host).getString(LAST_TOY, null)
+        val toy = chooseSpontaneousToy(eligible, eligible.firstOrNull { it.name == last }) ?: return
         if (toy == Toy.DOOMSCROLL) {
             host.startDoomscrollToy(automatic = true)
             return

@@ -1258,8 +1258,12 @@ class OverlayService : Service(), PropHost {
         if (hand != null) prop.alpha = 0f
         if (overlayDucked) params.alpha = 0f
         if (!runCatching { windowManager.addView(prop, params) }.isSuccess) return false
+        val isFirstPiece = toy != null && props.none(toy::owns)
         props += prop
-        if (toy != null) toyLifetimes.getOrPut(toy) { ToyLifetime(SystemClock.uptimeMillis()) }
+        if (toy != null) {
+            if (isFirstPiece) Toys.rememberArrival(this, toy)
+            toyLifetimes.getOrPut(toy) { ToyLifetime(SystemClock.uptimeMillis()) }
+        }
         if (hand != null) {
             val delay = when (prop) {
                 is Goal -> if (prop.pipDefends) 78L else 32L
@@ -2414,6 +2418,7 @@ class OverlayService : Service(), PropHost {
         // His hands are busy: he stands out of the way of the app he is working in, and the
         // way out of the job appears at the bottom of the screen.
         doomscrollJob = doomscroll
+        if (doomscroll) Toys.rememberArrival(this, Toy.DOOMSCROLL)
         automaticDoomscrollJob = fromClearHome
         pet?.showDoomscrollCue(DoomscrollMotion.Cue.CLEAR)
         beginJobWatch(turn, approach)

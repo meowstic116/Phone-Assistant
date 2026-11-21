@@ -800,6 +800,19 @@ fun main() {
     check(!WakeStartupPolicy.shouldStart(fromOpenApp = true, optedIn = true, pipReady = false))
     check(!WakeStartupPolicy.shouldStart(fromOpenApp = false, optedIn = true, pipReady = true)) // Boot/recovery.
 
+    val toys = listOf("painting", "soccer", "plant")
+    val toyRandom = kotlin.random.Random(186)
+    var lastToy: String? = null
+    repeat(30) {
+        val next = chooseSpontaneousToy(toys, lastToy, toyRandom)
+        check(next in toys && next != lastToy)
+        lastToy = next
+    }
+    check(chooseSpontaneousToy(listOf("plant"), null) == "plant")
+    check(chooseSpontaneousToy(listOf("plant"), "plant") == null)
+    check(chooseSpontaneousToy(listOf("plant"), "soccer") == "plant")
+    check(chooseSpontaneousToy(emptyList<String>(), "plant") == null)
+
     check(CarCommand.parse("Navigate home") == CarCommand.Navigate("home"))
     check(CarCommand.parse("Please navigate to 123 Main Street.") == CarCommand.Navigate("123 Main Street"))
     check(CarCommand.parse("Take me to Denver International Airport") == CarCommand.Navigate("Denver International Airport"))
