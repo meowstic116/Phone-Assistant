@@ -100,23 +100,28 @@ object AssistantBrain {
      * now and [event] is anything that just happened because of the message. The callback
      * fires on a background thread and receives (success, text).
      */
-    fun reply(
+    internal fun reply(
         ctx: Context,
         appLabel: String?,
         stage: String? = null,
         event: String? = null,
         turn: Long,
         voiceMessage: String? = null,
+        voiceContext: VoiceExchange.Turn? = null,
         onDone: (Boolean, String) -> Unit
     ) {
         val appContext = ctx.applicationContext
-        // Capture this turn's history before a later turn can enqueue another user message.
-        // A wake phrase is not authentication. Do not give a spoken turn access to
-        // previous conversations or remembered facts, even if the screen is unlocked.
-        val history = if (voiceMessage != null) listOf(Memory.Msg("user", voiceMessage)) else
-            ChatRecovery.attempt<List<Memory.Msg>?>(null, { Diag.chatFailure("chat history", it) }) {
-                Memory.history(appContext)
+        // Spoken follow-ups can use the immediately preceding unlocked voice exchange,
+        // but never read conversation history, the screen, or saved facts.
+        val history = if (voiceMessage != null) buildList {
+            voiceContext?.let {
+                add(Memory.Msg("user", it.input))
+                add(Memory.Msg("assistant", it.reply))
             }
+            add(Memory.Msg("user", voiceMessage))
+        } else ChatRecovery.attempt<List<Memory.Msg>?>(null, { Diag.chatFailure("chat history", it) }) {
+            Memory.history(appContext)
+        }
         if (history == null) {
             onDone(false, ChatRecovery.REPLY_FAILED)
             return

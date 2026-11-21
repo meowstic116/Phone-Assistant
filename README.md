@@ -266,8 +266,9 @@ x86_64. Its weights are not bundled with the APK or committed to Git. See
 
 Start the assistant, then open **Pip settings → Talk to Pip**. Download offline recognition
 (about 57 MB), grant microphone and notification permissions, and tap **Start listening for Pip**.
-Say **“Pip”** or **“Hey Pip”**, followed by an English message. You can also say his name,
-pause briefly, then speak. Turn on **Read Pip’s replies aloud** if you want to hear answers
+Address him in English: **“Hey Pip, tell me a joke”**, **“Good one, Pip”**, or
+**“Can you, Pip, tell me another?”** The name can come first, last, or as a direct address
+set off in the middle. You can also say his name, pause briefly, then speak. Turn on **Read Pip’s replies aloud** if you want to hear answers
 with the screen locked.
 
 If he doesn't respond, check the live status under **Talk to Pip** or in the listening
@@ -279,8 +280,9 @@ or the phone maker may suspend it. The persistent notification has a **Stop list
 and stopping the assistant also stops listening. The microphone is paused while Pip replies so
 he won’t normally wake himself. Microphone audio is processed in memory on the phone, not
 saved or sent to a server. Only recognized messages addressed to Pip enter the regular chat
-flow and use your configured chat API. Hands-free replies don’t use earlier conversations or
-saved facts, because a wake phrase doesn’t verify who’s speaking. Phone actions and screen
+flow and use your configured chat API. Pip checks locally whether speech sounds addressed to him. For an unlocked follow-up, he can use
+the previous spoken exchange for up to 90 seconds; he doesn’t read typed chat history or saved
+facts. This temporary context clears when you lock the phone or stop listening. Phone actions and screen
 access require unlocking, reviewing the transcript, and tapping **Send**. Neither boot nor service recovery starts listening.
 
 Offline recognition uses the English [Kroko community model](https://github.com/kroko-ai/kroko-onnx)
@@ -320,7 +322,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.182-debug.apk`](dist/phone-assistant-0.182-debug.apk).
+[`phone-assistant-0.183-debug.apk`](dist/phone-assistant-0.183-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by

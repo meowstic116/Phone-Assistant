@@ -143,7 +143,12 @@ class OverlayService : Service(), PropHost {
             else service.handleVoice(text, stillListening, done)
         }
 
-        internal fun discardVoiceDraft() { instance?.voiceDraft = null }
+        internal fun discardVoiceDraft() {
+            instance?.let {
+                it.voiceDraft = null
+                it.voiceExchange.clear()
+            }
+        }
 
         internal fun previewBubble(): Boolean {
             val service = instance ?: return false
@@ -187,6 +192,7 @@ class OverlayService : Service(), PropHost {
             instance?.let {
                 it.awaitingReply = false
                 it.voiceDraft = null
+                it.voiceExchange.clear()
                 it.hideThinking()
                 it.hideBubble()
                 it.leaveAttention()
@@ -289,6 +295,8 @@ class OverlayService : Service(), PropHost {
     private lateinit var speechBubble: SpeechBubble
 
     private var voiceDraft: Pair<String, Long>? = null
+    private val voiceExchange = VoiceExchange()
+    private var screenOffGeneration = 0L
     private var inputBar: LinearLayout? = null
     private var inputField: EditText? = null
     private var inputParams: WindowManager.LayoutParams? = null
@@ -2128,11 +2136,14 @@ class OverlayService : Service(), PropHost {
             return
         }
         val turn = ChatTurns.begin()
+        val unlocked = bubbleScreenUsable()
+        val screenGeneration = screenOffGeneration
+        val previousVoice = voiceExchange.takeIfRecent(SystemClock.elapsedRealtime()).takeIf { unlocked }
         beginReply()
         if (screenUsable()) startThinking()
         // No app/screen context, local phone shortcuts, toy reactions or memory changes occur
         // on an unconfirmed voice turn. Only a later tap on the ordinary Send button can act.
-        AssistantBrain.reply(this, null, turn = turn, voiceMessage = text) { ok, reply ->
+        AssistantBrain.reply(this, null, turn = turn, voiceMessage = text, voiceContext = previousVoice) { ok, reply ->
             handler.post {
                 var result = WakeFeedback.BUSY
                 try {
@@ -2158,6 +2169,9 @@ class OverlayService : Service(), PropHost {
                         leaveAttention()
                         PipVoice.reply(this, reply, allowLocked = true)
                     }
+                    if (ok && unlocked && screenOffGeneration == screenGeneration && bubbleScreenUsable()) {
+                        voiceExchange.remember(text, reply, SystemClock.elapsedRealtime())
+                    }
                     result = if (ok) WakeFeedback.REPLIED else WakeFeedback.CHAT_FAILED
                 } finally { done(result) }
             }
@@ -2169,6 +2183,7 @@ class OverlayService : Service(), PropHost {
         val text = field.text.toString().trim()
         if (text.isEmpty()) return
 
+        voiceExchange.clear()
         field.setText("")
         hideKeyboard()
         // The bar goes away the moment he has the message; he answers in the bubble.
@@ -2761,6 +2776,8 @@ class OverlayService : Service(), PropHost {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
+                    screenOffGeneration++
+                    voiceExchange.clear()
                     speechBubble.setScreenHidden(true)
                     if (voicedReply != null) {
                         hideBubble()

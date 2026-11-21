@@ -109,7 +109,7 @@ class PipSettingsActivity : Activity() {
         }
 
         heading("Talk to Pip")
-        text("Say ‘Pip’ or ‘Hey Pip’, then speak in English. Listening runs on your phone, even after locking. It can use battery and stops when you stop Pip or tap Stop listening. Audio is not saved or sent; recognized chat uses your chat API. Phone actions require unlocking and tapping Send. Turn on Read Pip’s replies aloud to hear answers while locked.")
+        text("Speak in English and address him by name, like ‘Hey Pip, tell me a joke’ or ‘Good one, Pip.’ Listening runs on your phone, even after locking. It can use battery and stops when you stop Pip or tap Stop listening. Audio is not saved or sent; recognized chat uses your chat API. Phone actions require unlocking and tapping Send. Turn on Read Pip’s replies aloud to hear answers while locked.")
         wakeAction = button("") { changeWakeListening() }
         wakeStatus = text("")
         wakeSpeak = button("Speak now (no wake word)") {
