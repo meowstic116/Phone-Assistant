@@ -57,6 +57,9 @@ val prepareKokoroRuntime by tasks.registering {
 
 tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(prepareKokoroRuntime) }
 
+// Only the distribution workflow assembles an unsigned debug APK; normal IDE builds still work.
+val pipDevUnsigned = providers.gradleProperty("pipDevUnsigned").orNull == "true"
+
 android {
     namespace = "com.phoneassistant"
     compileSdk = 34
@@ -79,7 +82,8 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            // Use the Android SDK's per-machine debug key; it cannot update the tester app.
+            // Local debug installs use the SDK key. GitHub signs its own Pip Dev update stream.
+            if (pipDevUnsigned) signingConfig = null
         }
         release {
             isMinifyEnabled = false
