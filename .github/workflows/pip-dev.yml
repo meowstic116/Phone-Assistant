@@ -1,0 +1,56 @@
+name: Publish Pip Dev APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pip-dev-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Don't expose the signing secret to pull requests or publishing runs on feature branches.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Assemble unsigned debug APK
+        run: ./gradlew :app:assembleDebug -PpipDevUnsigned=true --no-daemon
+      - name: Sign and verify Pip Dev only
+        id: sign
+        env:
+          PIP_DEV_SIGNING_BUNDLE: ${{ secrets.PIP_DEV_SIGNING_BUNDLE }}
+          PIP_DEV_CERT_SHA256: ${{ vars.PIP_DEV_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          export ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/34.0.0"
+          input=app/build/outputs/apk/debug/app-debug-unsigned.apk
+          badging=$("$ANDROID_BUILD_TOOLS/aapt2" dump badging "$input")
+          version=$(sed -n "s/^package: .*versionName='\([0-9][0-9.]*\)'.*$/\1/p" <<< "$badging")
+          [[ "$version" =~ ^[0-9]+(\.[0-9]+)+$ ]]
+          apk="$RUNNER_TEMP/pip-dev-$version.apk"
+          ./scripts/sign-pip-dev.sh "$input" "$apk"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+      - name: Publish pre-release without replacing existing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.sign.outputs.version }}
+          APK: ${{ steps.sign.outputs.apk }}
+        run: |
+          set -euo pipefail
+          gh release create "pip-dev-v$VERSION" "$APK" --target "$GITHUB_SHA" \
+            --prerelease --latest=false --title "Pip Dev $VERSION" \
+            --notes 'Debug build for personal testing. Separate from privately signed Pip Tester builds.'

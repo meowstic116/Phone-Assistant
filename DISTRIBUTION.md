@@ -67,3 +67,34 @@ sign again with the same key. There is no automatic public update check for this
 The old key is permanently public in repository history. Removing it from the latest
 checkout does not revoke it or make old APKs safe to share as trusted builds. Do not
 rewrite Git history as a substitute for rotating the signing identity.
+
+## Pip Dev builds for your own testing
+
+GitHub can publish a separate **Pip Dev** debug APK (`com.phoneassistant.pip.debug`). Its
+signing key is **not** the Pip Tester key. Set it up once from your own computer after the
+workflow is on `main`. In Bash on macOS, Linux, or WSL, with JDK 17, Python 3, OpenSSL, and
+GitHub CLI installed, run this from the repository folder. Sign in to the CLI with a GitHub
+account that can manage the repository’s Actions secrets and variables.
+
+```bash
+bash scripts/setup-pip-dev-signing.sh
+```
+
+The script creates a private keystore and password in `~/.pip-signing/pip-dev/` and sends
+an encrypted Actions secret directly to GitHub. It pins the public certificate as the
+`PIP_DEV_CERT_SHA256` repository variable. It won’t replace an existing signing secret.
+Keep a protected backup of **both files**. If the secret is deleted, restore it using the
+same local key and the setup script; don’t generate a replacement. Never commit the files
+or share them with testers.
+
+Open **GitHub → Actions → Publish Pip Dev APK → Run workflow** and select `main`.
+Download `pip-dev-<version>.apk` from the resulting GitHub pre-release. Those releases are
+public if the repository is public. Before publishing another build, increase `versionCode`
+and `versionName`; the workflow does not replace an existing release. The workflow checks
+that the APK has the Pip Dev app ID and matches the pinned certificate before publishing.
+
+Once you install a GitHub-signed Pip Dev APK, newer builds signed with the same key can
+update it in place. If you already installed **Pip Dev** from Android Studio with its local
+debug key, you’ll need to uninstall **that Dev install** once before switching (this erases
+its Dev data). Leave **Pip Tester** and the old **Phone Assistant** app installed if you
+want to keep their data; they have different app IDs.
