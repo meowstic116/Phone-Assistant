@@ -1,5 +1,6 @@
 package com.phoneassistant
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
@@ -36,6 +37,7 @@ class PipSettingsActivity : Activity() {
     private lateinit var wakeStatus: TextView
     private lateinit var wakeSpeak: Button
     private val kokoroChanged: () -> Unit = { refreshVoiceSummary() }
+    private val wakeModelChanged: () -> Unit = { refreshWakeAction() }
     private var refreshApiIfChanged: () -> Unit = {}
     private val permissionStatuses = mutableListOf<() -> Unit>()
     private val toySwitches = mutableListOf<Switch>()
@@ -106,14 +108,14 @@ class PipSettingsActivity : Activity() {
         }
 
         heading("Talk to Pip")
-        text("Speak in English and address him by name, like ‘Hey Pip, tell me a joke’ or ‘Good one, Pip.’ Listening runs on your phone, even after locking. It can use battery and stops when you stop Pip or tap Stop listening. Audio is not saved or sent; recognized chat uses your chat API. Phone actions require unlocking and tapping Send. Turn on Read Pip’s replies aloud to hear answers while locked.")
+        text("Speak in English and address him by name, like ‘Hey Pip, tell me a joke’ or ‘Good one, Pip.’ Listening runs on your phone, even after locking. It can use battery. To stop, tap Stop listening for Pip here or stop the assistant. Notifications are optional. Audio is not saved or sent; recognized chat uses your chat API. Phone actions require unlocking and tapping Send. Turn on Read Pip’s replies aloud to hear answers while locked.")
         toggle("Start listening when Pip starts", PipStartup.listenOnStart(this)) { enabled ->
             PipStartup.setListenOnStart(this, enabled)
             if (enabled) WakeListenService.startProblem(this)?.let {
                 Toast.makeText(this, it, Toast.LENGTH_LONG).show()
             }
         }.isEnabled = KokoroVoice.supported()
-        text("Only starts the microphone when you tap Start assistant in the app, not at phone boot. Requires the offline model and microphone and notification permissions. You can still stop listening at any time.")
+        text("Only starts the microphone when you tap Start assistant in the app, not at phone boot. Requires the offline model and microphone permission.")
         wakeAction = button("") { changeWakeListening() }
         wakeStatus = text("")
         wakeSpeak = button("Speak now (no wake word)") {
@@ -161,7 +163,7 @@ class PipSettingsActivity : Activity() {
         wakeStatus.text = status.message
         wakeSpeak.visibility = if (WakeListenService.running) View.VISIBLE else View.GONE
         wakeSpeak.isEnabled = status.canSpeak
-        wakeAction.isEnabled = !WakeModel.busy && (KokoroVoice.supported() || WakeListenService.running)
+        wakeAction.isEnabled = WakeListenService.running || (!WakeModel.busy && KokoroVoice.supported())
         wakeAction.text = when {
             WakeListenService.running -> "Stop listening for Pip"
             !KokoroVoice.supported() -> "Offline listening unavailable on this device"
@@ -176,20 +178,17 @@ class PipSettingsActivity : Activity() {
         if (!WakeModel.ready(this)) {
             WakeModel.install(this) { success ->
                 if (isFinishing || isDestroyed) return@install
-                refreshWakeAction()
                 Toast.makeText(this, if (success) "Ready. Tap Start listening for Pip."
                     else "Couldn’t install offline recognition. Check your connection and free space.", Toast.LENGTH_LONG).show()
             }
-            refreshWakeAction()
             return
         }
         if (!OverlayService.running || OverlayService.stopping) {
             Toast.makeText(this, "Start the assistant before turning on listening.", Toast.LENGTH_LONG).show()
             return
         }
-        val missing = WakeListenService.missingPermissions(this)
-        if (missing.isNotEmpty()) {
-            requestPermissions(missing.toTypedArray(), 702)
+        if (!WakeListenService.hasMicPermission(this)) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 702)
             return
         }
         WakeListenService.startProblem(this)?.let {
@@ -217,11 +216,12 @@ class PipSettingsActivity : Activity() {
         super.onStart()
         KokoroVoice.observe(kokoroChanged)
         WakeListenService.onChanged = ::refreshWakeAction
-        refreshWakeAction()
+        WakeModel.observe(wakeModelChanged)
     }
 
     override fun onStop() {
         KokoroVoice.forget(kokoroChanged)
+        WakeModel.forget(wakeModelChanged)
         WakeListenService.onChanged = null
         super.onStop()
     }

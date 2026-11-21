@@ -68,33 +68,22 @@ android {
     packaging.jniLibs.useLegacyPackaging = true
 
     defaultConfig {
-        applicationId = "com.phoneassistant"
+        // New identity: the publicly signed legacy app cannot update or replace this app.
+        applicationId = "com.phoneassistant.pip"
         minSdk = 26
         targetSdk = 34
-        versionCode = 186
-        versionName = "0.186"
-    }
-
-    // One committed, self-signed key signs every build, debug and release alike, so the
-    // signature never changes and updates install straight over the top. It is public:
-    // ideal for a personal sideloaded app, and never acceptable for Play Store
-    // distribution. See the README if you ever decide to share it.
-    signingConfigs {
-        create("stable") {
-            storeFile = rootProject.file("signing/phone-assistant.jks")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-        }
+        versionCode = 189
+        versionName = "0.189"
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("stable")
+            applicationIdSuffix = ".debug"
+            // Use the Android SDK's per-machine debug key; it cannot update the tester app.
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("stable")
+            // Assemble unsigned. Sign locally with the owner's private key (see DISTRIBUTION.md).
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

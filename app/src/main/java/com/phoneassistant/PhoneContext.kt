@@ -12,6 +12,13 @@ internal object PhoneContext {
     )
     private val quotedCommand = Regex("""\b(?:repeat|pretend|hypothetically|imagine)\b""", RegexOption.IGNORE_CASE)
 
+    private val appIdentity = Regex(
+        """^(?:(?:hey )?pip[, ]+)?(?:please )?(?:what|which) (?:app|application) (?:am i (?:in|using)|(?:is|do i have) (?:open|in front|on (?:my|the) screen))(?: right now)?[?.!]*$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun asksForAppLabel(message: String): Boolean = appIdentity.matches(message.trim())
+
     fun mayInspect(message: String): Boolean = question.containsMatchIn(message.trim()) &&
         onDevice.containsMatchIn(message) && !quotedCommand.containsMatchIn(message)
 

@@ -133,26 +133,20 @@ object Persona {
     fun isCustomised(ctx: Context): Boolean = custom(ctx) != null
 
     /**
-     * Instructions plus live context: where they are, what is on their screen, anything
+     * Instructions plus live context: which Pip toys are on their screen, anything
      * that just happened, and remembered facts. None of that is part of the editable text.
      */
     fun systemPrompt(
         ctx: Context,
-        appLabel: String?,
         stage: String? = null,
         event: String? = null,
         canAct: Boolean = false,
         includePersonalContext: Boolean = true
     ): String {
-        val where = if (appLabel != null) {
-            "They currently have $appLabel open."
-        } else {
-            "You do not know which app they are in right now."
-        }
         val facts = if (includePersonalContext) Facts.promptBlock(ctx) else ""
         return buildString {
             append((if (includePersonalContext) instructions(ctx) else DEFAULT_INSTRUCTIONS).trimEnd())
-            append("\n\nCURRENT CONTEXT\n- ").append(where)
+            append("\n\nCURRENT CONTEXT\n- You do not know which app they are in right now.")
             if (!stage.isNullOrBlank()) {
                 append("\n\n").append(stage)
             }

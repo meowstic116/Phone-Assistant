@@ -2,20 +2,15 @@ package com.phoneassistant
 
 import android.app.Activity
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
-import android.widget.TextView
 import android.widget.Toast
 
 class MainActivity : Activity() {
 
     private lateinit var startButton: Button
-    private lateinit var updateStatus: TextView
-    private lateinit var updateButton: Button
     private val powerStateListener: () -> Unit = { refreshPowerButton() }
-    private var availableRelease: UpdateChecker.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,23 +43,6 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.historyButton).setOnClickListener {
             startActivity(Intent(this, ChatHistoryActivity::class.java))
         }
-
-        updateStatus = findViewById(R.id.updateStatus)
-        updateButton = findViewById(R.id.updateButton)
-        updateButton.setOnClickListener {
-            val release = availableRelease
-            val target = release?.downloadUrl ?: release?.pageUrl
-            if (release != null && !target.isNullOrBlank()) {
-                try {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
-                } catch (_: android.content.ActivityNotFoundException) {
-                    Toast.makeText(this, "No browser is available to open the update.", Toast.LENGTH_SHORT).show()
-                }
-            } else {
-                checkForUpdates()
-            }
-        }
-        checkForUpdates()
     }
 
     override fun onResume() {
@@ -77,35 +55,6 @@ class MainActivity : Activity() {
     override fun onPause() {
         if (OverlayService.onPowerStateChanged === powerStateListener) OverlayService.onPowerStateChanged = null
         super.onPause()
-    }
-
-    private fun checkForUpdates() {
-        updateButton.isEnabled = false
-        updateStatus.text = "Checking for updates…"
-        updateButton.text = "Check for updates"
-        availableRelease = null
-
-        UpdateChecker.check(this) { result ->
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                updateButton.isEnabled = true
-                if (result == null) {
-                    updateStatus.text = "Couldn't reach GitHub"
-                } else if (result.version.isBlank()) {
-                    // GitHub answers 404 both for "no releases" and for a private repo,
-                    // so the message has to cover both rather than guess.
-                    updateStatus.text = "No releases found — the repo may be private " +
-                        "(installed " + result.currentVersion + ")"
-                } else if (result.newer) {
-                    availableRelease = result
-                    updateStatus.text = "Update available: " + result.version +
-                        " (installed " + result.currentVersion + ")"
-                    updateButton.text = "Download " + result.version
-                } else {
-                    updateStatus.text = "Up to date (" + result.currentVersion + ")"
-                }
-            }
-        }
     }
 
     private fun startAssistant() {

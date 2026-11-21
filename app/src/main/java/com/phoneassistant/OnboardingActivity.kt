@@ -210,7 +210,7 @@ class OnboardingActivity : Activity() {
         permission("Accessibility · optional", getString(R.string.setup_access_optional), { ImeWatch.enabled(this) }) {
             PipPermissions.openAccessibility(this)
         }
-        permission("Usage access · optional", "Lets Pip know which app is in front.", { AppWatcher.hasPermission(this) }) {
+        permission("Usage access · optional", "Lets Pip answer questions about the last app in front on your device.", { AppWatcher.hasPermission(this) }) {
             PipPermissions.openUsage(this)
         }
         if (Build.VERSION.SDK_INT >= 33) {

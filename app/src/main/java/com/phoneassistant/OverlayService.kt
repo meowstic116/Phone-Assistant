@@ -56,11 +56,6 @@ class OverlayService : Service(), PropHost {
         var running: Boolean = false
             private set
 
-        /** Label of the app the user is in, refreshed every few seconds. */
-        @Volatile
-        var currentAppLabel: String? = null
-            private set
-
         private var instance: OverlayService? = null
         val stopping: Boolean get() = instance?.ending == true
         internal var onPowerStateChanged: (() -> Unit)? = null
@@ -445,7 +440,6 @@ class OverlayService : Service(), PropHost {
     private var idleUntil = 0L
     private var attentive = false
     private var paused = false
-    private var watchCountdown = 0L
 
     private var petDrag: WindowDrag? = null
     private var ending = false
@@ -1410,12 +1404,6 @@ class OverlayService : Service(), PropHost {
             }
         }
 
-        watchCountdown += frameMs
-        if (watchCountdown >= 15_000L) {
-            watchCountdown = 0L
-            currentAppLabel = AppWatcher.currentAppLabel(this)
-        }
-
         // Nothing on screen for a few minutes: he gets bored and makes his own fun.
         if (spontaneousToysAllowed && !attentive && !walking && props.isEmpty() && !still) {
             initiativeIn -= frameMs
@@ -2156,6 +2144,7 @@ class OverlayService : Service(), PropHost {
                 return@projected
             }
             if (command != null) {
+                if (Agent.running()) { done(WakeFeedback.BUSY); return@projected }
                 // Never let the chat model or accessibility agent execute an unconfirmed car action.
                 val response = if (projected == true) DrivingVoice.execute(this, command) else
                     "I couldn’t verify an Android Auto connection. Try again when parked."
@@ -2180,7 +2169,8 @@ class OverlayService : Service(), PropHost {
         if (!inputField?.text.isNullOrBlank()) { done(WakeFeedback.DRAFT); return }
         // Tapping Pip first opens an empty composer. It shouldn't swallow a spoken request.
         if (inputBar != null) closeChat()
-        if (JobProgress.routePhoneLocally(text) || PhoneContext.mayInspect(text) || NowPlaying.requested(text)) {
+        if (JobProgress.routePhoneLocally(text) || PhoneContext.mayInspect(text) ||
+            PhoneContext.asksForAppLabel(text) || NowPlaying.requested(text)) {
             done(review())
             return
         }
@@ -2192,7 +2182,7 @@ class OverlayService : Service(), PropHost {
         if (screenUsable()) startThinking()
         // No app/screen context, local phone shortcuts, toy reactions or memory changes occur
         // on an unconfirmed voice turn. Only a later tap on the ordinary Send button can act.
-        AssistantBrain.reply(this, null, turn = turn, voiceMessage = text, voiceContext = previousVoice) { ok, reply ->
+        AssistantBrain.reply(this, turn = turn, voiceMessage = text, voiceContext = previousVoice) { ok, reply ->
             handler.post {
                 var result = WakeFeedback.BUSY
                 try {
@@ -2287,7 +2277,7 @@ class OverlayService : Service(), PropHost {
             Toys.reactTo(this, text)
         }
 
-        AssistantBrain.reply(this, currentAppLabel, Toys.summary(this), event, turn) { ok, reply ->
+        AssistantBrain.reply(this, Toys.summary(this), event, turn) { ok, reply ->
             handler.post {
                 if (instance !== this || !ChatTurns.isCurrent(turn)) return@post
                 // Sometimes the answer is not a line but a job for his hands to do.

@@ -265,14 +265,15 @@ x86_64. Its weights are not bundled with the APK or committed to Git. See
 ## Talk to Pip hands-free
 
 Start the assistant, then open **Pip settings → Talk to Pip**. Download offline recognition
-(about 57 MB), grant microphone and notification permissions, and tap **Start listening for Pip**.
+(about 57 MB), grant microphone permission, and tap **Start listening for Pip**. You can
+leave Pip’s Android notifications off.
 Address him in English: **“Hey Pip, tell me a joke”**, **“Good one, Pip”**, or
 **“Can you, Pip, tell me another?”** The name can come first, last, or as a direct address
 set off in the middle. You can also say his name, pause briefly, then speak. Turn on **Read Pip’s replies aloud** if you want to hear answers
 with the screen locked.
 
-If he doesn't respond, check the live status under **Talk to Pip** or in the listening
-notification. **Speak now (no wake word)** opens a short window to say one message without
+If he doesn't respond, check the live status under **Talk to Pip** or, if enabled, in the
+listening notification. **Speak now (no wake word)** opens a short window to say one message without
 the name, useful for checking that the microphone and chat work independently of wake detection.
 
 Listening is off by default. To skip the extra tap each session, turn on **Start listening when
@@ -282,8 +283,10 @@ Pip still appears with the mic off. This setting doesn't open the mic at phone b
 automatic service recovery.
 
 Listening can continue after locking and uses battery; Android
-or the phone maker may suspend it. The persistent notification has a **Stop listening** action,
-and stopping the assistant also stops listening. The microphone is paused while Pip replies so
+or the phone maker may suspend it. To stop listening, use **Stop listening for Pip** under
+**Talk to Pip**, or stop the assistant. If notifications are on, the listening notification
+also has a **Stop listening** action. Android can still show its own microphone indicator
+or list Pip under active apps when notifications are off. The microphone is paused while Pip replies so
 he won’t normally wake himself. Microphone audio is processed in memory on the phone, not
 saved or sent to a server. Only recognized messages addressed to Pip enter the regular chat
 flow and use your configured chat API. Pip checks locally whether speech sounds addressed to him. For an unlocked follow-up, he can use
@@ -347,16 +350,13 @@ it were.
 
 ## Setup on the phone
 
-To sideload without building, download the latest signed APK:
-[`phone-assistant-0.186-debug.apk`](dist/phone-assistant-0.186-debug.apk).
-The `dist/` directory also contains APKs from earlier releases.
+For a friend-testing build, follow the [private signing and sharing guide](DISTRIBUTION.md).
+Install only the signed **Pip Tester** APK from the person who invited you. The `dist/`
+APKs are historical builds signed with a public key, not tester releases.
 
-Tagged builds are also published as GitHub Releases by
-`.github/workflows/release.yml`, which is what the in-app update check looks at.
-
-1. Build and install: `./gradlew installDebug` (or open in Android Studio and Run).
-   The first build fetches the pinned, checksum-verified Kokoro runtime from npm;
-   the phone downloads the voice model separately only if requested.
+1. For local development, `./gradlew installDebug` (or Android Studio Run) installs the
+   separate **Pip Dev** app. The first build fetches the pinned, checksum-verified Kokoro
+   runtime from npm; the phone downloads the voice model separately only if requested.
 2. On first launch, **Meet Pip** guides you into **Connect Pip**. Paste an API key and
    tap **Verify & continue**. Pip sends a short test prompt (no chat or screen data) to
    the configured HTTPS provider and model. You can’t continue until the model replies.
@@ -421,33 +421,11 @@ browser check, ask “Look up all the mods 9 in the browser and open the downloa
 If the first accessibility click doesn't navigate, check for `touch fallback` in Diagnostics.
 “Look up pictures of cats” should still stop at Google Images.
 
-## Signing
+## Signing and distribution
 
-`signing/phone-assistant.jks` is committed and public, and signs **every** build — debug
-and release alike. One signature means every build installs straight over the top, so
-updates never require uninstalling and no chat history is lost.
-
-This is a personal-use key: ideal for sideloading on your own phone, and never acceptable
-for Play Store distribution or anywhere impersonation would matter.
-
-If you ever decide to share the app, generate a private keystore, feed it to the release
-workflow through repository secrets, and expect the first private-key build to need one
-uninstall — Android treats a changed signature as a different app.
-
-### Publishing a release
-
-Bump `versionCode` and `versionName` in `app/build.gradle.kts`, then tag:
-
-```bash
-git tag v0.3
-git push origin v0.3
-```
-
-`.github/workflows/release.yml` builds the APK and publishes it on a GitHub Release, so
-the GitHub Release is the source the in-app updater trusts, separate from any manually
-checked-in sideload APKs in `dist/`. The updater only opens the official repository’s
-release page or APK asset links. Only install APKs from a source you trust: the personal
-signing key is public.
+Pip Tester uses a separate Android app ID and must be signed with a private key held by
+its distributor. The old public keystore is retired and must not be used for new builds.
+See [DISTRIBUTION.md](DISTRIBUTION.md) to sign the APK locally and share it directly.
 
 ## Logins
 
@@ -485,9 +463,10 @@ limited to 4,096 characters.
   the prompt in an editor and
   saves it on the device. The built-in version lives in `Persona.kt`; **use new built-in**
   goes back to it, stashing your text in `custom_backup` first so **bring my text back**
-  can restore it. The note about which app you are in, the list of
-  toys on screen, and the remembered facts are all appended automatically and are not part
-  of the editable text.
+  can restore it. The list of toys on screen and remembered facts are appended automatically
+  and are not part of the editable text. With Usage access, Pip answers typed questions like
+  “Which app am I in?” on-device using the most recent foreground app Android reports.
+  The app name from that lookup is not sent to the chat provider or saved in chat history.
 - Look and animation: `app/src/main/java/com/phoneassistant/PetView.kt`
 - Walk speed, idle timing, window size: `OverlayService.kt`
 - Toys: `Prop.kt` is the base class (one overlay window, drag, tap, `onFrame` for

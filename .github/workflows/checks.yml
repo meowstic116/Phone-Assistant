@@ -21,8 +21,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Build Android APK
-        run: ./gradlew :app:assembleDebug --no-daemon
+      - name: Build debug and unsigned tester APKs
+        run: ./gradlew :app:assembleDebug :app:assembleRelease --no-daemon
       - name: Run host regression checks
         run: |
           set -euo pipefail
