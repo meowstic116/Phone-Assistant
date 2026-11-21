@@ -93,6 +93,7 @@ internal object PipVoice {
     }
 
     fun stop() {
+        if (speaking && allowLockedPlayback) Diag.handsFreeAudio("Speech was interrupted.")
         sequence++
         kokoroRequest?.cancel()
         kokoroRequest = null
@@ -118,7 +119,13 @@ internal object PipVoice {
         val manager = ctx.getSystemService(AudioManager::class.java) ?: return false
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
             .setAudioAttributes(attrs)
-            .setOnAudioFocusChangeListener({ change -> if (id == sequence && change < 0) stop() }, main)
+            .setOnAudioFocusChangeListener({ change ->
+                if (id == sequence && change < 0) {
+                    val handsFree = allowLockedPlayback
+                    stop()
+                    if (handsFree) Diag.handsFreeAudio("Android took back audio focus.")
+                }
+            }, main)
             .build()
         // Recent Android versions may decline focus while an overlay's app is in the background.
         // In that case don't interrupt the app currently playing audio.
@@ -129,8 +136,12 @@ internal object PipVoice {
 
     fun reply(context: Context, text: String, captions: ((Int?) -> Unit)? = null, allowLocked: Boolean = false) {
         val config = VoiceSettings.config(context)
-        if (config.enabled) speak(context.applicationContext, text, config, null, captions, allowLocked)
-        else captions?.invoke(null)
+        val report = if (allowLocked) Diag::handsFreeAudio else null
+        if (config.enabled) speak(context.applicationContext, text, config, report, captions, allowLocked)
+        else {
+            report?.invoke("Spoken replies are off in Pip settings.")
+            captions?.invoke(null)
+        }
     }
 
     /** Explicit read-aloud uses only Android voices marked offline, never model/TTS API paths. */
@@ -172,20 +183,29 @@ internal object PipVoice {
     }
 
     fun preview(context: Context, report: (String) -> Unit) =
-        speak(context.applicationContext, VoiceProtocol.PREVIEW, VoiceSettings.config(context), report, null)
+        speak(context.applicationContext, VoiceProtocol.PREVIEW, VoiceSettings.config(context), report, null, preview = true)
 
     private fun speak(ctx: Context, value: String, config: VoiceSettings.Config, report: ((String) -> Unit)?,
-                      captions: ((Int?) -> Unit)?, allowLocked: Boolean = false) {
-        val line = SpeechCaption.from(value, VoiceProtocol.MAX_TEXT) ?: run { captions?.invoke(null); return }
+                      captions: ((Int?) -> Unit)?, allowLocked: Boolean = false, preview: Boolean = false) {
+        val line = SpeechCaption.from(value, VoiceProtocol.MAX_TEXT) ?: run {
+            report?.invoke("No reply text was available to speak.")
+            captions?.invoke(null)
+            return
+        }
         stop()
         val id = sequence
         allowLockedPlayback = allowLocked
         speaking = true
         captionUpdate = captions
         lastCaptionEnd = 0
-        if (!mayPlay(ctx, id)) { finishCaptions(); return }
+        if (allowLocked) report?.invoke("Preparing offline speech…")
+        if (!mayPlay(ctx, id)) {
+            finishCaptions()
+            report?.invoke("Playback was not allowed in the current screen or listener state.")
+            return
+        }
         if (config.source == VoiceSource.ANDROID) {
-            timeLimit(id, 16_000L)
+            timeLimit(id, 16_000L) { report?.invoke("Android’s offline voice did not start in time.") }
             local(ctx, id, line, report, "Playing Android voice.")
             return
         }
@@ -195,8 +215,9 @@ internal object PipVoice {
                 report?.invoke(KokoroVoice.status(ctx))
                 return
             }
-            if (report == null && !KokoroIpc.automaticAllowed) {
+            if (!preview && !KokoroIpc.automaticAllowed) {
                 finishCaptions()
+                report?.invoke("Automatic Kokoro playback is paused after an error. Try Preview when parked.")
                 return
             }
             val request = KokoroIpc.Request(ctx, line.text, config.kokoro) complete@{ clip, problem ->
@@ -253,7 +274,11 @@ internal object PipVoice {
                     main.post {
                         if (utteranceId != id.toString() || id != sequence) return@post
                         val start = SystemClock.uptimeMillis()
-                        timeLimit(id, if (success.isEmpty()) 360_000L else 60_000L)
+                        val handsFree = allowLockedPlayback
+                        timeLimit(id, if (success.isEmpty()) 360_000L else 60_000L) {
+                            if (handsFree) Diag.handsFreeAudio("Android speech timed out during playback.")
+                        }
+                        if (handsFree) Diag.handsFreeAudio("Android reported speech started.")
                         // Engines that don't implement word ranges still get a timed reveal.
                         if (!timedByEngine) estimate(id, line) {
                             if (timedByEngine) null else (SystemClock.uptimeMillis() - start - 260L) / line.estimatedDurationMs.toFloat()
@@ -275,6 +300,7 @@ internal object PipVoice {
                         if (utteranceId == id.toString() && id == sequence) {
                             releaseAudio()
                             if (error) report?.invoke("Android couldn’t play the voice.")
+                            else if (allowLockedPlayback) Diag.handsFreeAudio("Android reported speech completed.")
                             finishCaptions()
                         }
                     }
@@ -339,7 +365,7 @@ internal object PipVoice {
                         KokoroIpc.playbackResult(null)
                         releaseAudio()
                         finishCaptions()
-                        report?.invoke("Kokoro preview played offline.")
+                        report?.invoke("Kokoro playback completed.")
                     } else failed(KokoroFailure.PLAYBACK)
                 }
                 if (playback == null) { failed(KokoroFailure.PLAYBACK); return@post }

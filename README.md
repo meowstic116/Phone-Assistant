@@ -312,7 +312,11 @@ Connect Android Auto and try:
   intent. Set a local home destination in Pip settings for **“Pip, navigate home.”**
 - **“Pip, pause Spotify,” “resume Spotify,” “next song on Spotify,”** or **“previous
   track on Spotify.”** Start Spotify while parked and grant **Notification access** so
-  Pip can control the existing local session. It cannot search for songs in this mode.
+  Pip can control the existing local session. You can also say **“Pip, play Emo Route Mix”**
+  or **“Pip, play the Emo Route Mix playlist on Spotify.”** For named playlists, Spotify’s
+  session must offer playback search. Pip reports when it can only hand off the request or
+  when search is unavailable. If it’s unavailable, use Android Auto’s own voice assistant
+  instead. Pip doesn’t use accessibility or send the playlist request to its chat API.
 
 Pip checks the Android Auto projection connection and handles only these commands on the
 phone, without the chat model or accessibility automation. Google Maps and Android decide
@@ -320,7 +324,11 @@ whether a navigation handoff can open or appear on the car display, especially w
 Spotify controls require an active session that offers the requested action. Pip does not
 unlock the phone or control the car screen. Test your mic, audio routing, and each command
 while parked before relying on them. If a command doesn’t work while driving, wait until
-parked rather than reaching for the phone.
+parked rather than reaching for the phone. In **Diagnostics → Hands-free voice**, check
+whether Pip heard the wake phrase, handed off the request, and got audio playback. Those
+status lines stay available for the current app session and contain no transcript or destination.
+If Android reports that speech completed but you heard nothing, check where the phone routed
+media audio while parked. Use **Preview Pip’s voice** to test the selected voice first.
 
 ## Personality
 

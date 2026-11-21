@@ -118,6 +118,8 @@ internal class WakeListenService : Service() {
     }
 
     private fun publish(status: WakeFeedback) {
+        if (status.isMicEvent) Diag.wakeInput(status)
+        if (status.isOutcome) Diag.wakeOutcome(status)
         val now = SystemClock.elapsedRealtime()
         if (status in listOf(WakeFeedback.LISTENING, WakeFeedback.PLAYING) && now < outcomeUntil) return
         main.removeCallbacks(resetOutcome)
