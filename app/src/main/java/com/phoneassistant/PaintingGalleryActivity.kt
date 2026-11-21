@@ -70,14 +70,12 @@ class PaintingGalleryActivity : Activity() {
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(0, dp(4), 0, dp(4))
                 }
-                if (picture.style == null || picture.style.drawable != null) {
-                    val thumbnail = ImageView(this).apply {
-                        scaleType = ImageView.ScaleType.FIT_CENTER
-                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    }
-                    row.addView(thumbnail, LinearLayout.LayoutParams(dp(52), dp(46)).apply { marginEnd = dp(10) })
-                    previews += picture to thumbnail
+                val thumbnail = ImageView(this).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }
+                row.addView(thumbnail, LinearLayout.LayoutParams(dp(52), dp(46)).apply { marginEnd = dp(10) })
+                previews += picture to thumbnail
                 row.addView(Switch(this).apply {
                     text = picture.label
                     setTextColor(getColor(R.color.text))

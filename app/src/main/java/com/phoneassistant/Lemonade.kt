@@ -4,8 +4,6 @@ import android.animation.ValueAnimator
 import android.graphics.Canvas
 import android.graphics.Path
 import android.graphics.RectF
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import kotlin.math.sin
 
@@ -40,13 +38,10 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     private val rect = RectF()
     private var artWidth = -1f
 
-    /** Glasses promised and not yet poured, capped at what the stand can hold. */
-    private var owed = 0
+    private var postRequestedAt: Long? = null
 
-    private val ui = Handler(Looper.getMainLooper())
-
-    /** Runs the next owed pour, a beat after the last one. */
-    private val pourNext = Runnable { pourPending(announce = false) }
+    internal override fun keepsToy(now: Long): Boolean =
+        postRequestedAt?.let { host.isPostOwner(this) && now - it < 45_000L } == true
 
     private fun buildArt(w: Float) {
         if (w == artWidth) return
@@ -241,65 +236,20 @@ class LemonadeStand(host: PropHost) : Prop(host) {
      */
     fun takePost(say: Boolean = false) {
         if (leaving) return
+        postRequestedAt = SystemClock.uptimeMillis()
         host.petHoldAt(this, centreX, behindCounterY()) {
+            postRequestedAt = null
             if (say) host.say(Lines.pick(POST_LINES))
-            // Whatever is owed is poured on arrival, so a later takePost — the stand being
-            // dragged while a glass is still promised, say — cannot drop that pour.
-            pourPending()
         }
     }
 
-    /** Dragged somewhere else: he walks back round behind it instead of being left behind. */
-    override fun onDragFinished() {
-        takePost(say = true)
-    }
+    override fun onDragFinished() = takePost(say = true)
 
-    /**
-     * Answers a request at once: the glass is poured now and he hurries round behind the
-     * counter with it. Waiting for the crossing made a request feel ignored, and the pour
-     * still cannot happen twice — each request adds one glass to the debt, capped by the
-     * space the stand has left, and [pourPending] takes it before pouring.
-     */
-    fun pourNow() {
-        val room = (2 - glassesOut()).coerceAtLeast(0)
-        owed = (owed + 1).coerceAtMost(room)
-        if (owed > 0) pourPending()
+    /** Serve as soon as the glass is actually placed; walking back is independent. */
+    fun pourNow(): Boolean {
+        val served = serve()
         takePost()
-    }
-
-    /**
-     * Pours one owed glass. The first of a batch speaks (it is the line that answers the
-     * request); the follow-ups scheduled [POUR_GAP_MS] later stay quiet, so a pair of glasses
-     * is one thing said rather than the same line twice.
-     */
-    private fun pourPending(announce: Boolean = true) {
-        if (owed <= 0) return
-        owed--
-        // serve() keeps its own room check, so a debt that was capped cannot overfill the
-        // stand if a glass appeared in the meantime.
-        if (!serve(announce)) {
-            owed = 0
-            return
-        }
-        if (owed == 0) return
-        if (!hasRoom()) {
-            owed = 0
-            return
-        }
-        // Two requests in a row get two glasses a beat apart, rather than both landing on
-        // the same frame and looking like one glass appearing twice.
-        ui.removeCallbacks(pourNext)
-        ui.postDelayed(pourNext, POUR_GAP_MS)
-    }
-
-    /** Off the screen: let him wander again, and forget anything still owed. */
-    override fun onDetachedFromWindow() {
-        owed = 0
-        ui.removeCallbacks(pourNext)
-        // The host releases the post as soon as the stand leaves the stage, which is before
-        // this runs. Releasing again here would free a new stand's post instead.
-        if (host.isPostOwner(this)) host.petRelease()
-        super.onDetachedFromWindow()
+        return served
     }
 
     override fun describe(): String {
@@ -313,7 +263,6 @@ class LemonadeStand(host: PropHost) : Prop(host) {
 
     companion object {
         /** Long enough to read as two pours, short enough not to feel like a pause. */
-        private const val POUR_GAP_MS = 800L
 
         val NO_ROOM_LINES = listOf(
             "two glasses. I'm not made of lemons.",

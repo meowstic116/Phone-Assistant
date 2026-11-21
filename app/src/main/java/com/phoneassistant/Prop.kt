@@ -62,16 +62,21 @@ interface PropHost {
 
     /** Pip's middle, in screen pixels. Read every frame, so it returns a plain float. */
     fun petCentreX(): Float
+    fun petFeetY(): Float
 
-    /** Leap toward a toy's target, with his feet landing at the given screen point. */
-    fun petHopOn(owner: Prop, x: Float, y: Float, landed: () -> Unit): Boolean
+    /** Leap toward a target. An accepted hop finishes once, with false if interrupted. */
+    fun petHopOn(owner: Prop, x: Float, y: Float, finished: (landed: Boolean) -> Unit): Boolean
 
     /** Approach the can's grip in screen pixels. A null progress means the pour has ended. */
     fun petWaterPlant(owner: Prop, gripX: Float, gripY: Float, facesRight: Boolean,
                       progress: (Float?) -> Unit, watered: () -> Unit): Boolean
 
-    /** Pip walks until his centre sits on (x, y), then runs [done]. */
-    fun petWalkTo(x: Float, y: Float, done: (() -> Unit)?)
+    /** An accepted walk calls [finished] once, including if it is interrupted. */
+    fun petWalkTo(owner: Prop, x: Float, y: Float, finished: (Boolean) -> Unit = {}): Boolean
+    fun retargetPetWalk(owner: Prop, x: Float, y: Float): Boolean
+    fun cancelPetWalk(owner: Prop)
+    fun petCanPlay(owner: Prop): Boolean
+    fun toyPlayPaused(): Boolean
 
     /**
      * Pip takes up a post at (x, y), owned by [owner]: he walks there and then stays put
@@ -86,7 +91,11 @@ interface PropHost {
 
     /** Whether [prop] is the prop he is currently posted at. */
     fun isPostOwner(prop: Prop): Boolean
-    fun petSit(sitting: Boolean)
+    fun petSitAt(owner: Prop)
+    fun petIsSeatedAt(owner: Prop): Boolean
+
+    /** Release only this prop's seat; true if Pip is free to walk away. */
+    fun petLeaveSeat(owner: Prop): Boolean
 
     fun addProp(prop: Prop): Boolean
     fun dropProp(prop: Prop)
@@ -321,6 +330,9 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
 
     /** Called about 30 times a second, for toys with physics or things to grow. */
     open fun onFrame() {}
+
+    /** A toy with work still in progress gets to use its own cleanup rules. */
+    internal open fun keepsToy(now: Long): Boolean = false
 
     /** One line for Pip's prompt describing what this is. */
     open fun describe(): String = ""

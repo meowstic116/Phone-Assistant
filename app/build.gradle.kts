@@ -75,8 +75,8 @@ android {
         applicationId = "com.phoneassistant.pip"
         minSdk = 26
         targetSdk = 34
-        versionCode = 189
-        versionName = "0.189"
+        versionCode = 190
+        versionName = "0.190"
     }
 
     buildTypes {

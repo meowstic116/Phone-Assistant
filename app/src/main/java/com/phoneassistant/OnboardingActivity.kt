@@ -1,15 +1,12 @@
 package com.phoneassistant
 
-import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.InputMethodManager
@@ -18,8 +15,10 @@ import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import com.phoneassistant.SetupPolicy.Check
+import com.phoneassistant.SetupPolicy.Permission
 import com.phoneassistant.SetupPolicy.Step
 import java.util.concurrent.Future
 
@@ -204,22 +203,22 @@ class OnboardingActivity : Activity() {
     private fun permissions() {
         heading("Make room for Pip")
         line(page, getString(R.string.setup_permissions_intro), 15f, top = 10)
-        permission("Display over other apps", "Needed for Pip to appear on your screen.", { Settings.canDrawOverlays(this) }) {
-            PipPermissions.openOverlay(this)
-        }
-        permission("Accessibility · optional", getString(R.string.setup_access_optional), { ImeWatch.enabled(this) }) {
-            PipPermissions.openAccessibility(this)
-        }
-        permission("Usage access · optional", "Lets Pip answer questions about the last app in front on your device.", { AppWatcher.hasPermission(this) }) {
-            PipPermissions.openUsage(this)
-        }
-        if (Build.VERSION.SDK_INT >= 33) {
-            permission("Notifications · optional", "Shows Pip’s status and a quick way to stop him.", {
-                PipPermissions.notificationsEnabled(this)
-            }) {
-                if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
-                    PipPermissions.openNotifications(this) // The status channel may have been blocked separately.
-                } else requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7)
+        for (permission in Permission.entries) {
+            val entry = PipPermissions.row(permission)
+            val card = permission(getString(entry.title), getString(entry.description), { PipPermissions.granted(this, permission) }) {
+                PipPermissions.requestFromSetup(this, permission)
+            }
+            if (permission == Permission.NOTIFICATION_ACCESS) {
+                card.addView(Switch(this).apply {
+                    setText(R.string.permissions_message_previews)
+                    setTextColor(getColor(R.color.text))
+                    minHeight = dp(48)
+                    isChecked = PipSettings.enabled(this@OnboardingActivity, PipSettings.Option.MESSAGE_NOTIFICATIONS)
+                    setOnCheckedChangeListener { _, enabled ->
+                        PipSettings.set(this@OnboardingActivity, PipSettings.Option.MESSAGE_NOTIFICATIONS, enabled)
+                    }
+                }, row(4))
+                line(card, getString(R.string.permissions_message_previews_info), 14f)
             }
         }
         button(page, "Finish setup", primary = true, top = 18) {
@@ -231,7 +230,7 @@ class OnboardingActivity : Activity() {
         }
     }
 
-    private fun permission(title: String, description: String, granted: () -> Boolean, request: () -> Unit) {
+    private fun permission(title: String, description: String, granted: () -> Boolean, request: () -> Unit): LinearLayout {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundResource(R.drawable.settings_card)
@@ -248,6 +247,7 @@ class OnboardingActivity : Activity() {
             allow.isEnabled = !enabled
         }
         permissionUpdates.last().invoke()
+        return card
     }
 
     private fun checkMessage(result: Check): String = when (result) {

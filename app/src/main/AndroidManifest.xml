@@ -115,6 +115,15 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
 
+        <activity android:name=".ReadMessageActivity" android:exported="true"
+            android:excludeFromRecents="true" android:label="@string/read_message_with_pip">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".ChatHistoryActivity"
             android:exported="false"

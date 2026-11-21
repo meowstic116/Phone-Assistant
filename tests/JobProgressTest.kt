@@ -418,6 +418,42 @@ fun main() {
     check(!playedToy.expired(123_998L, held = false))
     check(playedToy.expired(123_999L, held = false))
 
+    val interrupted = mutableListOf<Boolean>()
+    val ballChase = ToyApproach("scoreboard", interrupted::add)
+    ballChase.finish(false)
+    ballChase.finish(true) // A late arrival must not kick the ball after cancellation.
+    check(ballChase.owner == "scoreboard" && interrupted == listOf(false))
+    ToyApproach("scoreboard", interrupted::add).finish(true)
+    check(interrupted == listOf(false, true)) // The next chase can still finish.
+    val clock = ToyPlayClock()
+    check(clock.frame(0L, paused = false) == 0L)
+    check(clock.frame(33L, paused = false) == 33L)
+    check(clock.frame(40L, paused = true) == 33L)
+    check(clock.frame(30_000L, paused = false) == 33L)
+    check(clock.frame(30_033L, paused = false) == 66L)
+    check(clock.frame(120_000L, paused = false) == 166L) // No frames while the screen was off.
+    playedToy.keepFor(100_000L, 10_000L)
+    check(!playedToy.expired(123_998L, held = false)) // A short interruption doesn't shorten a tap grace.
+    playedToy.keepFor(120_000L, 25_000L)
+    check(!playedToy.expired(144_999L, held = false) && playedToy.expired(145_000L, held = false))
+
+    val hops = BubbleHopSchedule(100L)
+    val wrapLifetime = ToyLifetime(100L)
+    check(!hops.due(849L) && hops.due(850L))
+    hops.attempted(850L, started = false)
+    check(!hops.reservesInput(900L) && !hops.due(949L) && hops.due(950L))
+    check(!wrapLifetime.expired(20_000L, held = hops.keepsSheet(20_000L))) // Still waiting for a first jump.
+    hops.attempted(40_000L, started = true)
+    check(hops.reservesInput(40_400L) && !hops.due(40_400L))
+    hops.finished(40_400L, landed = true)
+    check(!hops.due(40_779L) && hops.due(40_780L) && hops.reservesInput(40_780L))
+    hops.attempted(40_780L, started = true)
+    hops.finished(41_100L, landed = false)
+    check(!hops.reservesInput(41_101L))
+    check(!hops.due(41_299L) && hops.due(41_300L))
+    check(!wrapLifetime.expired(45_500L, held = hops.keepsSheet(45_500L))) // Pausing mid-sheet doesn't retire it.
+    check(wrapLifetime.expired(71_100L, held = hops.keepsSheet(71_100L))) // But idle cleanup still works.
+
     val bubbles = PopSheet()
     check(bubbles.total == 20 && bubbles.nextBubble { 16 } == 16)
     check((0 until bubbles.total).map { rank -> bubbles.nextBubble { rank } } == (0 until bubbles.total).toList())
@@ -576,6 +612,8 @@ fun main() {
         check(!HomeScreenPolicy.isWorkspace(launcherHome + panel))
     }
 
+    check(SetupPolicy.Permission.entries.map { it.name } == listOf(
+        "NOTIFICATIONS", "NOTIFICATION_ACCESS", "OVERLAY", "MICROPHONE", "USAGE", "ACCESSIBILITY"))
     val setup = SetupPolicy
     val welcomeStep = SetupPolicy.Step.WELCOME
     val apiStep = SetupPolicy.Step.API
@@ -680,6 +718,29 @@ fun main() {
     check(suggestions.splitReply("{\"action\":\"delegate\",\"task\":\"Open Maps\"}").payload == null)
     check(suggestions.splitReply("Fair enough.\nPIP_MEMORY: x").payload == null)
 
+    check(MessageNotifications.senderRequested("What did Maya text me?") == "Maya")
+    check(MessageNotifications.senderRequested("Hey Pip, what did O’Connor message me just now?") == "O’Connor")
+    check(MessageNotifications.senderRequested("What did Maya text me and then reply?") == null)
+    check(MessageNotifications.senderRequested("Repeat ‘what did Maya text me?’") == null)
+    check(MessageNotifications.senderRequested("Text Maya that I’m running late") == null)
+    check(MessageNotifications.request("What did Maya text me on WhatsApp?") == MessageNotifications.Request("Maya", "WhatsApp"))
+    check(MessageNotifications.request("What did Maya text me and then reply?") == null)
+    val exactQuote = "[Check this] *not a stage direction*\nMeet me at 6."
+    check(SpeechCaption.literal(exactQuote, 100)?.text == exactQuote)
+    check(SpeechCaption.literal(exactQuote, 8) == null)
+    val prior = MessageNotifications.Preview("Maya Chen", "Earlier preview", 100, 400)
+    val latest = MessageNotifications.Preview("Maya Chen", "Meet at six", 200, 300)
+    val other = MessageNotifications.Preview("Amaya Davis", "Unrelated message", 500, 500)
+    val ambiguous = MessageNotifications.Preview("Maya Patel", "Different Maya", 600, 600)
+    check(MessageNotifications.answer("maya", listOf(other, latest, prior)) == "From Maya Chen: “Meet at six”")
+    check(MessageNotifications.answer("maya", listOf(latest, ambiguous)).startsWith("More than one"))
+    check(MessageNotifications.answer("MAYA  CHEN", listOf(latest, ambiguous)) == "From Maya Chen: “Meet at six”")
+    check(MessageNotifications.answer("maya", listOf(other)).startsWith("I couldn’t find"))
+    val noPreview = latest.copy(body = null, sentAt = 0, postedAt = 450)
+    check(MessageNotifications.answer("maya", listOf(prior, latest, noPreview)).contains("doesn’t include"))
+    check(MessageNotifications.excerpt("hi\nthere\u202E", 20) == "hi there")
+    check(MessageNotifications.excerpt("abcd", 3) == "abc…")
+
     check(NowPlaying.requested("What song am I listening to right now?"))
     check(NowPlaying.requested("Hey Pip, what’s playing?"))
     check(NowPlaying.requested("Could you tell me what song is playing now?"))
@@ -769,6 +830,38 @@ fun main() {
     check(regularPlants.indices.map { index -> PlantSelection.pick(emptyMap()) { index } } == regularPlants)
 
     // Phone-width pitch: the old top-left board overlapped the centered goal.
+    val tuning = SoccerBallTuning
+    check(tuning.PLAYER_KICK < 1150f && tuning.PIP_KICK < 720f && tuning.SAVE_KICK < tuning.PIP_KICK)
+    check(tuning.retainedSpeed(1f) in 0.40f..0.45f)
+    check(kotlin.math.abs(tuning.retainedSpeed(0.033f) * tuning.retainedSpeed(0.033f) -
+        tuning.retainedSpeed(0.066f)) < 0.0001f)
+    check(tuning.REBOUND * tuning.REBOUND < 0.30f) // Two impacts should take most of the speed out.
+    check(tuning.PIP_KICK * tuning.rollSeconds(2f) > 350f) // A clean shot can still reach from midfield.
+
+    val smallPitch = SoccerAi.Pitch(21f, 339f, 45f, 700f, 122f, 238f, 679f)
+    val pipFeet = DragMotion.Point(158f, 385f)
+    val rolling = SoccerAi.Ball(DragMotion.Point(178f, 280f), 190f, -30f)
+    val chase = SoccerAi.plan(pipFeet, rolling, smallPitch, userPressing = false)
+    check(chase.role == SoccerAi.Role.CHASE && chase.feet.x > rolling.centre.x)
+    val fastWide = SoccerAi.Ball(DragMotion.Point(302f, 246f), 950f, -20f)
+    val rebound = SoccerAi.plan(pipFeet, fastWide, smallPitch, userPressing = false)
+    check(rebound.feet.x in smallPitch.left..smallPitch.right && rebound.feet.y in smallPitch.top..smallPitch.bottom)
+    val heldFar = SoccerAi.Ball(DragMotion.Point(65f, 235f), 0f, 0f)
+    check(SoccerAi.plan(pipFeet, heldFar, smallPitch, userPressing = true).role == SoccerAi.Role.GUARD)
+    check(SoccerAi.plan(heldFar.centre, heldFar, smallPitch, userPressing = true).role == SoccerAi.Role.CHASE)
+    val shot = SoccerAi.Ball(DragMotion.Point(155f, 460f), 120f, 770f)
+    val guard = SoccerAi.plan(DragMotion.Point(280f, 615f), shot, smallPitch, userPressing = false)
+    check(guard.role == SoccerAi.Role.GUARD && guard.feet.x > shot.centre.x && guard.feet.y < smallPitch.goalY)
+    val fromShot = DragMotion.Point(140f, 617f)
+    val toShot = DragMotion.Point(200f, 705f)
+    val goalX = SoccerAi.crossingX(fromShot, toShot, smallPitch.goalY) ?: error("shot should cross the goal")
+    check(goalX in 181f..183f)
+    val atLine = DragMotion.Point(goalX, smallPitch.goalY)
+    check(SoccerAi.contact(DragMotion.Point(161f, 650f), fromShot, atLine) != null)
+    check(SoccerAi.contact(DragMotion.Point(285f, 650f), fromShot, atLine) == null)
+    check(SoccerAi.crossingX(fromShot, toShot, 720f) == null)
+    check(SoccerAi.aim(DragMotion.Point(130f, 360f), 180f, 60f, 0f) > 0f)
+
     val phoneScore = SoccerLayout.scoreboard(360f, 24f, 109f, 78f, 124f, 10f, 8f)
     check(phoneScore == DragMotion.Point(10f, 86f))
     val wideScore = SoccerLayout.scoreboard(480f, 24f, 169f, 78f, 124f, 10f, 8f)
@@ -785,10 +878,55 @@ fun main() {
 
     val textOnlyBubble = ReplyBubbleState(12, spoken = false)
     check(textOnlyBubble.visibleEnd == 12 && !textOnlyBubble.waiting)
-    check(WakeStartupPolicy.shouldStart(fromOpenApp = true, optedIn = true, pipReady = true))
-    check(!WakeStartupPolicy.shouldStart(fromOpenApp = true, optedIn = false, pipReady = true))
-    check(!WakeStartupPolicy.shouldStart(fromOpenApp = true, optedIn = true, pipReady = false))
-    check(!WakeStartupPolicy.shouldStart(fromOpenApp = false, optedIn = true, pipReady = true)) // Boot/recovery.
+    val attemptedPictures = mutableListOf<String>()
+    check(PaintingStart.tryEnabledPictures(listOf("unreadable", "good", "unused")) {
+        attemptedPictures += it
+        if (it == "unreadable") PaintingStart.Result.UNREADABLE else PaintingStart.Result.SHOWN
+    } == PaintingStart.Result.SHOWN)
+    check(attemptedPictures == listOf("unreadable", "good"))
+    check(PaintingStart.tryEnabledPictures(listOf(1, 2)) { picture ->
+        check(picture == 1) // A window rejection won't be fixed by decoding another image.
+        PaintingStart.Result.NO_ROOM
+    } == PaintingStart.Result.NO_ROOM)
+    check(PaintingStart.tryEnabledPictures(listOf(1)) { PaintingStart.Result.UNREADABLE } == PaintingStart.Result.UNREADABLE)
+
+    val wakeStartup = WakeStartupPolicy()
+    val app = WakeStartupPolicy.Source.APP
+    val boot = WakeStartupPolicy.Source.BOOT
+    val recovery = WakeStartupPolicy.Source.RECOVERY
+    check(wakeStartup.start(app, true, true, bootEnabled = false, bootMicAllowed = false))
+    check(!wakeStartup.start(app, false, true, bootEnabled = true, bootMicAllowed = true))
+    check(!wakeStartup.start(app, true, false, bootEnabled = true, bootMicAllowed = true))
+    check(!wakeStartup.start(recovery, true, true, bootEnabled = true, bootMicAllowed = true))
+    check(!wakeStartup.appVisible(true, true, true))
+    check(!wakeStartup.start(boot, true, true, bootEnabled = false, bootMicAllowed = true))
+    check(!wakeStartup.start(boot, false, true, bootEnabled = true, bootMicAllowed = false))
+    check(!wakeStartup.start(boot, true, false, bootEnabled = true, bootMicAllowed = false))
+    check(!wakeStartup.appVisible(true, true, true))
+    check(wakeStartup.start(boot, true, true, bootEnabled = true, bootMicAllowed = true))
+    check(!wakeStartup.appVisible(true, true, true))
+    check(!wakeStartup.start(boot, true, true, bootEnabled = true, bootMicAllowed = false))
+    check(wakeStartup.appVisible(true, true, true))
+    check(!wakeStartup.appVisible(true, true, true)) // Reopening after a manual stop doesn't restart the mic.
+    check(!wakeStartup.start(boot, true, true, bootEnabled = true, bootMicAllowed = false))
+    check(!wakeStartup.appVisible(false, true, true)) // Opt-out after boot cancels the deferred start.
+    check(!wakeStartup.appVisible(true, true, true))
+    check(!wakeStartup.start(boot, true, true, bootEnabled = true, bootMicAllowed = false))
+    check(!wakeStartup.appVisible(true, true, false)) // Turning off boot startup also cancels it.
+    check(!wakeStartup.start(boot, true, true, bootEnabled = true, bootMicAllowed = false, openAppAtBoot = true))
+    check(!wakeStartup.takeAppLaunch(unlocked = false, enabled = true))
+    check(wakeStartup.takeAppLaunch(unlocked = true, enabled = true))
+    check(!wakeStartup.takeAppLaunch(unlocked = true, enabled = true))
+    check(wakeStartup.appVisible(true, true, true)) // The mic waits for the real activity.
+    check(!wakeStartup.start(boot, true, true, bootEnabled = true, bootMicAllowed = false, openAppAtBoot = true))
+    check(wakeStartup.appVisible(true, true, true)) // Manual opening consumes both requests.
+    check(!wakeStartup.takeAppLaunch(unlocked = true, enabled = true))
+    check(!wakeStartup.start(boot, true, true, bootEnabled = true, bootMicAllowed = false, openAppAtBoot = true))
+    check(!wakeStartup.takeAppLaunch(unlocked = true, enabled = false))
+    check(!wakeStartup.takeAppLaunch(unlocked = true, enabled = true))
+    val restarted = WakeStartupPolicy()
+    check(!restarted.start(recovery, true, true, bootEnabled = true, bootMicAllowed = false, openAppAtBoot = true))
+    check(!restarted.takeAppLaunch(unlocked = true, enabled = true))
 
     check(TimedRequest.numericDuration("for 20 seconds") == 20_000L)
     check(TimedRequest.numericDuration("wait 1.5 hours") == 5_400_000L)
@@ -877,6 +1015,31 @@ fun main() {
     val edgePet = OverlayBounds.Box(0, 5, 64, 86)
     val edgeBubble = OverlayBounds.Box(6, 99, 48, 26)
     check(OverlayBounds.union(edgePet, edgeBubble) == OverlayBounds.Box(0, 5, 64, 120))
+
+    val overlaySync = OverlayFrameSync()
+    val closedFrame = OverlayBounds.Box(96, 128, 64, 86)
+    val openFrame = OverlayBounds.Box(48, 40, 190, 174)
+    overlaySync.request(closedFrame, 10L)
+    check(overlaySync.canDraw(closedFrame, 10L, screenCoordinates = true))
+    overlaySync.request(openFrame, 20L)
+    check(!overlaySync.canDraw(closedFrame, 25L, screenCoordinates = true))
+    check(!overlaySync.canDraw(openFrame.copy(y = closedFrame.y), 30L, screenCoordinates = true))
+    check(overlaySync.canDraw(openFrame, 35L, screenCoordinates = true))
+    overlaySync.request(closedFrame, 40L)
+    check(!overlaySync.canDraw(openFrame, 41L, screenCoordinates = true))
+    check(overlaySync.canDraw(openFrame, 110L, screenCoordinates = true)) // OEM fallback is bounded.
+    val translatedFrame = closedFrame.copy(y = 140)
+    overlaySync.request(translatedFrame, 120L)
+    check(overlaySync.canDraw(closedFrame, 121L, screenCoordinates = true)) // Ordinary walking is not blocked.
+    val flippedFrame = translatedFrame.copy(y = 90)
+    overlaySync.request(flippedFrame, 130L, DragMotion.Point(0f, 50f))
+    check(!overlaySync.canDraw(translatedFrame, 131L, screenCoordinates = true))
+    check(overlaySync.canDraw(flippedFrame, 132L, screenCoordinates = true))
+    check(OverlayBounds.keyboardEscapeY(150f, 85f, 30f) == 85f)
+    check(OverlayBounds.keyboardEscapeY(150f, 5f, 30f) == 30f)
+    check(OverlayBounds.keyboardEscapeY(30f, 5f, 30f) == null)
+    check(OverlayBounds.keyboardEscapeY(42f, 41.5f, 30f) == null)
+    check(OverlayBounds.keyboardEscapeY(30f, 150f, 20f) == null)
 
     val bubbleClock = SpeechBubbleTiming()
     bubbleClock.hold(null)

@@ -3,8 +3,6 @@ package com.phoneassistant
 import android.graphics.Canvas
 import android.graphics.Path
 import android.graphics.RectF
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import kotlin.math.abs
 import kotlin.random.Random
@@ -65,7 +63,7 @@ class SoccerGame(private val host: PropHost) {
 
     private lateinit var board: ScoreBoard
 
-    private val ui = Handler(Looper.getMainLooper())
+    private val clock = ToyPlayClock()
     private val rnd = Random(SystemClock.uptimeMillis())
 
     /**
@@ -82,39 +80,38 @@ class SoccerGame(private val host: PropHost) {
 
     private var paused = false
     private var cheats = 0
-    private var startedAt = 0L
-    private var nextPipKick = 0L
+    private var nextPipKick = 750L
+    private var nextDecision = 0L
+    private var lastUserPlay: Long? = null
+    private var lastQuip = -4_000L
+    private var nextRoundAt: Long? = null
+    private var clearAt: Long? = null
+    private var stageWidth = 0
+    private var stageHeight = 0
     private var pipChasing = false
 
-    fun start() {
-        startedAt = SystemClock.uptimeMillis()
-        nextPipKick = startedAt + 2600L
-
+    fun start(): Boolean {
         board = ScoreBoard(host, this)
         topGoal = Goal(host, this, pipDefends = false)
         bottomGoal = Goal(host, this, pipDefends = true)
         ball = Ball(host, this)
 
         fitPitch()
-        layOut()
+        if (!layOut()) {
+            clear()
+            return false
+        }
         ballHomeX = ball.posX
         ballHomeY = ball.posY
-        // His own chat box's keyboard may still be on its way out, which would leave the
-        // pitch short. One chance to grow it back, and only if the ball is provably where
-        // it was put: not kicked, not dragged, not drifting. If that cannot be shown the
-        // re-fit is dropped rather than risked later.
-        ui.postDelayed({
-            val untouched = !ball.kicked && ball.atRest() &&
-                abs(ball.posX - ballHomeX) < 1f && abs(ball.posY - ballHomeY) < 1f
-            if (!over && !paused && untouched) refitPitch()
-        }, 800L)
-
         host.say("first to three. tap the ball at my goal. I'll defend, badly.")
         host.feel(PetView.Mood.SMUG, 2600L)
+        return true
     }
 
     /** The whole stage, or just what sits above a keyboard someone is typing on. */
     private fun fitPitch() {
+        stageWidth = host.stageWidth()
+        stageHeight = host.stageHeight()
         pitchTop = host.stageTop().toFloat()
         pitchBottom = host.toysFloor()
     }
@@ -133,38 +130,85 @@ class SoccerGame(private val host: PropHost) {
         val floor = host.toysFloor()
         if (floor <= pitchBottom) return
         pitchBottom = floor
-        layOut()
+        if (!layOut()) clear()
     }
 
     /** The pitch's edges, for the ball's own physics. */
     fun pitchTopY(): Float = pitchTop
     fun pitchFloorY(): Float = pitchBottom
 
-    private fun layOut() {
+    private fun layOut(): Boolean {
         val w = host.stageWidth().toFloat()
         val top = pitchTop
         val bottom = pitchBottom
+        if (w < maxOf(topGoal.windowW, bottomGoal.windowW, board.windowW) ||
+            bottom - top < topGoal.windowH + bottomGoal.windowH + ball.windowH + host.px(8f)) return false
 
         val goalLeft = (w - topGoal.windowW) / 2f
         val goalTop = top + host.px(4f)
         val score = SoccerLayout.scoreboard(w, top, goalLeft, goalTop + topGoal.windowH,
             board.windowW.toFloat(), margin = host.px(10f), gap = host.px(8f))
-        board.bring(score.x, score.y)
-        topGoal.bring(goalLeft, goalTop)
-        bottomGoal.bring(
+        if (!board.bring(score.x, score.y) || !topGoal.bring(goalLeft, goalTop) || !bottomGoal.bring(
             w / 2f - bottomGoal.windowW / 2f,
             bottom - bottomGoal.windowH - host.px(4f)
-        )
-        ball.bring(w / 2f - ball.windowW / 2f, (top + bottom) / 2f - ball.windowH / 2f)
+        ) || !ball.bring(w / 2f - ball.windowW / 2f, (top + bottom) / 2f - ball.windowH / 2f)) return false
         topGoal.rememberOrigin()
         bottomGoal.rememberOrigin()
+        return true
     }
 
-    fun isPaused(): Boolean = paused || over
+    fun isPaused(): Boolean = paused || over || host.toyPlayPaused()
+
+    private fun cancelChase() = host.cancelPetWalk(board)
+
+    fun userPlayed() {
+        lastUserPlay = clock.elapsed
+        nextDecision = clock.elapsed
+    }
+
+    private fun petFeet() = DragMotion.Point(host.petCentreX(), host.petFeetY())
+
+    private fun DragMotion.Point.dpPoint(): DragMotion.Point = DragMotion.Point(x / host.px(1f), y / host.px(1f))
+    private fun canRespond() = !isPaused() && !ball.inToyMotion && host.petCanPlay(board)
+
+    private fun pipKick(at: DragMotion.Point, save: Boolean) {
+        val behindGoal = at.y <= topGoal.lineY
+        val aimY = if (behindGoal) (pitchTop + pitchBottom) / 2f else topGoal.lineY
+        val aim = SoccerAi.aim(at.dpPoint(), topGoal.centreX / host.px(1f), aimY / host.px(1f),
+            rnd.nextFloat() * 0.42f - 0.21f)
+        nextPipKick = clock.elapsed + SoccerAi.KICK_COOLDOWN_MS
+        nextDecision = clock.elapsed + SoccerAi.THINK_MS
+        val power = when {
+            behindGoal -> SoccerBallTuning.CLEAR_KICK
+            save -> SoccerBallTuning.SAVE_KICK
+            else -> SoccerBallTuning.PIP_KICK
+        }
+        ball.kick(up = !behindGoal, aim = aim, power = host.px(power))
+        if (clock.elapsed - lastQuip >= 3_600L) {
+            lastQuip = clock.elapsed
+            host.feel(PetView.Mood.SMUG, 1200L)
+            host.say(if (save) "not past me. well, not this time." else Lines.pick(PIP_KICK_LINES))
+        }
+    }
+
+    /** A save requires actual contact with Pip before the ball crosses his goal line. */
+    internal fun trySave(from: DragMotion.Point, to: DragMotion.Point, goalCrossingX: Float?): Boolean {
+        if (clock.elapsed < nextPipKick || to.y <= from.y || from.y >= bottomGoal.lineY) return false
+        val feet = petFeet()
+        if (feet.y >= bottomGoal.lineY - host.px(8f)) return false
+        val end = if (goalCrossingX == null) to else DragMotion.Point(goalCrossingX, bottomGoal.lineY)
+        val hit = SoccerAi.contact(feet.dpPoint(), from.dpPoint(), end.dpPoint()) ?: return false
+        if (!canRespond()) return false
+        val point = DragMotion.Point(host.px(hit.x), host.px(hit.y))
+        ball.moveTo(point.x - ball.windowW / 2f, point.y - ball.windowH / 2f)
+        pipKick(point, save = true)
+        return true
+    }
 
     fun scored(pipPoint: Boolean) {
-        if (over) return
+        if (isPaused()) return
         paused = true
+        cancelChase()
 
         if (pipPoint) pipScore++ else youScore++
         board.invalidate()
@@ -174,16 +218,7 @@ class SoccerGame(private val host: PropHost) {
             Lines.pick(if (pipPoint) PIP_GOAL_LINES else YOUR_GOAL_LINES)
         )
 
-        if (youScore >= TARGET || pipScore >= TARGET) {
-            ui.postDelayed({ finish() }, 1500L)
-        } else {
-            ui.postDelayed({
-                if (over || packedAway()) return@postDelayed
-                ball.reset()
-                paused = false
-                nextPipKick = SystemClock.uptimeMillis() + 2200L
-            }, 1500L)
-        }
+        nextRoundAt = clock.elapsed + 1_500L
     }
 
     fun goalMoved() {
@@ -191,51 +226,90 @@ class SoccerGame(private val host: PropHost) {
         cheats++
         host.feel(PetView.Mood.ANNOYED, 2800L)
         if (cheats >= 3) {
-            over = true
-            paused = true
+            endRound(after = 3_400L)
             host.say("three goal moves. that's the limit. *flops* rematch later.")
-            ui.postDelayed({ clear() }, 3400L)
         } else {
             host.say(Lines.pick(CHEAT_LINES))
         }
     }
 
-    /** Runs about thirty times a second: Pip's turn, and the clock. */
+    /** Runs only from the match's own scoreboard, never from a detached timer. */
     fun referee(now: Long) {
-        if (over || paused) return
-        if (now - startedAt > TIME_LIMIT_MS) {
-            timeUp()
+        if (packedAway()) return
+        val blocked = host.toyPlayPaused()
+        val elapsed = clock.frame(now, blocked)
+        if (blocked) return
+        if (over) {
+            if (clearAt?.let { elapsed >= it } == true) clear()
             return
         }
-        if (pipChasing) return
-        if (!ball.atRest() || ball.movingByUser) return
-        if (now - ball.restingSince < 1000L) return
-        if (now < nextPipKick) return
-
-        pipChasing = true
-        nextPipKick = now + 3400L
-        val aimX = ball.centreX
-        host.petWalkTo(
-            aimX,
-            ball.centreY + host.petHeight() / 2f + host.px(6f)
-        ) {
-            pipChasing = false
-            if (over || paused || packedAway() || ball.movingByUser) return@petWalkTo
-            // If they booted it away while he was plodding over, he kicks at nothing.
-            if (abs(ball.centreX - aimX) > host.px(26f)) {
-                host.say("...it moved. that's fine. I meant to do that.")
-                return@petWalkTo
-            }
-            host.feel(PetView.Mood.SMUG, 1600L)
-            ball.kick(up = true, aim = rnd.nextFloat() * 1.8f - 0.9f, power = host.px(560f))
-            host.say(Lines.pick(PIP_KICK_LINES))
-            nextPipKick = SystemClock.uptimeMillis() + 2600L
+        if (host.stageWidth() != stageWidth || host.stageHeight() != stageHeight) {
+            // Rotation invalidates old goal coordinates, not either player's score.
+            cancelChase()
+            fitPitch()
+            if (!layOut()) { clear(); return }
+            ball.reset()
+        }
+        nextRoundAt?.let { next ->
+            if (elapsed < next) return
+            nextRoundAt = null
+            if (youScore >= TARGET || pipScore >= TARGET) { finish(); return }
+            ball.reset()
+            paused = false
+            nextPipKick = elapsed + 750L
+            nextDecision = elapsed
+            lastUserPlay = null
+        }
+        if (elapsed > TIME_LIMIT_MS) { timeUp(); return }
+        if (!paused && elapsed >= 800L && !pipChasing && ball.atRest() && !ball.movingByUser &&
+            ball.posX == ballHomeX && ball.posY == ballHomeY && ball.restingSince == 0L && cheats == 0) refitPitch()
+        if (!canRespond()) return
+        val feet = petFeet().dpPoint()
+        val state = ball.motion()
+        val held = ball.movingByUser
+        val pressing = held || lastUserPlay?.let { elapsed - it < 1_500L } == true
+        if (elapsed < 800L && !pressing) return
+        val scale = host.px(1f)
+        // At the top edge Pip can't stand any higher. Let him head a stranded ball
+        // only if it actually touches his body; don't let him shoot it from a distance.
+        val edge = (host.stageTop() + host.petHeight()) / scale + 2f
+        val head = DragMotion.Point(feet.x, feet.y - host.petHeight() / scale + 17f)
+        val header = state.centre.y < edge - SoccerAi.CONTACT &&
+            SoccerAi.contact(state.centre, head, feet) != null
+        if (!held && elapsed >= nextPipKick && state.vy >= -160f &&
+            (header || SoccerAi.contact(feet, state.centre, state.centre) != null)) {
+            pipKick(DragMotion.Point(ball.centreX, ball.centreY), save = state.vy > 80f)
+            return
+        }
+        if (elapsed < nextDecision) return
+        nextDecision = elapsed + SoccerAi.THINK_MS
+        val radius = ball.windowW / 2f
+        val pitch = SoccerAi.Pitch(radius / scale, (stageWidth - radius) / scale,
+            (pitchTop + radius) / scale, (pitchBottom - radius) / scale,
+            bottomGoal.mouthLeft / scale, bottomGoal.mouthRight / scale, bottomGoal.lineY / scale)
+        val plan = SoccerAi.plan(feet, state, pitch, pressing)
+        if (held && plan.role != SoccerAi.Role.GUARD) {
+            cancelChase()
+            return
+        }
+        val x = host.px(plan.feet.x)
+        val y = host.px(plan.feet.y) - host.petHeight() / 2f + host.px(6f)
+        if (host.petIsNear(x, y, host.px(4f))) {
+            cancelChase()
+        } else if (!host.retargetPetWalk(board, x, y)) {
+            pipChasing = host.petWalkTo(board, x, y) { pipChasing = false }
         }
     }
 
-    private fun timeUp() {
+    private fun endRound(after: Long) {
         over = true
         paused = true
+        cancelChase()
+        clearAt = clock.elapsed + after
+    }
+
+    private fun timeUp() {
+        endRound(after = 3_800L)
         val line = when {
             youScore > pipScore -> "time. you're ahead. I want a recount."
             pipScore > youScore -> "time. I win. being this good is tiring."
@@ -243,13 +317,11 @@ class SoccerGame(private val host: PropHost) {
         }
         host.feel(if (youScore > pipScore) PetView.Mood.ANNOYED else PetView.Mood.SMUG, 5000L)
         host.say(line)
-        ui.postDelayed({ clear() }, 3800L)
     }
 
     private fun finish() {
         if (over || packedAway()) return
-        over = true
-        paused = true
+        endRound(after = 4_500L)
         val youWon = youScore > pipScore
         host.feel(if (youWon) PetView.Mood.ANNOYED else PetView.Mood.SMUG, 6000L)
         host.say(
@@ -259,13 +331,13 @@ class SoccerGame(private val host: PropHost) {
                 "$pipScore to $youScore. I'll take a trophy, or a snack."
             }
         )
-        ui.postDelayed({ clear() }, 4500L)
     }
 
     /** Packs the whole game away. */
     fun clear() {
         // Over first: nothing queued may rebuild a pitch that is being packed away.
         over = true
+        cancelChase()
         // Old match callbacks must never remove the next match's windows.
         listOf(board, topGoal, bottomGoal, ball).forEach(host::dropProp)
     }
@@ -402,6 +474,9 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
 
     fun atRest(): Boolean = !moving
 
+    internal fun motion(): SoccerAi.Ball = SoccerAi.Ball(DragMotion.Point(centreX / dp(1f), centreY / dp(1f)),
+        vx / dp(1f), vy / dp(1f))
+
     fun kick(up: Boolean, aim: Float, power: Float) {
         kicked = true
         vy = if (up) -power else power
@@ -427,8 +502,9 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
 
     override fun onTap(x: Float, y: Float) {
         if (game.isPaused()) return
+        game.userPlayed()
         val aim = ((x / width.toFloat()) - 0.5f) * 2f
-        kick(up = false, aim = aim, power = host.px(1150f))
+        kick(up = false, aim = aim, power = dp(SoccerBallTuning.PLAYER_KICK))
         if (scan == 0f) {
             scan = 1f
             host.feel(PetView.Mood.SMUG, 1200L)
@@ -436,12 +512,14 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
     }
 
     override fun onDragStarted() {
+        game.userPlayed()
         vx = 0f
         vy = 0f
         moving = false
     }
 
     override fun onDragFinished() {
+        game.userPlayed()
         restingSince = SystemClock.uptimeMillis()
     }
 
@@ -453,7 +531,7 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
         lastAt = now
 
         if (!moving) return
-        if (abs(vx) < 2f && abs(vy) < 2f) {
+        if (abs(vx) < dp(SoccerBallTuning.STOP_SPEED) && abs(vy) < dp(SoccerBallTuning.STOP_SPEED)) {
             moving = false
             vx = 0f
             vy = 0f
@@ -461,8 +539,9 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
             return
         }
 
-        vx *= 0.985f
-        vy *= 0.985f
+        val retention = SoccerBallTuning.retainedSpeed(dt)
+        vx *= retention
+        vy *= retention
 
         var nx = posX + vx * dt
         var ny = posY + vy * dt
@@ -470,23 +549,26 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
         val maxX = (host.stageWidth() - windowW).toFloat()
         if (nx <= 0f) {
             nx = 0f
-            vx = -vx * 0.7f
+            vx = -vx * SoccerBallTuning.REBOUND
         }
         if (nx >= maxX) {
             nx = maxX
-            vx = -vx * 0.7f
+            vx = -vx * SoccerBallTuning.REBOUND
         }
 
-        val cx = nx + windowW / 2f
-        val cy = ny + windowH / 2f
+        val from = DragMotion.Point(centreX, centreY)
+        val to = DragMotion.Point(nx + windowW / 2f, ny + windowH / 2f)
         val top = game.topGoal
         val bottom = game.bottomGoal
+        val topCrossing = if (vy < 0f) SoccerAi.crossingX(from, to, top.lineY) else null
+        val bottomCrossing = if (vy > 0f) SoccerAi.crossingX(from, to, bottom.lineY) else null
 
-        if (cx in top.mouthLeft..top.mouthRight && cy < top.lineY) {
+        if (topCrossing != null && topCrossing in top.mouthLeft..top.mouthRight) {
             game.scored(pipPoint = true)
             return
         }
-        if (cx in bottom.mouthLeft..bottom.mouthRight && cy > bottom.lineY) {
+        if (game.trySave(from, to, bottomCrossing)) return
+        if (bottomCrossing != null && bottomCrossing in bottom.mouthLeft..bottom.mouthRight) {
             game.scored(pipPoint = false)
             return
         }
@@ -495,11 +577,11 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
         val floorY = game.pitchFloorY() - windowH
         if (ny <= topEdge) {
             ny = topEdge
-            vy = -vy * 0.7f
+            vy = -vy * SoccerBallTuning.REBOUND
         }
         if (ny >= floorY) {
             ny = floorY
-            vy = -vy * 0.7f
+            vy = -vy * SoccerBallTuning.REBOUND
         }
 
         spin = (spin + (vx + vy * 0.30f) * dt * 0.5f) % 360f
@@ -555,6 +637,8 @@ class ScoreBoard(host: PropHost, private val game: SoccerGame) : Prop(host) {
     private val rulePaint = text(0xFFFFEAC1.toInt(), 7.6f, true)
     private val border = RectF()
     private val pipScores = (0..SoccerGame.TARGET).map(Int::toString)
+
+    internal override fun keepsToy(now: Long): Boolean = true // The match owns its full clock and cleanup.
 
     override fun onFrame() {
         game.referee(SystemClock.uptimeMillis())

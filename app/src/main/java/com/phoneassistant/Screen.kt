@@ -102,6 +102,8 @@ object Screen {
         val app = root.packageName?.toString()?.takeIf { it.isNotBlank() && it != svc.packageName }
             ?: return null
         if (expectedApp != null && app != expectedApp) return null
+        // Model-facing snapshots must not collect conversation bodies from messaging apps.
+        if (PrivateMessageRead.messagingPackage(svc, app)) return null
         val windowId = root.windowId
         val items = ArrayList<Item>()
         val localFeed = feed

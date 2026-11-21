@@ -7,6 +7,9 @@ internal object SetupPolicy {
     enum class Step { WELCOME, API, PERMISSIONS }
     enum class Check { OK, MISSING, URL, KEY, MODEL, LIMIT, PROVIDER, NETWORK, RESPONSE }
 
+    // Shared by the initial setup and Pip settings, in display order.
+    enum class Permission { NOTIFICATIONS, NOTIFICATION_ACCESS, OVERLAY, MICROPHONE, USAGE, ACCESSIBILITY }
+
     /** An optional replay must earn its own proof without resetting the completed install. */
     fun proofForRun(replay: Boolean, storedProof: Boolean, replayProof: Boolean): Boolean =
         if (replay) replayProof else storedProof
