@@ -814,6 +814,16 @@ fun main() {
     wakePhrase.arm(27_000)
     check(wakePhrase.accept("Too late", 38_000) == null)
 
+    val petBox = OverlayBounds.Box(180, 260, 64, 86)
+    val abovePet = OverlayBounds.Box(96, 190, 232, 62)
+    val belowPet = OverlayBounds.Box(96, 354, 232, 84)
+    check(OverlayBounds.union(petBox, null) == petBox)
+    check(OverlayBounds.union(petBox, abovePet) == OverlayBounds.Box(96, 190, 232, 156))
+    check(OverlayBounds.union(petBox, belowPet) == OverlayBounds.Box(96, 260, 232, 178))
+    val edgePet = OverlayBounds.Box(0, 5, 64, 86)
+    val edgeBubble = OverlayBounds.Box(6, 99, 48, 26)
+    check(OverlayBounds.union(edgePet, edgeBubble) == OverlayBounds.Box(0, 5, 64, 120))
+
     val bubbleClock = SpeechBubbleTiming()
     bubbleClock.hold(null)
     repeat(500) { bubbleClock.advance(it * 33L, visible = true, animate = true) }

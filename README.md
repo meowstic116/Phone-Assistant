@@ -245,7 +245,9 @@ existing explicit voice choice stays selected.
 Pip doesn't send reply text to a speech provider. The separate chat API still generates
 chat replies when needed, whether or not speech is enabled.
 
-A single overlay shows the animated dots, captions, and text without swapping windows.
+Pip’s own overlay shows the animated dots, captions, and text without opening a second
+window. **Pip settings → Voice → Preview reply bubble** tests the display without voice
+or the chat API.
 The dots stay animated while Pip prepares a spoken reply. When playback
 begins, the bubble reveals words without resizing. Android engines may report word ranges;
 Kokoro estimates word timing from the playback position. If audio is unavailable or times
@@ -318,7 +320,7 @@ it were.
 ## Setup on the phone
 
 To sideload without building, download the latest signed APK:
-[`phone-assistant-0.181-debug.apk`](dist/phone-assistant-0.181-debug.apk).
+[`phone-assistant-0.182-debug.apk`](dist/phone-assistant-0.182-debug.apk).
 The `dist/` directory also contains APKs from earlier releases.
 
 Tagged builds are also published as GitHub Releases by
