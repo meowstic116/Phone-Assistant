@@ -22,6 +22,21 @@ object Diag {
     /** One failure: what it was, when it first happened, and how many times since. */
     data class Event(val text: String, val at: Long, val count: Int = 1)
 
+    // These are fixed status messages, not recognition transcripts or reply contents.
+    @Volatile var lastWakeInput: Event? = null
+        private set
+    @Volatile var lastWakeOutcome: Event? = null
+        private set
+    @Volatile var lastHandsFreeCommand: Event? = null
+        private set
+    @Volatile var lastHandsFreeAudio: Event? = null
+        private set
+
+    internal fun wakeInput(status: WakeFeedback) { lastWakeInput = Event(status.message, now()) }
+    internal fun wakeOutcome(status: WakeFeedback) { lastWakeOutcome = Event(status.message, now()) }
+    internal fun handsFreeCommand(status: String) { lastHandsFreeCommand = Event(status, now()) }
+    internal fun handsFreeAudio(status: String) { lastHandsFreeAudio = Event(status, now()) }
+
     /** The last refused or failed request. Null until the brain has been asked something. */
     @Volatile
     var lastApiError: Event? = null

@@ -11,6 +11,7 @@ import android.media.session.PlaybackState
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
+import android.provider.MediaStore
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
@@ -126,32 +127,41 @@ class PipMediaAccess : NotificationListenerService() {
         }
 
         /** Bounded to an existing local Spotify session; never fall back to media keys or taps. */
-        internal fun controlSpotify(ctx: Context, action: CarCommand.Spotify): String {
-            if (!enabled(ctx)) return "Allow Pip’s Notification access when you're parked."
+        internal fun controlSpotify(ctx: Context, action: CarCommand.Media): DrivingVoice.Result {
+            fun unavailable(message: String) = DrivingVoice.Result(message)
             return try {
+                if (!enabled(ctx)) return unavailable("Allow Pip’s Notification access when you're parked.")
                 val manager = ctx.getSystemService(MediaSessionManager::class.java)
-                    ?: return "I couldn’t reach Android’s media controls."
+                    ?: return unavailable("I couldn’t reach Android’s media controls.")
                 val spotify = manager.getActiveSessions(component(ctx)).firstOrNull {
-                    it.packageName == "com.spotify.music" &&
+                    it.packageName == SpotifyQuickPlan.PACKAGE &&
                         it.playbackInfo?.playbackType == android.media.session.MediaController.PlaybackInfo.PLAYBACK_TYPE_LOCAL
-                } ?: return "There’s no local Spotify session yet. Start Spotify when parked."
-                val available = spotify.playbackState?.actions ?: return "Spotify isn’t offering playback controls."
+                } ?: return unavailable("There’s no local Spotify session yet. Start Spotify when parked.")
+                val available = spotify.playbackState?.actions ?: 0L
                 val required = when (action) {
                     CarCommand.Spotify.PLAY -> PlaybackState.ACTION_PLAY
                     CarCommand.Spotify.PAUSE -> PlaybackState.ACTION_PAUSE
                     CarCommand.Spotify.NEXT -> PlaybackState.ACTION_SKIP_TO_NEXT
                     CarCommand.Spotify.PREVIOUS -> PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                    is CarCommand.SpotifyPlaylist -> PlaybackState.ACTION_PLAY_FROM_SEARCH
                 }
-                if (available and required == 0L) return "Spotify isn’t offering that control right now."
+                if (available and required == 0L) return unavailable(if (action is CarCommand.SpotifyPlaylist) {
+                    "Spotify isn’t offering playlist search to Pip. Use Android Auto’s voice assistant, or try again when parked."
+                } else "Spotify isn’t offering that control right now.")
                 val controls = spotify.transportControls
                 when (action) {
                     CarCommand.Spotify.PLAY -> controls.play()
                     CarCommand.Spotify.PAUSE -> controls.pause()
                     CarCommand.Spotify.NEXT -> controls.skipToNext()
                     CarCommand.Spotify.PREVIOUS -> controls.skipToPrevious()
+                    is CarCommand.SpotifyPlaylist -> controls.playFromSearch(action.title, Bundle().apply {
+                        putString(MediaStore.EXTRA_MEDIA_FOCUS, MediaStore.Audio.Playlists.ENTRY_CONTENT_TYPE)
+                        putString(MediaStore.EXTRA_MEDIA_PLAYLIST, action.title)
+                    })
                 }
-                "I sent that to Spotify."
-            } catch (_: RuntimeException) { "I couldn’t reach Spotify’s playback controls." }
+                DrivingVoice.Result(if (action is CarCommand.SpotifyPlaylist) "I sent the playlist request to Spotify."
+                    else "I sent that to Spotify.", handedOff = true)
+            } catch (_: RuntimeException) { unavailable("I couldn’t reach Spotify’s playback controls.") }
         }
 
         fun answer(ctx: Context): String {

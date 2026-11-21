@@ -2333,28 +2333,31 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun handleVoice(text: String, stillListening: () -> Boolean, done: (WakeFeedback) -> Unit) {
-        if (!VoiceSettings.drivingEnabled(this)) {
+        val command = CarCommand.parse(text)
+        val task = command != null || CarCommand.looksLikeTask(text)
+        if (!task && !VoiceSettings.drivingEnabled(this)) {
             handleOrdinaryVoice(text, stillListening, done, driving = false)
             return
         }
-        val command = CarCommand.parse(text)
         DrivingVoice.projected(this) { projected ->
             if (instance !== this || ending || !stillListening()) { done(WakeFeedback.BUSY); return@projected }
-            if (!VoiceSettings.drivingEnabled(this)) {
-                handleOrdinaryVoice(text, stillListening, done, driving = false)
-                return@projected
+            val enabled = VoiceSettings.drivingEnabled(this)
+            val result = when (CarVoiceRoute.choose(enabled, projected, supported = command != null, task = task)) {
+                CarVoiceRoute.EXECUTE -> {
+                    if (Agent.running()) DrivingVoice.Result("I’m already working on another phone task. Try again in a moment.")
+                    else DrivingVoice.execute(this, checkNotNull(command))
+                }
+                CarVoiceRoute.DISABLED -> DrivingVoice.Result("Hands-free driving commands are off in Pip settings. Change that only when parked.")
+                CarVoiceRoute.CONNECTION_UNVERIFIED -> DrivingVoice.Result("I couldn’t verify an Android Auto connection. Try again when parked.")
+                CarVoiceRoute.UNSUPPORTED -> DrivingVoice.Result("That’s not a hands-free driving command. Try a Spotify control or a Google Maps destination, or wait until parked.")
+                CarVoiceRoute.ORDINARY, CarVoiceRoute.REVIEW_WHEN_PARKED -> {
+                    handleOrdinaryVoice(text, stillListening, done, driving = projected == true || projected == null && enabled)
+                    return@projected
+                }
             }
-            if (command != null) {
-                if (Agent.running()) { done(WakeFeedback.BUSY); return@projected }
-                // Never let the chat model or accessibility agent execute an unconfirmed car action.
-                val response = if (projected == true) DrivingVoice.execute(this, command) else
-                    "I couldn’t verify an Android Auto connection. Try again when parked."
-                PipVoice.reply(this, response, allowLocked = true)
-                done(WakeFeedback.CAR_COMMAND)
-            } else {
-                // Unknown projection status is treated conservatively: no phone UI for confirmations.
-                handleOrdinaryVoice(text, stillListening, done, driving = projected != false)
-            }
+            Diag.handsFreeCommand(result.message)
+            PipVoice.reply(this, result.message, allowLocked = true)
+            done(if (result.handedOff) WakeFeedback.CAR_COMMAND else WakeFeedback.CAR_NOT_RUN)
         }
     }
 
@@ -2362,15 +2365,27 @@ class OverlayService : Service(), PropHost {
                                     driving: Boolean) {
         fun review(): WakeFeedback {
             if (!driving) { confirmVoiceRequest(text); return WakeFeedback.REVIEW }
-            PipVoice.reply(this, "That’s not a hands-free driving command. Try again when parked.", allowLocked = true)
-            return WakeFeedback.CAR_COMMAND
+            val reason = "That’s not a hands-free driving command. Try again when parked."
+            Diag.handsFreeCommand(reason)
+            PipVoice.reply(this, reason, allowLocked = true)
+            return WakeFeedback.CAR_NOT_RUN
         }
         val waiting = awaitingReply && SystemClock.uptimeMillis() - replyAskedAt < 15_000L
-        if (!stillListening() || Agent.running() || waiting) { done(WakeFeedback.BUSY); return }
-        if (!inputField?.text.isNullOrBlank()) { done(WakeFeedback.DRAFT); return }
+        if (!stillListening() || Agent.running() || waiting) {
+            if (driving && stillListening() && !PipVoice.microphoneBlocked()) {
+                PipVoice.reply(this, "I’m busy with another request. Try again in a moment.", allowLocked = true)
+            }
+            done(WakeFeedback.BUSY)
+            return
+        }
+        if (!inputField?.text.isNullOrBlank()) {
+            if (driving) PipVoice.reply(this, "I couldn’t start that request. There’s an unfinished draft on the phone. Check it when parked.", allowLocked = true)
+            done(WakeFeedback.DRAFT)
+            return
+        }
         // Tapping Pip first opens an empty composer. It shouldn't swallow a spoken request.
         if (inputBar != null) closeChat()
-        if (JobProgress.routePhoneLocally(text) || PhoneContext.mayInspect(text) ||
+        if (CarCommand.looksLikeTask(text) || JobProgress.routePhoneLocally(text) || PhoneContext.mayInspect(text) ||
             PhoneContext.asksForAppLabel(text) || NowPlaying.requested(text) || MessageNotifications.request(text) != null) {
             done(review())
             return
@@ -2383,8 +2398,25 @@ class OverlayService : Service(), PropHost {
         if (screenUsable()) startThinking()
         // No app/screen context, local phone shortcuts, toy reactions or memory changes occur
         // on an unconfirmed voice turn. Only a later tap on the ordinary Send button can act.
+        // The wake listener pauses capture until this turn completes. A slow chat provider
+        // must not hold the microphone indefinitely or deliver a reply after it has resumed.
+        var timedOut = false
+        val deadline = Runnable {
+            timedOut = true
+            if (instance === this && !ending && ChatTurns.isCurrent(turn)) {
+                ChatTurns.begin() // Also invalidate any queued provider work for this turn.
+                awaitingReply = false
+                hideThinking()
+                leaveAttention()
+                if (stillListening()) PipVoice.reply(this, "My chat reply took too long. You can try again.", allowLocked = true)
+            }
+            done(WakeFeedback.CHAT_TIMED_OUT)
+        }
+        handler.postDelayed(deadline, 18_000L)
         AssistantBrain.reply(this, text, turn = turn, handsFree = true, voiceContext = previousVoice) { ok, reply ->
             handler.post {
+                if (timedOut) return@post
+                handler.removeCallbacks(deadline)
                 var result = WakeFeedback.BUSY
                 try {
                     if (instance !== this || ending || !ChatTurns.isCurrent(turn)) return@post

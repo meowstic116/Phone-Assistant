@@ -22,7 +22,7 @@ kotlinc app/src/main/java/com/phoneassistant/JobProgress.kt app/src/main/java/co
   app/src/main/java/com/phoneassistant/ReplyBubbleState.kt app/src/main/java/com/phoneassistant/KokoroPcm.kt \
   app/src/main/java/com/phoneassistant/SpeechBubbleTiming.kt app/src/main/java/com/phoneassistant/WakePhrase.kt \
   app/src/main/java/com/phoneassistant/WakeStartupPolicy.kt app/src/main/java/com/phoneassistant/VoiceExchange.kt \
-  app/src/main/java/com/phoneassistant/CarCommand.kt app/src/main/java/com/phoneassistant/SpontaneousToyChoice.kt \
+  app/src/main/java/com/phoneassistant/CarCommand.kt app/src/main/java/com/phoneassistant/WakeFeedback.kt app/src/main/java/com/phoneassistant/SpontaneousToyChoice.kt \
   app/src/main/java/com/phoneassistant/TimedRequest.kt app/src/main/java/com/phoneassistant/PaintingStart.kt \
   tests/JobProgressTest.kt \
   -include-runtime -d "$tmp/job-progress.jar"

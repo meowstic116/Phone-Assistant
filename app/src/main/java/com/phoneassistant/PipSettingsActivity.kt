@@ -132,7 +132,7 @@ class PipSettingsActivity : Activity() {
         refreshWakeAction()
 
         heading("Hands-free driving")
-        text("Set up and test while parked. With Android Auto connected, use ‘Pip, navigate to [destination]’ or ‘Pip, pause Spotify.’ Google Maps must be installed; Spotify needs an active session and Pip’s Now playing permission. Enable spoken replies to hear the result. Other phone actions still need review when parked.")
+        text("Set up and test while parked. With Android Auto connected, use ‘Pip, navigate to [destination]’ or ‘Pip, pause Spotify.’ Google Maps must be installed; Spotify needs an active local session and Android Notification access for Pip. Say ‘play Emo Route Mix’ for a named mix; this works only if Spotify exposes playlist search to Pip. Enable spoken replies to hear the result. Other phone actions still need review when parked.")
         toggle("Allow hands-free driving commands", VoiceSettings.drivingEnabled(this)) {
             VoiceSettings.setDrivingEnabled(this, it)
         }
