@@ -10,6 +10,8 @@ internal enum class WakeFeedback(val message: String, val canSpeak: Boolean = fa
     SPEAK_NOW("Speak now. You don’t need to say Pip’s name."),
     NO_NAME("Speech didn’t sound addressed to Pip. Say his name or try Speak now.", true),
     NO_MESSAGE("No message heard. Try again or tap Speak now.", true),
+    MIC_RESTARTING("Microphone capture was interrupted. Reopening it…"),
+    MIC_MUTED("Android is silencing Pip’s microphone. Check microphone access or close the other app using it."),
     MIC_SILENT("No microphone signal. Check Android’s Mic access and close other apps using the mic."),
     SENDING("Message heard. Waiting for Pip’s reply…"),
     PLAYING("Microphone paused while Pip speaks."),
@@ -26,9 +28,12 @@ internal enum class WakeFeedback(val message: String, val canSpeak: Boolean = fa
     START_FAILED("Android didn’t start listening. Check microphone permission and try again with Pip settings open.");
 
     val isMicEvent: Boolean get() = when (this) {
-        NAME_HEARD, SPEAK_NOW, NO_NAME, NO_MESSAGE, MIC_SILENT, SENDING, ENGINE_FAILED, MIC_FAILED, START_FAILED -> true
+        NAME_HEARD, SPEAK_NOW, NO_NAME, NO_MESSAGE, MIC_RESTARTING, MIC_MUTED, MIC_SILENT, SENDING, ENGINE_FAILED, MIC_FAILED, START_FAILED -> true
         else -> false
     }
 
-    val isOutcome: Boolean get() = this in setOf(REPLIED, CAR_COMMAND, CAR_NOT_RUN, REVIEW, DRAFT, BUSY, CHAT_FAILED, CHAT_TIMED_OUT)
+    val isOutcome: Boolean get() = when (this) {
+        REPLIED, CAR_COMMAND, CAR_NOT_RUN, REVIEW, DRAFT, BUSY, CHAT_FAILED, CHAT_TIMED_OUT -> true
+        else -> false
+    }
 }

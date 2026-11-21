@@ -81,6 +81,7 @@ internal object PaintingGallery {
                     while (true) {
                         val n = input.read(buffer)
                         if (n < 0) break
+                        if (n == 0) throw IOException("Image import made no progress")
                         total += n
                         if (total > MAX_SOURCE_BYTES) throw IOException("Image exceeds input limit")
                         out.write(buffer, 0, n)

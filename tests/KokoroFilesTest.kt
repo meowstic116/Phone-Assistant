@@ -23,5 +23,22 @@ fun main(args: Array<String>) {
     check(copied == bytes.size.toLong() && file.readBytes().contentEquals(bytes))
     check(runCatching { KokoroFiles.copyVerified(bytes.inputStream(), file, 2, hash) {} }.isFailure)
     check(runCatching { KokoroFiles.copyVerified(bytes.inputStream(), file, bytes.size.toLong(), "wrong") {} }.isFailure)
+    var ticks = 0L
+    val stalled = runCatching {
+        KokoroFiles.copyVerified(bytes.inputStream(), file, bytes.size.toLong(), hash,
+            budgetNanos = 2, nanoTime = { ticks++ }) { error("Timed out reads must not be written") }
+    }.exceptionOrNull()
+    check(stalled is java.net.SocketTimeoutException && file.length() == 0L)
+    val noProgress = object : java.io.InputStream() {
+        override fun read() = error("Expected a bulk read")
+        override fun read(b: ByteArray, off: Int, len: Int) = 0
+    }
+    check(runCatching { KokoroFiles.copyVerified(noProgress, file, bytes.size.toLong(), hash) {} }
+        .exceptionOrNull() is java.io.IOException)
+    Thread.currentThread().interrupt()
+    try {
+        check(runCatching { KokoroFiles.copyVerified(bytes.inputStream(), file, bytes.size.toLong(), hash) {} }
+            .exceptionOrNull() is java.io.InterruptedIOException)
+    } finally { Thread.interrupted() }
     println("Kokoro archive and download verification tests passed.")
 }

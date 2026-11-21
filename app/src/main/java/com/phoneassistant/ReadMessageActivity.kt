@@ -12,12 +12,13 @@ import android.widget.TextView
 
 /** Shares are untrusted input. Show them locally and require a tap before speaking. */
 class ReadMessageActivity : Activity() {
+    private var playback: Long? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         if (!PipMediaAccess.canShowMessage(this)) { finish(); return }
-        val shared = if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
-            runCatching { intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() }.getOrNull()
+        val shared = if (savedInstanceState == null && intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            runCatching { intent.getCharSequenceExtra(Intent.EXTRA_TEXT) }.getOrNull()
         } else null
         // Don't retain or reprocess a shared message on rotation or process recreation.
         intent = Intent()
@@ -32,15 +33,19 @@ class ReadMessageActivity : Activity() {
         val status = TextView(this)
         fun read(value: CharSequence?) {
             if (!PipMediaAccess.canShowMessage(this)) return
-            val text = value?.toString()?.takeIf { it.isNotBlank() }
-            if (text == null) { status.text = "No message text was provided."; return }
+            if (value == null) { status.text = "No message text was provided."; return }
+            if (value.length > android.speech.tts.TextToSpeech.getMaxSpeechInputLength()) {
+                status.text = "This message is too long. Try sharing a shorter selection."
+                return
+            }
+            if (value.isBlank()) { status.text = "No message text was provided."; return }
             status.text = "Reading with Android’s offline voice…"
-            PipVoice.readPrivate(this, text, { status.text = it }) {
+            playback = PipVoice.readPrivate(this, value.toString(), { status.text = it }) {
                 if (status.text == "Reading with Android’s offline voice…") status.text = "Read again or close this screen."
             }
         }
         rows.addView(explanation)
-        if (!shared.isNullOrBlank()) rows.addView(Button(this).apply {
+        if (!shared.isNullOrEmpty()) rows.addView(Button(this).apply {
             text = "Read shared text aloud"
             setOnClickListener { read(shared) }
         })
@@ -56,7 +61,8 @@ class ReadMessageActivity : Activity() {
     }
 
     override fun onStop() {
-        PipVoice.stop()
+        playback?.let(PipVoice::stopPrivate)
+        playback = null
         super.onStop()
         if (!isChangingConfigurations) finish()
     }
