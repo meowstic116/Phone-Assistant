@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Phone Assistant</string>
+    <string name="app_name">Pip Tester</string>
     <string name="start_at_boot">Start Pip when the phone starts</string>
     <string name="start_at_boot_hint">Starts Pip after you unlock your phone following a restart.</string>
     <string name="start_at_boot_needs_overlay">Automatic start needs “Display over other apps” permission.</string>
@@ -35,9 +35,9 @@
     <string name="permissions_access_switch">Let Pip use accessibility</string>
     <string name="permissions_access_android">Android accessibility permission</string>
     <string name="permissions_usage">Usage access · optional</string>
-    <string name="permissions_usage_info">Lets Pip know which app is in front.</string>
+    <string name="permissions_usage_info">Lets Pip answer questions about the last app in front without sharing app usage with your chat provider.</string>
     <string name="permissions_notifications">Notifications · optional</string>
-    <string name="permissions_notifications_info">Turn off notifications in Android without stopping Pip. Android may still show him in its active apps list while he’s running.</string>
+    <string name="permissions_notifications_info">Pip can run and listen without notifications. To stop listening, use Talk to Pip in settings. Android may still show the microphone indicator or list Pip among active apps.</string>
     <string name="permissions_notifications_manage">Manage notifications</string>
     <string name="permissions_manage">Open Android settings</string>
     <string name="permissions_status">%1$s · %2$s</string>

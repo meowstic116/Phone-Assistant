@@ -210,15 +210,7 @@ object Toys {
      */
     fun durationIn(raw: String): Long? {
         val text = raw.lowercase()
-        Regex("(\\d+)\\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)").find(text)?.let { found ->
-            val amount = found.groupValues[1].toLongOrNull() ?: 1L
-            val unit = found.groupValues[2]
-            return when {
-                unit.startsWith("s") -> amount * 1_000L
-                unit.startsWith("h") -> amount * 3_600_000L
-                else -> amount * 60_000L
-            }
-        }
+        TimedRequest.numericDuration(text)?.let { return it }
         return when {
             text.contains("half an hour") || text.contains("half hour") -> 30 * 60_000L
             text.contains("a few hours") -> 3 * 3_600_000L

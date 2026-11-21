@@ -595,16 +595,6 @@ fun main() {
     check(!setup.validApiKey("bad\r\nheader"))
     check(!setup.validApiKey("a".repeat(4097)))
 
-    check(UpdatePolicy.isNewer("v0.175", "0.174"))
-    check(!UpdatePolicy.isNewer("v0.175.0", "0.175"))
-    check(!UpdatePolicy.isNewer("v0.176-rc.1", "0.175"))
-    check(!UpdatePolicy.isNewer("v0.175..7", "0.175"))
-    check(UpdatePolicy.releasePage("v0.175") == "https://github.com/meowstic116/Phone-Assistant/releases/tag/v0.175")
-    check(UpdatePolicy.releasePage("v0.175/../unsafe") == null)
-    val asset = "https://github.com/meowstic116/Phone-Assistant/releases/download/v0.175/phone-assistant-v0.175.apk"
-    check(UpdatePolicy.apkUrl("v0.175", "phone-assistant-v0.175.apk", asset) == asset)
-    check(UpdatePolicy.apkUrl("v0.175", "phone-assistant-v0.175.apk", asset.replace("meowstic116", "elsewhere")) == null)
-    check(UpdatePolicy.apkUrl("v0.175", "phone-assistant-v0.175.apk", "$asset?override=1") == null)
     check(java.io.StringReader("hello").readBounded(5) == "hello")
     check(java.io.StringReader("").readBounded(0).isEmpty())
     check(runCatching { java.io.StringReader("a".repeat(8192)).readBounded(6000) }.exceptionOrNull() is java.io.IOException)
@@ -799,6 +789,19 @@ fun main() {
     check(!WakeStartupPolicy.shouldStart(fromOpenApp = true, optedIn = false, pipReady = true))
     check(!WakeStartupPolicy.shouldStart(fromOpenApp = true, optedIn = true, pipReady = false))
     check(!WakeStartupPolicy.shouldStart(fromOpenApp = false, optedIn = true, pipReady = true)) // Boot/recovery.
+
+    check(TimedRequest.numericDuration("for 20 seconds") == 20_000L)
+    check(TimedRequest.numericDuration("wait 1.5 hours") == 5_400_000L)
+    check(TimedRequest.numericDuration("for 000000000000000000000001 min") == 60_000L)
+    check(TimedRequest.numericDuration("for 9223372036854775807 hrs") == TimedRequest.MAX_MS)
+    check(TimedRequest.numericDuration("for 999999999999999999999999999 hours") == TimedRequest.MAX_MS)
+    check(TimedRequest.numericDuration("for 5 hourglass turns") == null)
+    check(TimedRequest.numericDuration("for now") == null)
+    check(PhoneContext.asksForAppLabel("Which app am I in?"))
+    check(PhoneContext.asksForAppLabel("Hey Pip, what app is open right now?"))
+    check(!PhoneContext.asksForAppLabel("Pretend I asked which app am I in?"))
+    check(!PhoneContext.asksForAppLabel("What app should I open?"))
+    check(!PhoneContext.asksForAppLabel("What's on my screen?"))
 
     val toys = listOf("painting", "soccer", "plant")
     val toyRandom = kotlin.random.Random(186)

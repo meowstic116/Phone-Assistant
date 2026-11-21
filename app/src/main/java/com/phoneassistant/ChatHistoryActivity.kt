@@ -119,16 +119,15 @@ class ChatHistoryActivity : Activity() {
 
         AssistantBrain.reply(
             this,
-            OverlayService.currentAppLabel,
             OverlayService.toysOnStage(),
             event,
             turn
         ) { ok, reply ->
             runOnUiThread {
-                if (isDestroyed || isFinishing) return@runOnUiThread
-                messageList.removeView(placeholder)
+                val visible = !isDestroyed && !isFinishing
+                if (visible) messageList.removeView(placeholder)
                 if (!ChatTurns.isCurrent(turn)) {
-                    if (pendingTurn == turn) sendButton.isEnabled = true
+                    if (visible && pendingTurn == turn) sendButton.isEnabled = true
                     return@runOnUiThread
                 }
                 // A delegated job is a JSON object, not a line: it belongs to his hands, and
@@ -136,13 +135,15 @@ class ChatHistoryActivity : Activity() {
                 // the user the protocol instead of an answer.
                 val job = if (ok) Agent.delegated(reply) else null
                 if (job != null) {
-                    showJobStarted(OverlayService.runPhoneJob(job, text, turn))
+                    if (visible) showJobStarted(OverlayService.runPhoneJob(job, text, turn))
                     return@runOnUiThread
                 }
-                addBubble(reply, false)
+                // A plain reply still belongs in history if Android recreated or closed this screen.
                 if (ok) ChatRecovery.attempt(Unit, { Diag.chatFailure("chat history", it) }) {
                     Memory.append(this, "assistant", reply)
                 }
+                if (!visible) return@runOnUiThread
+                addBubble(reply, false)
                 sendButton.isEnabled = true
                 OverlayService.speak(this, reply)
             }

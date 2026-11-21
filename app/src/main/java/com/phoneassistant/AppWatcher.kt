@@ -8,7 +8,7 @@ import android.os.Build
 import android.os.Process
 
 /**
- * Answers "which app is the user in right now" using Usage Access.
+ * Looks up the most recent foreground app on demand using Usage Access.
  * This reads app identities only — never screen contents — which is why it needs no
  * accessibility service: [Screen] is the only thing that reads a screen, and only when the
  * user has given Pip a job.
@@ -35,7 +35,8 @@ object AppWatcher {
     }
 
     fun currentAppLabel(ctx: Context): String? = try {
-        currentPackage(ctx)?.let { labelFor(ctx, it) ?: it }
+        currentPackage(ctx)?.let { (labelFor(ctx, it) ?: it).filterNot(Char::isISOControl).trim().take(120)
+            .trimEnd { char -> char.isHighSurrogate() }.ifBlank { null } }
     } catch (_: RuntimeException) {
         // OEM usage services can fail if access is revoked during a query.
         null
@@ -68,7 +69,7 @@ object AppWatcher {
         val pm = ctx.packageManager
         val info = pm.getApplicationInfo(packageName, 0)
         pm.getApplicationLabel(info).toString()
-    } catch (t: Throwable) {
+    } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
         null
     }
 }

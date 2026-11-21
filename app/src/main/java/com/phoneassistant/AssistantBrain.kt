@@ -102,7 +102,6 @@ object AssistantBrain {
      */
     internal fun reply(
         ctx: Context,
-        appLabel: String?,
         stage: String? = null,
         event: String? = null,
         turn: Long,
@@ -128,14 +127,13 @@ object AssistantBrain {
         }
         executor.execute {
             val result = ChatRecovery.attempt(false to ChatRecovery.REPLY_FAILED, { Diag.chatFailure("chat reply", it) }) {
-                resolveReply(appContext, history, appLabel, stage, event, turn, voiceMessage != null)
+                resolveReply(appContext, history, stage, event, turn, voiceMessage != null)
             }
             onDone(result.first, result.second)
         }
     }
 
-    private fun resolveReply(appContext: Context, history: List<Memory.Msg>, appLabel: String?,
-                             stage: String?, event: String?, turn: Long, handsFree: Boolean): Pair<Boolean, String> {
+    private fun resolveReply(appContext: Context, history: List<Memory.Msg>, stage: String?, event: String?, turn: Long, handsFree: Boolean): Pair<Boolean, String> {
         if (!ChatTurns.isCurrent(turn)) return false to ""
         val config = config(appContext)
         val latest = history.lastOrNull()?.takeIf { it.role == "user" }?.content.orEmpty()
@@ -143,13 +141,20 @@ object AssistantBrain {
         val suggestMemory = !handsFree && !explicitlySaved && PipSettings.enabled(appContext, PipSettings.Option.LEARN_FROM_CHAT) &&
             MemorySuggestion.maySuggest(latest)
         val memoryRevision = Facts.revision()
+        val appQuestion = !handsFree && PhoneContext.asksForAppLabel(latest)
+        if (appQuestion) {
+            // An app name is enough to answer this question locally; don't send usage data to the provider.
+            val label = if (appContext.getSystemService(android.app.KeyguardManager::class.java)
+                    ?.isKeyguardLocked == false) AppWatcher.currentAppLabel(appContext) else null
+            return false to if (label != null) "The last app Android reported in front was $label."
+                else "I couldn’t identify the last app in front. Check Usage access in Pip settings."
+        }
         val mayInspect = !handsFree && Screen.available() && PhoneContext.mayInspect(latest)
 
         // Whether he can actually work other apps right now decides what the prompt says
         // about his hands: promising them while the switch is off would be a lie.
         val systemPrompt = Persona.systemPrompt(
             appContext,
-            appLabel,
             stage,
             event,
             canAct = !handsFree && Screen.available(),

@@ -8,3 +8,12 @@ local.properties
 captures/
 __pycache__/
 .venv/
+
+# Signing keys and generated distribution packages must never be committed.
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+*.apk
+/artifacts/

@@ -27,6 +27,11 @@ internal object WakeModel {
     var busy = false
         private set
 
+    private val observers = mutableSetOf<() -> Unit>()
+    fun observe(observer: () -> Unit) { observers.add(observer); observer() }
+    fun forget(observer: () -> Unit) { observers.remove(observer) }
+    private fun notifyObservers() = observers.toList().forEach { it() }
+
     private fun directory(ctx: Context) = File(ctx.noBackupFilesDir, PACK)
     fun ready(ctx: Context) = files.all { File(directory(ctx), it).let { f -> f.isFile && f.length() > 0 } }
 
@@ -35,6 +40,7 @@ internal object WakeModel {
         val app = ctx.applicationContext
         if (ready(app)) { done(true); return }
         busy = true
+        notifyObservers()
         executor.execute {
             val target = directory(app)
             val stage = File(app.noBackupFilesDir, "$PACK.partial")
@@ -71,7 +77,11 @@ internal object WakeModel {
                 check(archive.delete() && target.deleteRecursively() && stage.renameTo(target))
             }.isSuccess
             stage.deleteRecursively()
-            main.post { busy = false; done(installed) }
+            main.post {
+                busy = false
+                notifyObservers()
+                done(installed)
+            }
         }
     }
 
