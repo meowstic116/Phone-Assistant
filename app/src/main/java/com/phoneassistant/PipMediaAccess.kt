@@ -24,6 +24,35 @@ class PipMediaAccess : NotificationListenerService() {
                 .orEmpty().split(':').any { ComponentName.unflattenFromString(it) == component(ctx) }
         }
 
+        /** Bounded to an existing local Spotify session; never fall back to media keys or taps. */
+        internal fun controlSpotify(ctx: Context, action: CarCommand.Spotify): String {
+            if (!enabled(ctx)) return "Enable Pip’s Now playing access when you're parked."
+            return try {
+                val manager = ctx.getSystemService(MediaSessionManager::class.java)
+                    ?: return "I couldn’t reach Android’s media controls."
+                val spotify = manager.getActiveSessions(component(ctx)).firstOrNull {
+                    it.packageName == "com.spotify.music" &&
+                        it.playbackInfo?.playbackType == android.media.session.MediaController.PlaybackInfo.PLAYBACK_TYPE_LOCAL
+                } ?: return "There’s no local Spotify session yet. Start Spotify when parked."
+                val available = spotify.playbackState?.actions ?: return "Spotify isn’t offering playback controls."
+                val required = when (action) {
+                    CarCommand.Spotify.PLAY -> PlaybackState.ACTION_PLAY
+                    CarCommand.Spotify.PAUSE -> PlaybackState.ACTION_PAUSE
+                    CarCommand.Spotify.NEXT -> PlaybackState.ACTION_SKIP_TO_NEXT
+                    CarCommand.Spotify.PREVIOUS -> PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                }
+                if (available and required == 0L) return "Spotify isn’t offering that control right now."
+                val controls = spotify.transportControls
+                when (action) {
+                    CarCommand.Spotify.PLAY -> controls.play()
+                    CarCommand.Spotify.PAUSE -> controls.pause()
+                    CarCommand.Spotify.NEXT -> controls.skipToNext()
+                    CarCommand.Spotify.PREVIOUS -> controls.skipToPrevious()
+                }
+                "I sent that to Spotify."
+            } catch (_: RuntimeException) { "I couldn’t reach Spotify’s playback controls." }
+        }
+
         fun answer(ctx: Context): String {
             if (ctx.getSystemService(KeyguardManager::class.java)?.isDeviceLocked != false) {
                 return "Unlock your phone so I can check what’s playing."

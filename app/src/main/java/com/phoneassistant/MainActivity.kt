@@ -114,7 +114,7 @@ class MainActivity : Activity() {
             PipPermissions.openOverlay(this)
             return
         }
-        if (!OverlayService.start(this)) {
+        if (!OverlayService.startFromApp(this)) {
             Toast.makeText(this, "Android couldn’t start Pip. Try again with the app open.", Toast.LENGTH_LONG).show()
         }
     }

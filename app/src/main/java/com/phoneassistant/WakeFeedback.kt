@@ -14,6 +14,7 @@ internal enum class WakeFeedback(val message: String, val canSpeak: Boolean = fa
     SENDING("Message heard. Waiting for Pip’s reply…"),
     PLAYING("Microphone paused while Pip speaks."),
     REPLIED("Pip replied. Check the bubble or chat history.", true),
+    CAR_COMMAND("Driving request handled. Listen for Pip’s reply; troubleshoot only when parked.", true),
     REVIEW("Phone action heard. Unlock and review it before tapping Send.", true),
     DRAFT("Pip heard you. Send or close your unfinished text draft first.", true),
     BUSY("Pip heard you, but he’s busy. Try again in a moment.", true),
@@ -22,5 +23,5 @@ internal enum class WakeFeedback(val message: String, val canSpeak: Boolean = fa
     MIC_FAILED("Couldn’t open or read the microphone. Check permission and try again."),
     START_FAILED("Android didn’t start listening. Check microphone permission and try again with Pip settings open.");
 
-    val isOutcome: Boolean get() = this in setOf(REPLIED, REVIEW, DRAFT, BUSY, CHAT_FAILED)
+    val isOutcome: Boolean get() = this in setOf(REPLIED, CAR_COMMAND, REVIEW, DRAFT, BUSY, CHAT_FAILED)
 }

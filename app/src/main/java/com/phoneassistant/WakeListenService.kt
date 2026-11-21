@@ -22,7 +22,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.widget.Toast
 
-/** User-started microphone session. Never started by boot, a restart, or a chat reply. */
+/** Explicit microphone session, either tapped directly or opted in when starting Pip from the app. */
 internal class WakeListenService : Service() {
     companion object {
         private const val STOP = "com.phoneassistant.STOP_WAKE_LISTENING"
@@ -43,6 +43,28 @@ internal class WakeListenService : Service() {
         }
         var running = false
             private set
+        fun missingPermissions(ctx: Context): List<String> = buildList {
+            if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+                add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= 33 &&
+                ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        fun startProblem(ctx: Context): String? = when {
+            !KokoroVoice.supported() -> "Offline listening is unavailable on this device."
+            !WakeModel.ready(ctx) -> "Download offline recognition in Pip settings → Talk to Pip."
+            missingPermissions(ctx).isNotEmpty() -> "Grant microphone and notification permissions in Pip settings → Talk to Pip."
+            !notificationAvailable(ctx) -> "Enable Pip microphone notifications so Stop listening is available."
+            else -> null
+        }
+
+        private fun notificationAvailable(ctx: Context): Boolean {
+            val manager = ctx.getSystemService(NotificationManager::class.java) ?: return false
+            return manager.areNotificationsEnabled() &&
+                manager.getNotificationChannel(CHANNEL)?.importance != NotificationManager.IMPORTANCE_NONE
+        }
+
         fun start(ctx: Context) = runCatching {
             ctx.startForegroundService(Intent(ctx, WakeListenService::class.java)) != null
         }.getOrDefault(false)
@@ -67,8 +89,7 @@ internal class WakeListenService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) { stopSelf(); return START_NOT_STICKY }
         if (active) return START_NOT_STICKY
-        if (!OverlayService.running || !WakeModel.ready(this) ||
-            checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (!OverlayService.running || OverlayService.stopping || startProblem(this) != null) {
             failed(WakeFeedback.START_FAILED)
             return START_NOT_STICKY
         }
