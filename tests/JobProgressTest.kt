@@ -814,6 +814,25 @@ fun main() {
     wakePhrase.arm(27_000)
     check(wakePhrase.accept("Too late", 38_000) == null)
 
+    check(wakePhrase.accept("Good one, Pip!", 40_000) == "Good one!")
+    check(wakePhrase.accept("good one pip", 41_000) == "good one") // The recognizer may omit punctuation.
+    check(wakePhrase.accept("Can you, Pip, tell me another?", 42_000) == "Can you tell me another?")
+    check(wakePhrase.accept("Tell me another, P. I. P.", 43_000) == "Tell me another.")
+    check(wakePhrase.accept("We were talking about Pip.", 44_000) == null)
+    check(wakePhrase.accept("I like Pip", 45_000) == null)
+    check(wakePhrase.accept("I said 'nice one Pip'", 46_000) == null)
+    check(wakePhrase.accept("Good one, Piper", 47_000) == null)
+    check(wakePhrase.accept("That was funny", 48_000) == null)
+    val voiceExchange = VoiceExchange()
+    voiceExchange.remember("Tell me a joke", "A short joke.", 0)
+    check(voiceExchange.takeIfRecent(50_000) == VoiceExchange.Turn("Tell me a joke", "A short joke."))
+    check(voiceExchange.takeIfRecent(55_000) == null) // A new response must renew it.
+    voiceExchange.remember("Tell me another", "A different joke.", 60_000)
+    check(voiceExchange.takeIfRecent(150_000) == null)
+    voiceExchange.remember("Tell me another", "A different joke.", 160_000)
+    voiceExchange.clear()
+    check(voiceExchange.takeIfRecent(160_001) == null)
+
     val petBox = OverlayBounds.Box(180, 260, 64, 86)
     val abovePet = OverlayBounds.Box(96, 190, 232, 62)
     val belowPet = OverlayBounds.Box(96, 354, 232, 84)

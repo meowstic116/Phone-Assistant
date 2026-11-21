@@ -8,7 +8,7 @@ internal enum class WakeFeedback(val message: String, val canSpeak: Boolean = fa
     LISTENING("Listening. Say ‘Hey Pip, tell me a joke.’", true),
     NAME_HEARD("Name heard. Keep speaking."),
     SPEAK_NOW("Speak now. You don’t need to say Pip’s name."),
-    NO_NAME("Speech heard, but not Pip’s name. Try ‘Hey Pip’ or Speak now.", true),
+    NO_NAME("Speech didn’t sound addressed to Pip. Say his name or try Speak now.", true),
     NO_MESSAGE("No message heard. Try again or tap Speak now.", true),
     MIC_SILENT("No microphone signal. Check Android’s Mic access and close other apps using the mic."),
     SENDING("Message heard. Waiting for Pip’s reply…"),
