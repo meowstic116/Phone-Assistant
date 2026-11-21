@@ -110,7 +110,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
             canvas.drawLine(rect.left + dp(2f), y + dp(3f), rect.right - dp(2f), y + dp(3f), detail)
         }
 
-        rect.set(dp(2f), dp(96f), w - dp(2f), dp(112f))
+        rect.set(dp(2f), dp(LemonadeLayout.COUNTER_TOP_DP), w - dp(2f), dp(112f))
         panel(canvas, rect, 5f, edge, mint)
         canvas.drawLine(dp(8f), dp(100f), w - dp(8f), dp(100f), mintShine)
         canvas.drawLine(cx - dp(24f), dp(109f), cx - dp(24f), dp(118f), detail)
@@ -164,17 +164,13 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         invalidate()
     }
 
-    /**
-     * Where Pip's middle has to sit to look like he is serving from behind the counter,
-     * worked out from PetView's own drawing rather than guessed.
-     *
-     * His window is 86dp tall and his middle is 43dp down it, so this puts the top of his
-     * window 24dp below the top of the stand. Measured from there, and from the layout
-     * above: antenna tip 27.8, head 37, face 45–89, mouth 73.2, hips 95 onwards, feet 108.
-     * The canopy stops above his antenna, and the 96dp counter lip is below his chin
-     * even at the bottom of his idle bob. Keep the sign and the cabinet below that lip.
-     */
-    fun behindCounterY(): Float = posY + windowH - dp(81f)
+    private fun station() = LemonadeLayout.station(posX, posY, windowW, host.petHeight(), dp(1f))
+
+    internal fun atCounter(): Boolean {
+        if (!host.isPostOwner(this) || inToyMotion || movingByUser) return false
+        val target = station()
+        return host.petIsNear(target.x, target.y, dp(10f))
+    }
 
     /** How many glasses are on the screen right now. */
     private fun glassesOut(): Int = host.propsOnScreen().count { it is LemonadeGlass }
@@ -220,9 +216,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         // box his body occupies above the counter is a poke, not an order.
         // Only while he is actually standing there: the same box over an empty counter is
         // not an invisible button.
-        val onHim = y < dp(96f) && x > dp(29f) && x < dp(83f) &&
-            host.petIsNear(posX + x, posY + y, dp(46f))
-        if (onHim) {
+        if (atCounter() && LemonadeLayout.isPipTap(x, y, width, dp(1f))) {
             host.pokePet()
             return
         }
@@ -237,7 +231,8 @@ class LemonadeStand(host: PropHost) : Prop(host) {
     fun takePost(say: Boolean = false) {
         if (leaving) return
         postRequestedAt = SystemClock.uptimeMillis()
-        host.petHoldAt(this, centreX, behindCounterY()) {
+        val target = station()
+        host.petHoldAt(this, target.x, target.y) {
             postRequestedAt = null
             if (say) host.say(Lines.pick(POST_LINES))
         }
@@ -254,7 +249,7 @@ class LemonadeStand(host: PropHost) : Prop(host) {
 
     override fun describe(): String {
         val base = "your lemonade stand (glasses out right now: ${glassesOut()})"
-        return if (host.petIsNear(centreX, behindCounterY(), dp(24f))) {
+        return if (atCounter()) {
             "$base, and you are standing behind the counter"
         } else {
             "$base, and you are not behind it right now"

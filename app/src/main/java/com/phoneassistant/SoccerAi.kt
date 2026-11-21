@@ -7,7 +7,10 @@ import kotlin.math.exp
 /** Local opponent for the overlay pitch. Coordinates and speeds are in dp. */
 internal object SoccerAi {
     const val RUN_SPEED = 215f
-    const val CONTACT = 25f
+    private const val HEADER_REACH = 25f
+    private const val KICK_VERTICAL_TOLERANCE = 6f
+    private const val KICK_HORIZONTAL_TOLERANCE = 14f
+    private const val BALL_BOTTOM = SoccerBallTuning.BALL_SIZE_DP / 2f - SoccerBallTuning.DRAW_INSET_DP - SoccerBallTuning.DRAW_LIFT_DP
     const val THINK_MS = 100L
     const val KICK_COOLDOWN_MS = 560L
     private const val FAR = 115f
@@ -33,7 +36,7 @@ internal object SoccerAi {
         val nearBall = distance(feet, ball.centre)
         val guardY = (pitch.goalY - GUARD_DEPTH).coerceIn(pitch.top, pitch.bottom)
         val incoming = ball.vy > 80f && ball.centre.y < pitch.goalY
-        val secondsToGuard = if (incoming) ((guardY - ball.centre.y) / ball.vy).coerceIn(0f, 0.8f) else 0f
+        val secondsToGuard = if (incoming) ((guardY - BALL_BOTTOM - ball.centre.y) / ball.vy).coerceIn(0f, 0.8f) else 0f
         val defendX = if (incoming) reflected(ball.centre.x + ball.vx * SoccerBallTuning.rollSeconds(secondsToGuard), pitch.left, pitch.right)
             else ball.centre.x
         val goalMiddle = (pitch.goalLeft + pitch.goalRight) / 2f
@@ -50,8 +53,9 @@ internal object SoccerAi {
             val roll = SoccerBallTuning.rollSeconds(seconds)
             val x = reflected(ball.centre.x + ball.vx * roll, pitch.left, pitch.right)
             val y = reflected(ball.centre.y + ball.vy * roll, pitch.top, pitch.bottom)
-            target = DragMotion.Point(x, (y + 9f).coerceAtMost(pitch.bottom))
-            if (distance(feet, target) <= RUN_SPEED * seconds + CONTACT * 0.75f) break
+            // pitch.bottom is the lowest BALL CENTRE. His shoes can go below it.
+            target = kickStance(DragMotion.Point(x, y))
+            if (distance(feet, target) <= RUN_SPEED * seconds + KICK_VERTICAL_TOLERANCE) break
         }
         return Plan(Role.CHASE, target)
     }
@@ -66,19 +70,37 @@ internal object SoccerAi {
         return from.x + (to.x - from.x) * t
     }
 
-    fun contact(feet: DragMotion.Point, from: DragMotion.Point, to: DragMotion.Point): DragMotion.Point? {
+    fun kickStance(ball: DragMotion.Point) = DragMotion.Point(ball.x, ball.y + BALL_BOTTOM)
+
+    /** Test the ball's lower edge against Pip's sole line, allowing for the width of his
+     * two shoes and their small walking bob. Sweeping the segment also catches fast shots. */
+    fun kickContact(feet: DragMotion.Point, from: DragMotion.Point, to: DragMotion.Point): DragMotion.Point? {
+        val xScale = KICK_VERTICAL_TOLERANCE / KICK_HORIZONTAL_TOLERANCE
+        val target = DragMotion.Point(feet.x * xScale, feet.y - BALL_BOTTOM)
+        val closest = closestPoint(target, DragMotion.Point(from.x * xScale, from.y), DragMotion.Point(to.x * xScale, to.y))
+        return if (distance(target, closest) <= KICK_VERTICAL_TOLERANCE) DragMotion.Point(closest.x / xScale, closest.y) else null
+    }
+
+    /** Top edge exception: if the correct footing is beyond reach, use a real body contact. */
+    fun headerContact(ball: DragMotion.Point, head: DragMotion.Point, feet: DragMotion.Point, minimumFeetY: Float): Boolean =
+        kickStance(ball).y + KICK_VERTICAL_TOLERANCE < minimumFeetY &&
+            distance(ball, closestPoint(ball, head, feet)) <= HEADER_REACH
+
+    private fun closestPoint(point: DragMotion.Point, from: DragMotion.Point, to: DragMotion.Point): DragMotion.Point {
         val dx = to.x - from.x
         val dy = to.y - from.y
         val lengthSquared = dx * dx + dy * dy
-        val along = (feet.x - from.x) * dx + (feet.y - from.y) * dy
+        val along = (point.x - from.x) * dx + (point.y - from.y) * dy
         val t = if (lengthSquared == 0f) 0f else (along / lengthSquared).coerceIn(0f, 1f)
-        val closest = DragMotion.Point(from.x + dx * t, from.y + dy * t)
-        return closest.takeIf { distance(feet, it) <= CONTACT }
+        return DragMotion.Point(from.x + dx * t, from.y + dy * t)
     }
 }
 
 /** Speeds in dp/second; distance damping is shared by play and Pip's prediction. */
 internal object SoccerBallTuning {
+    const val BALL_SIZE_DP = 42f
+    const val DRAW_INSET_DP = 3f
+    const val DRAW_LIFT_DP = 1f
     const val PLAYER_KICK = 610f
     const val PIP_KICK = 465f
     const val SAVE_KICK = 375f

@@ -5,7 +5,7 @@ import kotlin.math.sin
 /** Visual-only cues emitted by the feed runner; these never schedule a phone action. */
 internal object DoomscrollMotion {
     const val SWIPE_MS = 425L
-    const val INSTAGRAM_PACKAGE = "com.instagram.android"
+    const val INSTAGRAM_PACKAGE = InstagramReelsPolicy.PACKAGE
     const val COMMAND = "Open Instagram and doomscroll"
     enum class Cue { WATCH, SWIPE, CLEAR }
     data class Pose(val lean: Float, val gazeX: Float, val gazeY: Float,

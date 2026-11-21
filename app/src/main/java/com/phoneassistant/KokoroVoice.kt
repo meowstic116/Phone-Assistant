@@ -20,6 +20,8 @@ internal object KokoroVoice {
 
     fun supported() = Build.VERSION.SDK_INT >= 27 && Build.SUPPORTED_ABIS.any { it in setOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     fun modelDir(ctx: Context) = File(ctx.noBackupFilesDir, KokoroFiles.PACK)
+    private fun partialDir(ctx: Context) = File(ctx.noBackupFilesDir, "${KokoroFiles.PACK}.partial")
+    fun hasDownload(ctx: Context) = modelDir(ctx).exists() || partialDir(ctx).exists()
     fun ready(ctx: Context) = KokoroFiles.ready(modelDir(ctx))
     fun busy() = stage != null
     fun status(ctx: Context): String = when {
@@ -27,6 +29,7 @@ internal object KokoroVoice {
         stage != null -> stage.orEmpty()
         error != null -> error.orEmpty()
         ready(ctx) -> KokoroIpc.lastProblem?.message ?: "Kokoro is installed. Tap Preview to test audio."
+        hasDownload(ctx) -> "Kokoro’s download is incomplete. Remove it, then download again."
         else -> "Kokoro needs a one-time 110 MB download."
     }
 
@@ -44,7 +47,7 @@ internal object KokoroVoice {
         update("Starting Kokoro download…")
         installer.execute {
             val target = modelDir(ctx)
-            val staging = File(ctx.noBackupFilesDir, "${KokoroFiles.PACK}.partial")
+            val staging = partialDir(ctx)
             val failure = runCatching {
                 check(staging.deleteRecursively())
                 if (ctx.noBackupFilesDir.usableSpace < SPACE_NEEDED) throw NotEnoughSpace()
@@ -98,11 +101,13 @@ internal object KokoroVoice {
 
     fun remove(context: Context) {
         val ctx = context.applicationContext
-        if (busy() || !ready(ctx)) return
+        if (busy() || !hasDownload(ctx)) return
         PipVoice.stop()
         update("Removing Kokoro…")
         installer.execute {
-            val removed = modelDir(ctx).deleteRecursively()
+            val modelRemoved = modelDir(ctx).deleteRecursively()
+            val partialRemoved = partialDir(ctx).deleteRecursively()
+            val removed = modelRemoved && partialRemoved
             main.post { update(null, if (removed) null else "Couldn’t remove all of Kokoro’s files.") }
         }
     }

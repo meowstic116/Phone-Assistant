@@ -112,7 +112,7 @@ internal object PipVoice {
     private fun mayPlay(ctx: Context, id: Long) = id == sequence &&
         ((allowLockedPlayback && WakeListenService.running) ||
             (ctx.getSystemService(PowerManager::class.java)?.isInteractive == true &&
-                ctx.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != true))
+                ctx.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == false))
 
     private fun takeFocus(ctx: Context, id: Long): Boolean {
         val manager = ctx.getSystemService(AudioManager::class.java) ?: return false

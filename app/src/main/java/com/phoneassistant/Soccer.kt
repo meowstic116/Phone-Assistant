@@ -172,6 +172,7 @@ class SoccerGame(private val host: PropHost) {
     private fun canRespond() = !isPaused() && !ball.inToyMotion && host.petCanPlay(board)
 
     private fun pipKick(at: DragMotion.Point, save: Boolean) {
+        cancelChase() // Plant his feet instead of running on past the contact point.
         val behindGoal = at.y <= topGoal.lineY
         val aimY = if (behindGoal) (pitchTop + pitchBottom) / 2f else topGoal.lineY
         val aim = SoccerAi.aim(at.dpPoint(), topGoal.centreX / host.px(1f), aimY / host.px(1f),
@@ -195,9 +196,8 @@ class SoccerGame(private val host: PropHost) {
     internal fun trySave(from: DragMotion.Point, to: DragMotion.Point, goalCrossingX: Float?): Boolean {
         if (clock.elapsed < nextPipKick || to.y <= from.y || from.y >= bottomGoal.lineY) return false
         val feet = petFeet()
-        if (feet.y >= bottomGoal.lineY - host.px(8f)) return false
         val end = if (goalCrossingX == null) to else DragMotion.Point(goalCrossingX, bottomGoal.lineY)
-        val hit = SoccerAi.contact(feet.dpPoint(), from.dpPoint(), end.dpPoint()) ?: return false
+        val hit = SoccerAi.kickContact(feet.dpPoint(), from.dpPoint(), end.dpPoint()) ?: return false
         if (!canRespond()) return false
         val point = DragMotion.Point(host.px(hit.x), host.px(hit.y))
         ball.moveTo(point.x - ball.windowW / 2f, point.y - ball.windowH / 2f)
@@ -272,12 +272,12 @@ class SoccerGame(private val host: PropHost) {
         val scale = host.px(1f)
         // At the top edge Pip can't stand any higher. Let him head a stranded ball
         // only if it actually touches his body; don't let him shoot it from a distance.
-        val edge = (host.stageTop() + host.petHeight()) / scale + 2f
+        val walkTop = host.stageTop() + host.px(ToyFooting.WALK_TOP_PADDING_DP)
+        val edge = ToyFooting.feetY(walkTop.toInt().toFloat(), host.petHeight(), scale) / scale
         val head = DragMotion.Point(feet.x, feet.y - host.petHeight() / scale + 17f)
-        val header = state.centre.y < edge - SoccerAi.CONTACT &&
-            SoccerAi.contact(state.centre, head, feet) != null
+        val header = SoccerAi.headerContact(state.centre, head, feet, minimumFeetY = edge)
         if (!held && elapsed >= nextPipKick && state.vy >= -160f &&
-            (header || SoccerAi.contact(feet, state.centre, state.centre) != null)) {
+            (header || SoccerAi.kickContact(feet, state.centre, state.centre) != null)) {
             pipKick(DragMotion.Point(ball.centreX, ball.centreY), save = state.vy > 80f)
             return
         }
@@ -293,7 +293,7 @@ class SoccerGame(private val host: PropHost) {
             return
         }
         val x = host.px(plan.feet.x)
-        val y = host.px(plan.feet.y) - host.petHeight() / 2f + host.px(6f)
+        val y = ToyFooting.centreForFeet(host.px(plan.feet.y), host.petHeight(), scale)
         if (host.petIsNear(x, y, host.px(4f))) {
             cancelChase()
         } else if (!host.retargetPetWalk(board, x, y)) {
@@ -444,8 +444,8 @@ class Goal(host: PropHost, private val game: SoccerGame, val pipDefends: Boolean
 /** The ball. Tap to boot it downwards at Pip's goal; he kicks it back up at yours. */
 class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
 
-    override val boxW = 42f
-    override val boxH = 42f
+    override val boxW = SoccerBallTuning.BALL_SIZE_DP
+    override val boxH = SoccerBallTuning.BALL_SIZE_DP
 
     private var vx = 0f
     private var vy = 0f
@@ -600,8 +600,8 @@ class Ball(host: PropHost, private val game: SoccerGame) : Prop(host) {
 
     override fun onDraw(canvas: Canvas) {
         val cx = width / 2f
-        val cy = height / 2f - dp(1f)
-        val radius = cx - dp(3f)
+        val cy = height / 2f - dp(SoccerBallTuning.DRAW_LIFT_DP)
+        val radius = cx - dp(SoccerBallTuning.DRAW_INSET_DP)
         canvas.drawOval(cx - dp(14f), cy + dp(11f), cx + dp(16f), cy + dp(20f), shadow)
         canvas.drawCircle(cx, cy, radius, shade)
         canvas.drawCircle(cx - dp(1.2f), cy - dp(1.6f), radius - dp(2f), leather)

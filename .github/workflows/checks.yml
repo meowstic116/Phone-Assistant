@@ -32,3 +32,4 @@ jobs:
           ant_jar=$(find "$HOME/.gradle/caches/modules-2/files-2.1/org.apache.ant/ant/1.10.15" -name 'ant-1.10.15.jar' -print -quit)
           test -n "$ant_jar"
           tests/run-kokoro-files.sh "$ant_jar"
+          tests/run-signing.sh

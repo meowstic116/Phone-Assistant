@@ -32,21 +32,23 @@ internal class Painting(host: PropHost, val picture: PaintingGallery.Picture, pr
 
     /** 0 to 1, how much of the painting has been painted. */
     private var brush = 0f
-    private var approachOffset: DragMotion.Point? = null
+    private var paintFromLeft: Boolean? = null
     private var walkingToSeat = false
     private var finishedAt = 0L
 
-    internal fun approachFrom(x: Float, y: Float) {
-        approachOffset = DragMotion.Point(x - posX, y - posY)
+    internal fun approachFrom(left: Boolean) {
+        paintFromLeft = left
     }
 
     internal override fun keepsToy(now: Long): Boolean = !finished || now - finishedAt < 8_000L
 
     private fun trySit() {
-        val offset = approachOffset ?: return
+        val left = paintFromLeft ?: return
         if (walkingToSeat || host.petIsSeatedAt(this) || movingByUser) return
-        walkingToSeat = host.petWalkTo(this, posX + offset.x,
-            (posY + offset.y).coerceAtMost(host.toysFloor() - host.petHeight() / 2f)) { arrived ->
+        val x = ToyFooting.beside(posX, windowW, host.petWidth(), host.stageWidth(), dp(6f), preferLeft = left)
+        val feet = (posY + windowH - dp(FRAME_MARGIN_DP)).coerceAtMost(host.toysFloor())
+        val y = ToyFooting.centreForFeet(feet, host.petHeight(), dp(1f))
+        walkingToSeat = host.petWalkTo(this, x, y) { arrived ->
             walkingToSeat = false
             if (arrived && !finished && !leaving) host.petSitAt(this)
         }
@@ -119,7 +121,7 @@ internal class Painting(host: PropHost, val picture: PaintingGallery.Picture, pr
         val w = width.toFloat()
         val h = height.toFloat()
 
-        frameRect.set(dp(3f), dp(3f), w - dp(3f), h - dp(3f))
+        frameRect.set(dp(FRAME_MARGIN_DP), dp(FRAME_MARGIN_DP), w - dp(FRAME_MARGIN_DP), h - dp(FRAME_MARGIN_DP))
         panel(canvas, frameRect, 13f, frameEdge, frame)
         canvas.drawRoundRect(dp(10f), h - dp(22f), w - dp(10f), h - dp(6f), dp(7f), dp(7f), frameShade)
         artArea.set(dp(10f), dp(10f), w - dp(10f), h - dp(23f))
@@ -182,6 +184,7 @@ internal class Painting(host: PropHost, val picture: PaintingGallery.Picture, pr
         "\"${picture.title}\", a painting on a canvas — ${picture.blurb}"
 
     companion object {
+        private const val FRAME_MARGIN_DP = 3f
         private const val SHEEN_PERIOD_MS = 7_200L
 
         val WET_LINES = listOf(
@@ -224,7 +227,7 @@ internal class PaintingScene(private val host: PropHost, private val picture: Pa
             return PaintingStart.Result.NO_ROOM
         }
 
-        art.approachFrom(spotX, spotY)
+        art.approachFrom(left = x > spotX)
         host.say("*sets up the easel* give me a minute. inspiration is scheduled.")
         return PaintingStart.Result.SHOWN
     }

@@ -30,7 +30,6 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
@@ -303,9 +302,12 @@ class OverlayService : Service(), PropHost {
     private lateinit var windowManager: WindowManager
     private lateinit var petParams: WindowManager.LayoutParams
     private var pet: PetView? = null
-    private var petHost: FrameLayout? = null
+    private var petHost: PetView? = null
+    private var bubbleHost: FrameLayout? = null
+    private var bubbleParams: WindowManager.LayoutParams? = null
     private var bubbleBox: OverlayBounds.Box? = null
-    private val petFrameSync = OverlayFrameSync()
+    private var bubbleRetryAt = 0L
+    private val captionIdlePause = CaptionIdlePause()
     private val overlayLocation = IntArray(2)
 
     private var voicedReply: ReplyBubbleState? = null
@@ -473,7 +475,7 @@ class OverlayService : Service(), PropHost {
         speechBubble = SpeechBubble(this, limits = {
             (screenW - dpInt(12f)).coerceIn(1, dpInt(232f).coerceAtLeast(1)) to
                 (screenH - topInset - bottomInset - dpInt(12f)).coerceIn(1, dpInt(280f).coerceAtLeast(1))
-        }, onBoundsChanged = ::layoutPetOverlay)
+        }, onBoundsChanged = ::layoutSpeechBubble)
 
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(
@@ -501,23 +503,7 @@ class OverlayService : Service(), PropHost {
         Quiet.onChanged = { settleBreak() }
         settleBreak()
 
-        petParams = WindowManager.LayoutParams(
-            petW,
-            petH,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                (if (Build.VERSION.SDK_INT >= 30) WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN else 0),
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.LEFT
-            // We already keep Pip and his bubble inside the usable display. Don't let Android
-            // push the window somewhere else when the bubble makes it bigger.
-            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
-            if (Build.VERSION.SDK_INT >= 30) {
-                setFitInsetsTypes(0)
-                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-            }
+        petParams = stageWindow(petW, petH).apply {
             x = posX.toInt()
             y = posY.toInt()
         }
@@ -535,32 +521,8 @@ class OverlayService : Service(), PropHost {
         if (entrance) view.powerPose = PipTransition.pose(entering = true, fraction = 0f)
         pet = view
 
-        val host = object : FrameLayout(this) {
-            private val syncFrame = ViewTreeObserver.OnPreDrawListener {
-                getLocationOnScreen(overlayLocation)
-                val actual = OverlayBounds.Box(overlayLocation[0], overlayLocation[1], width, height)
-                petFrameSync.canDraw(actual, SystemClock.uptimeMillis(), screenCoordinates = Build.VERSION.SDK_INT >= 30)
-            }
-
-            override fun onAttachedToWindow() {
-                super.onAttachedToWindow()
-                viewTreeObserver.addOnPreDrawListener(syncFrame)
-            }
-
-            override fun onDetachedFromWindow() {
-                viewTreeObserver.removeOnPreDrawListener(syncFrame)
-                super.onDetachedFromWindow()
-            }
-        }.apply {
-            addView(view, FrameLayout.LayoutParams(petW, petH, Gravity.TOP or Gravity.LEFT))
-            addView(speechBubble.view, FrameLayout.LayoutParams(1, 1, Gravity.TOP or Gravity.LEFT))
-            // Only the expanded area uses this click; Pip's own drag/tap still handles his view.
-            setOnClickListener { hideBubble() }
-        }
-        petHost = host
-        petFrameSync.request(OverlayBounds.Box(petParams.x, petParams.y, petW, petH), SystemClock.uptimeMillis())
-        val added = runCatching { windowManager.addView(host, petParams) }.isSuccess
-        if (added) layoutPetOverlay()
+        petHost = view
+        val added = runCatching { windowManager.addView(view, petParams) }.isSuccess
         if (!added) {
             petHost = null
             stopSelf()
@@ -913,6 +875,7 @@ class OverlayService : Service(), PropHost {
         props.forEach { it.cancelDrag() }
         handler.removeCallbacksAndMessages(null)
         speechBubble.clear()
+        hideSpeechWindow()
         removeInputBar()
         hideJobBar()
         // The panel is its own window and nothing else owns it, so it goes with the service.
@@ -1029,11 +992,13 @@ class OverlayService : Service(), PropHost {
 
     override fun petCentreX(): Float = posX + petW / 2f
 
-    override fun petFeetY(): Float = posY + petH - dp(6f)
+    override fun petFeetY(): Float = ToyFooting.feetY(posY.toInt().toFloat(), petH, dp(1f))
 
     /** Heads for the post; whatever is waiting there runs on arrival. */
     private fun approachPost(x: Float, y: Float) {
         val owner = postOwner ?: return
+        if (toyWalk || !petCanPlay(owner)) return
+        if (owner is LemonadeStand && !restoreCounterLayer(owner)) return
         petWalkTo(owner, x, y) { arrived ->
             if (arrived && postOwner === owner) firePostArrival()
         }
@@ -1095,6 +1060,25 @@ class OverlayService : Service(), PropHost {
 
     private var toyHop: ToyHop? = null
     private var raisedFor: Prop? = null
+    private var counterBelowPip: LemonadeStand? = null
+
+    private fun restoreCounterLayer(stand: LemonadeStand): Boolean {
+        if (counterBelowPip !== stand) return true
+        if (!runCatching { windowManager.removeViewImmediate(stand) }.isSuccess) return false
+        if (!runCatching { windowManager.addView(stand, stand.params) }.isSuccess) {
+            dropProp(stand)
+            return false
+        }
+        counterBelowPip = null
+        // Pip is no longer the top stage character. Raise him again for his next bubble hop.
+        raisedFor = null
+        raiseVisibleCaption()
+        return true
+    }
+
+    private fun raiseVisibleCaption() {
+        if (bubbleParams != null && hideSpeechWindow()) layoutSpeechBubble()
+    }
 
     private data class GardenVisit(
         val owner: Prop, val ownerX: Float, val ownerY: Float, val started: Long, val travelMs: Long,
@@ -1118,7 +1102,7 @@ class OverlayService : Service(), PropHost {
         val stance = WateringPose.stance(grip, facesRight, dp(1f))
         val tx = (stance.x - petW / 2f).coerceIn(0f, (screenW - petW).coerceAtLeast(0).toFloat())
         val minY = topInset.toFloat()
-        val ty = (stance.y - petH + dp(2f)).coerceIn(minY, (screenH - petH - bottomInset).toFloat().coerceAtLeast(minY))
+        val ty = OverlayBounds.clamp(ToyFooting.topForFeet(stance.y, petH, dp(1f)), minY, (screenH - petH - bottomInset).toFloat())
         val distanceDp = hypot(tx - posX, ty - posY) / dp(1f)
         val travel = if (distanceDp < 3f) 0L else (distanceDp * 5.4f).toLong().coerceIn(190L, 2_100L)
         gardenVisit = GardenVisit(owner, owner.posX, owner.posY, SystemClock.uptimeMillis(), travel,
@@ -1194,10 +1178,12 @@ class OverlayService : Service(), PropHost {
                 return false
             }
             raisedFor = owner
+            counterBelowPip = props.filterIsInstance<LemonadeStand>().firstOrNull()
+            raiseVisibleCaption()
         }
         val tx = (x - petW / 2f).coerceIn(0f, (screenW - petW).coerceAtLeast(0).toFloat())
         val minY = topInset.toFloat()
-        val ty = (y - petH + dp(2f)).coerceIn(minY, (screenH - petH - bottomInset).toFloat().coerceAtLeast(minY))
+        val ty = OverlayBounds.clamp(ToyFooting.topForFeet(y, petH, dp(1f)), minY, (screenH - petH - bottomInset).toFloat())
         val distance = hypot(tx - posX, ty - posY)
         val duration = (280f + distance / dp(1f) * 1.25f).toLong().coerceAtMost(710L)
         if (post != null) petRelease()
@@ -1236,7 +1222,7 @@ class OverlayService : Service(), PropHost {
         posX = hop.fromX + (hop.toX - hop.fromX) * t
         hop.groundY = hop.fromY + (hop.toY - hop.fromY) * t
         posY = (hop.groundY - height * hop.lift).coerceAtLeast(topInset.toFloat())
-        view.pivotY = petH - dp(2f)
+        view.pivotY = ToyFooting.feetY(0f, petH, dp(1f))
         view.scaleY = 1f + height * 0.08f
         view.scaleX = 1f - height * 0.06f
         applyPetPosition()
@@ -1253,7 +1239,8 @@ class OverlayService : Service(), PropHost {
 
     private fun targetToyWalk(x: Float, y: Float) {
         targetX = OverlayBounds.clamp(x - petW / 2f, 0f, (screenW - petW).toFloat())
-        targetY = OverlayBounds.clamp(y - petH / 2f, topInset + dp(8f), (screenH - petH - bottomInset).toFloat())
+        targetY = OverlayBounds.clamp(y - petH / 2f, topInset + dp(ToyFooting.WALK_TOP_PADDING_DP),
+            (screenH - petH - bottomInset).toFloat())
     }
 
     override fun petWalkTo(owner: Prop, x: Float, y: Float, finished: (Boolean) -> Unit): Boolean {
@@ -1381,26 +1368,31 @@ class OverlayService : Service(), PropHost {
         fading.filterIsInstance<Prop>().forEach(Prop::completeToyMotion)
     }
 
+    /** Every toy, caption, and Pip uses the same top-left origin, including in RTL. */
+    private fun stageWindow(width: Int, height: Int, untouchable: Boolean = false) = WindowManager.LayoutParams(
+        width, height, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+            (if (Build.VERSION.SDK_INT >= 30) WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN else 0) or
+            (if (untouchable) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0),
+        PixelFormat.TRANSLUCENT
+    ).apply {
+        gravity = Gravity.TOP or Gravity.LEFT
+        softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+        if (Build.VERSION.SDK_INT >= 30) {
+            setFitInsetsTypes(0)
+            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        }
+    }
+
     override fun addProp(prop: Prop): Boolean {
         if (ending) return false
         val toy = Toy.values().firstOrNull { it.owns(prop) }
         if (toy != null && !PipSettings.toyAllowed(this, toy)) return false
         if (props.contains(prop)) return true
         val hand = toyHand(prop.centreX)
-        val params = WindowManager.LayoutParams(
-            prop.windowW,
-            prop.windowH,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            // Touchable and draggable, but never focusable: a toy must not steal the
-            // keyboard or the taps meant for the app underneath. A toy put down while a step
-            // is pressing starts out of the way for that step, as all of them do.
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                (if (overlayDucked || hand != null) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0),
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
+        val params = stageWindow(prop.windowW, prop.windowH,
+            untouchable = overlayDucked || hand != null).apply {
             x = prop.posX.toInt()
             y = prop.posY.toInt()
         }
@@ -1440,6 +1432,7 @@ class OverlayService : Service(), PropHost {
         if (toyHop?.owner === prop) cancelToyHop()
         if (gardenVisit?.owner === prop) cancelGardenVisit()
         if (raisedFor === prop) raisedFor = null
+        if (counterBelowPip === prop) counterBelowPip = null
         Toy.values().firstOrNull { it.owns(prop) }?.let { toy ->
             if (props.none(toy::owns)) toyLifetimes.remove(toy)
         }
@@ -1523,7 +1516,7 @@ class OverlayService : Service(), PropHost {
         val still = standingStill()
 
         speechBubble.onFrame()
-        layoutPetOverlay()
+        layoutSpeechBubble()
 
         keyboardWatch -= frameMs
         if (keyboardWatch <= 0L) {
@@ -1565,7 +1558,8 @@ class OverlayService : Service(), PropHost {
         }
 
         // Nothing on screen for a few minutes: he gets bored and makes his own fun.
-        if (spontaneousToysAllowed && !attentive && !walking && props.isEmpty() && !still) {
+        if (spontaneousToysAllowed && !attentive && !walking && props.isEmpty() && !still &&
+            captionIdlePause.permitsIdleMotion(now)) {
             initiativeIn -= frameMs
             if (initiativeIn <= 0L) {
                 initiativeIn = 180_000L + rnd.nextLong(140_000L)
@@ -1628,7 +1622,8 @@ class OverlayService : Service(), PropHost {
                 if (abs(dx) > 1f) view.facingRight = dx > 0
                 view.walking = true
             }
-        } else if (wanderAllowed && !still && !attentive && post == null && now > idleUntil) {
+        } else if (wanderAllowed && !still && !attentive && post == null && now > idleUntil &&
+            captionIdlePause.permitsIdleMotion(now)) {
             // A post outranks being bored: he keeps station until the toy lets him go.
             pickTarget(now)
         }
@@ -1726,7 +1721,9 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun applyPetPosition() {
-        layoutPetOverlay()
+        val host = petHost ?: return
+        updateStageBounds(host, petParams, OverlayBounds.Box(posX.toInt(), posY.toInt(), petW, petH), "Pip position")
+        layoutSpeechBubble()
         positionInputBar()
     }
 
@@ -1779,57 +1776,85 @@ class OverlayService : Service(), PropHost {
 
     // ------------------------------------------------------------ anchored panels
 
-    /** Expand the existing pet window without moving either child on screen. */
-    private fun layoutPetOverlay() {
-        val host = petHost ?: return
-        val petView = pet ?: return
-        val petRect = OverlayBounds.Box(posX.toInt(), posY.toInt(), petW, petH)
+    private fun updateStageBounds(view: View, params: WindowManager.LayoutParams, box: OverlayBounds.Box,
+                                  diagnostic: String): Boolean {
+        val old = OverlayBounds.Box(params.x, params.y, params.width, params.height)
+        if (old == box) return true
+        fun set(bounds: OverlayBounds.Box) {
+            params.x = bounds.x
+            params.y = bounds.y
+            params.width = bounds.width
+            params.height = bounds.height
+        }
+        set(box)
+        return try {
+            windowManager.updateViewLayout(view, params)
+            true
+        } catch (e: RuntimeException) {
+            set(old)
+            Diag.chatFailure(diagnostic, e)
+            false
+        }
+    }
+
+    /** A caption can resize or move without ever relaying out Pip's sprite. */
+    private fun layoutSpeechBubble() {
+        val shown = speechBubble.shown && !ending && petHost != null
+        val now = SystemClock.uptimeMillis()
+        captionIdlePause.visibilityChanged(shown, now)
+        if (!shown) {
+            bubbleBox = null
+            hideSpeechWindow()
+            return
+        }
         val panel = speechBubble.view
-        val bubble = if (!speechBubble.shown) null else {
-            val width = panel.panelWidth
-            val height = panel.panelHeight
-            bubbleBox?.takeIf { speechBubble.fading && it.width == width && it.height == height }
-                ?: OverlayBounds.Box((posX + petW / 2f - width / 2f).toInt()
-                    .coerceIn(dpInt(6f), (screenW - width - dpInt(6f)).coerceAtLeast(dpInt(6f))),
-                    OverlayBounds.panelY(petRect.y, petH, height, dpInt(8f), topInset, screenH - bottomInset), width, height)
+        val stand = (postOwner as? LemonadeStand)?.takeIf { it.atCounter() }
+        val anchor = if (stand != null) OverlayBounds.Box(stand.posX.toInt(), stand.posY.toInt(), stand.windowW, stand.windowH)
+            else OverlayBounds.Box(posX.toInt(), posY.toInt(), petW, petH)
+        val frame = bubbleBox?.takeIf { speechBubble.fading && it.width == panel.panelWidth && it.height == panel.panelHeight }
+            ?: OverlayBounds.anchoredPanel(anchor, panel.panelWidth, panel.panelHeight,
+                screenW, topInset, screenH - bottomInset, dpInt(6f), dpInt(8f))
+        val attached = bubbleParams
+        if (attached != null) {
+            val host = bubbleHost ?: return
+            if (updateStageBounds(host, attached, frame, "bubble layout")) bubbleBox = frame
+            return
         }
-        bubbleBox = bubble
-        host.isClickable = bubble != null
-        val frame = OverlayBounds.union(petRect, bubble)
-        fun layoutChild(child: View, rect: OverlayBounds.Box) {
-            val left = rect.x - frame.x
-            val top = rect.y - frame.y
-            val previous = child.layoutParams as FrameLayout.LayoutParams
-            if (previous.width != rect.width || previous.height != rect.height ||
-                previous.leftMargin != left || previous.topMargin != top) {
-                child.layoutParams = FrameLayout.LayoutParams(rect.width, rect.height, Gravity.TOP or Gravity.LEFT).apply {
-                    leftMargin = left
-                    topMargin = top
-                }
-            }
+        if (now < bubbleRetryAt) return
+        val host = bubbleHost ?: FrameLayout(this).apply {
+            addView(panel, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            setOnClickListener { hideBubble() }
+            bubbleHost = this
         }
-        val last = OverlayBounds.Box(petParams.x, petParams.y, petParams.width, petParams.height)
-        if (!host.isAttachedToWindow) return
-        if (last != frame) {
-            petParams.x = frame.x
-            petParams.y = frame.y
-            petParams.width = frame.width
-            petParams.height = frame.height
-            val update = runCatching { windowManager.updateViewLayout(host, petParams) }
-            if (update.isFailure) {
-                petParams.x = last.x
-                petParams.y = last.y
-                petParams.width = last.width
-                petParams.height = last.height
-                update.exceptionOrNull()?.let { if (it is Exception) Diag.chatFailure("bubble layout", it) }
-                return
-            }
+        val params = stageWindow(frame.width, frame.height).apply {
+            // Private previews and ordinary replies can replace one another in the same
+            // window without resizing it. Set this before attach, not after the text changes.
+            flags = flags or WindowManager.LayoutParams.FLAG_SECURE
+            x = frame.x
+            y = frame.y
         }
-        petFrameSync.request(frame, SystemClock.uptimeMillis(),
-            DragMotion.Point((petRect.x - frame.x).toFloat(), (petRect.y - frame.y).toFloat()))
-        // Pair the offsets with the accepted window request, never with a failed layout.
-        layoutChild(petView, petRect)
-        bubble?.let { layoutChild(panel, it) }
+        try {
+            windowManager.addView(host, params)
+            bubbleParams = params
+            bubbleBox = frame
+        } catch (e: RuntimeException) {
+            bubbleRetryAt = now + 300L
+            Diag.chatFailure("show bubble", e)
+        }
+    }
+
+    private fun hideSpeechWindow(): Boolean {
+        if (bubbleParams == null) return true
+        val host = bubbleHost ?: return false
+        return try {
+            windowManager.removeViewImmediate(host)
+            bubbleParams = null
+            bubbleRetryAt = 0L
+            true
+        } catch (e: RuntimeException) {
+            Diag.chatFailure("hide bubble", e)
+            false
+        }
     }
 
     // --------------------------------------------------------------- speech bubble
@@ -2050,7 +2075,7 @@ class OverlayService : Service(), PropHost {
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
+            gravity = Gravity.TOP or Gravity.LEFT
             // Match Pip's layout coordinates; the composer still requests and pans for the IME.
             if (Build.VERSION.SDK_INT >= 30) setFitInsetsTypes(0)
             // The window asks for the keyboard itself, so it opens together with the bar
@@ -2167,12 +2192,12 @@ class OverlayService : Service(), PropHost {
      */
     private var windowOffset = 0f
 
-    /** Measure the legacy window's stable origin, not a child being re-anchored for speech. */
+    /** Measure the legacy stage's screen origin from Pip's stationary sprite. */
     private fun measureWindowOffset() {
         if (Build.VERSION.SDK_INT >= 30) return // Uses display coordinates by construction.
         val host = petHost ?: return
         if (walking || toyHop != null || gardenVisit != null || jobWalk != null ||
-            petDrag?.moving == true || speechBubble.shown || !host.isLaidOut || host.isLayoutRequested ||
+            petDrag?.moving == true || !host.isLaidOut || host.isLayoutRequested ||
             host.width != petW || host.height != petH) return
         host.getLocationOnScreen(overlayLocation)
         windowOffset = (overlayLocation[1] - petParams.y).toFloat()
@@ -2358,7 +2383,7 @@ class OverlayService : Service(), PropHost {
         if (screenUsable()) startThinking()
         // No app/screen context, local phone shortcuts, toy reactions or memory changes occur
         // on an unconfirmed voice turn. Only a later tap on the ordinary Send button can act.
-        AssistantBrain.reply(this, turn = turn, voiceMessage = text, voiceContext = previousVoice) { ok, reply ->
+        AssistantBrain.reply(this, text, turn = turn, handsFree = true, voiceContext = previousVoice) { ok, reply ->
             handler.post {
                 var result = WakeFeedback.BUSY
                 try {
@@ -2465,7 +2490,7 @@ class OverlayService : Service(), PropHost {
             Toys.reactTo(this, text)
         }
 
-        AssistantBrain.reply(this, Toys.summary(this), event, turn) { ok, reply ->
+        AssistantBrain.reply(this, text, Toys.summary(this), event, turn) { ok, reply ->
             handler.post {
                 if (instance !== this || !ChatTurns.isCurrent(turn)) return@post
                 // Sometimes the answer is not a line but a job for his hands to do.
@@ -2725,8 +2750,10 @@ class OverlayService : Service(), PropHost {
             finishToyFlights()
         }
         var ok = setChipDucked(jobBar?.let(::overlaps) == true)
-        // Pip and the bubble share the input region now. Duck that whole window before a gesture.
         speechBubble.setDucked(overlayDucked)
+        // Normally the caption detaches when ducked. Don't dispatch a touch if it couldn't.
+        if (overlayDucked && !hideSpeechWindow()) ok = false
+        if (!overlayDucked) applyPetPosition()
         petHost?.let { if (!duckLayout(it, petParams, overlayDucked, DUCK_ALPHA)) ok = false }
         if (!setHudDucked(hud?.let(::overlaps) == true)) ok = false
         props.forEach { prop -> if (!duckLayout(prop, prop.params, overlaps(prop))) ok = false }

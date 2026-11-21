@@ -53,8 +53,12 @@ internal object KokoroIpc {
             // Unlink immediately: a stopped or interrupted reply leaves no named audio file behind.
             clip = runCatching {
                 val file = File.createTempFile("pip-kokoro-", ".wav", ctx.cacheDir)
-                try { ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE) }
-                finally { file.delete() }
+                val fd = try { ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE) }
+                catch (e: Exception) { file.delete(); throw e }
+                if (file.delete()) fd else {
+                    fd.closeQuietly() // Do not write speech to a named file if unlinking failed.
+                    null
+                }
             }.getOrNull()
             if (clip == null) { finish(KokoroFailure.BINDING); return }
             val connected = runCatching {

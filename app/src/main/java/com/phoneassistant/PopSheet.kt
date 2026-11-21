@@ -45,6 +45,19 @@ internal class PopSheet(val columns: Int = 4, val rows: Int = 5) {
     }
 }
 
+/** Aim one shoe at the dome's near/lower half, not both shoes at its side edges. */
+internal fun bubbleLanding(
+    domeX: Float, domeY: Float, radius: Float, petX: Float, petWidth: Int, stageWidth: Int, density: Float
+): DragMotion.Point {
+    val left = petWidth / 2f
+    val right = (stageWidth - left).coerceAtLeast(left)
+    val offset = ToyFooting.SHOE_CENTRE_DP * density
+    val options = listOf(domeX - offset, domeX + offset)
+    val centre = options.filter { it in left..right }.minByOrNull { kotlin.math.abs(it - petX) }
+        ?: domeX.coerceIn(left, right)
+    return DragMotion.Point(centre, domeY + radius * 0.65f)
+}
+
 /** Unit-height parabolic leap: at ground at launch and landing, at full lift halfway. */
 internal fun hopLift(fraction: Float): Float {
     val t = fraction.coerceIn(0f, 1f)

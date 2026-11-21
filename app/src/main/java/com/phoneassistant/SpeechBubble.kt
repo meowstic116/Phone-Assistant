@@ -5,7 +5,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.view.View
 
-/** Presentation inside Pip's existing overlay. Showing a reply never opens a new window. */
+/** Presentation for a caption window independent of Pip's sprite. */
 internal class SpeechBubble(
     context: Context,
     private val limits: () -> Pair<Int, Int>,

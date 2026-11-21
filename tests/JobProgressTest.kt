@@ -122,6 +122,26 @@ fun main() {
     check(JobProgress.surfaceProof(home, dialog, accepted = true, surface = "reels") == null)
     check(JobProgress.matchesFeedViewer("clips_viewer_view_pager", "reels", "com.instagram.android"))
     check(!JobProgress.matchesFeedViewer("clips_viewer_view_pager", "reels", "another.app"))
+    val instagram = InstagramReelsPolicy
+    check(instagram.requested("com.instagram.android", "reels", bulk = false))
+    check(!instagram.requested("com.instagram.android", "feed", bulk = false))
+    check(!instagram.requested("com.instagram.android", "reels", bulk = true))
+    check(!instagram.requested("com.facebook.orca", "reels", bulk = false))
+    check(instagram.tab("clips_tab") == "reels" && instagram.tab("direct_inbox") == null)
+    check(instagram.viewer("clips_viewer_view_pager", broad = true))
+    check(!instagram.viewer("clips_viewer_view_pager", broad = false))
+    check(instagram.blocked("direct_thread_message_list", broad = false))
+    check(instagram.blocked("comments_bottom_sheet", broad = true))
+    check(!instagram.blocked("direct_share_button", broad = false))
+    check(!instagram.reelItem("direct_thread_message_text", inViewer = true))
+    check(!instagram.reelItem("comment_text", inViewer = true))
+    check(!instagram.reelItem("clips_caption", inViewer = false))
+    check(instagram.reelItem("clips_caption", inViewer = true))
+    check(instagram.readable(false, true, hasViewer = false, hasReelsTab = true, requireViewer = false))
+    check(!instagram.readable(false, true, hasViewer = false, hasReelsTab = true, requireViewer = true))
+    check(instagram.readable(false, true, hasViewer = true, hasReelsTab = false, requireViewer = true))
+    check(!instagram.readable(true, true, hasViewer = true, hasReelsTab = true, requireViewer = false))
+    check(!instagram.readable(false, false, hasViewer = true, hasReelsTab = true, requireViewer = false))
     val waiting = JobProgress.SurfaceWatch(7)
     check(!waiting.observe(7, null, sameTab = true))
     check(waiting.canRetryTap) // Home refreshed, but the original tab stayed present.
@@ -454,6 +474,15 @@ fun main() {
     check(!wrapLifetime.expired(45_500L, held = hops.keepsSheet(45_500L))) // Pausing mid-sheet doesn't retire it.
     check(wrapLifetime.expired(71_100L, held = hops.keepsSheet(71_100L))) // But idle cleanup still works.
 
+    val centreBubble = bubbleLanding(138f, 225f, 10f, petX = 100f, petWidth = 64, stageWidth = 360, density = 1f)
+    check(centreBubble == DragMotion.Point(130.5f, 231.5f))
+    check(centreBubble.x + ToyFooting.SHOE_CENTRE_DP == 138f)
+    val rightBubble = bubbleLanding(337f, 250f, 10f, petX = 328f, petWidth = 64, stageWidth = 360, density = 1f)
+    check(rightBubble.x <= 328f)
+    check(kotlin.math.abs(rightBubble.x + ToyFooting.SHOE_CENTRE_DP - 337f) <= ToyFooting.SHOE_WIDTH_DP / 2f)
+    val leftBubble = bubbleLanding(25f, 180f, 10f, petX = 35f, petWidth = 64, stageWidth = 360, density = 1f)
+    check(leftBubble.x == 32.5f && leftBubble.y == 186.5f)
+
     val bubbles = PopSheet()
     check(bubbles.total == 20 && bubbles.nextBubble { 16 } == 16)
     check((0 until bubbles.total).map { rank -> bubbles.nextBubble { rank } } == (0 until bubbles.total).toList())
@@ -636,6 +665,19 @@ fun main() {
     check(java.io.StringReader("hello").readBounded(5) == "hello")
     check(java.io.StringReader("").readBounded(0).isEmpty())
     check(runCatching { java.io.StringReader("a".repeat(8192)).readBounded(6000) }.exceptionOrNull() is java.io.IOException)
+    val drip = object : java.io.Reader() {
+        override fun read(cbuf: CharArray, off: Int, len: Int): Int { cbuf[off] = 'x'; return 1 }
+        override fun close() = Unit
+    }
+    var clockNanos = 0L
+    check(runCatching { drip.readBounded(100, budgetNanos = 12L) { ++clockNanos } }
+        .exceptionOrNull() is java.net.SocketTimeoutException)
+    Thread.currentThread().interrupt()
+    try {
+        check(runCatching { drip.readBounded(100) }.exceptionOrNull() is java.io.InterruptedIOException)
+        check(Thread.currentThread().isInterrupted)
+    } finally { Thread.interrupted() }
+
 
     check(OverlayBounds.clamp(100f, 20f, -20f) == 20f)
     check(OverlayBounds.clamp(-100f, 0f, 80f) == 0f)
@@ -669,7 +711,7 @@ fun main() {
     val leftStance = WateringPose.stance(leftHand, true, 1f)
     val rightStance = WateringPose.stance(rightHand, false, 1f)
     check(leftHand.x - leftStance.x == 27f && rightStance.x - rightHand.x == 27f)
-    check(leftStance.y == rightStance.y && leftStance.y == potTop + 5f)
+    check(leftStance.y == rightStance.y && leftStance.y == potTop + WateringPose.POT_DEPTH_DP)
     val tilted = WateringPose.tilt(0.5f)
     val leftSpout = WateringPose.spout(leftHand, true, 1f, tilted)
     val rightSpout = WateringPose.spout(rightHand, false, 1f, tilted)
@@ -852,13 +894,32 @@ fun main() {
     val shot = SoccerAi.Ball(DragMotion.Point(155f, 460f), 120f, 770f)
     val guard = SoccerAi.plan(DragMotion.Point(280f, 615f), shot, smallPitch, userPressing = false)
     check(guard.role == SoccerAi.Role.GUARD && guard.feet.x > shot.centre.x && guard.feet.y < smallPitch.goalY)
+    val stillBall = DragMotion.Point(180f, 300f)
+    val shootingFeet = SoccerAi.kickStance(stillBall)
+    check(shootingFeet == DragMotion.Point(180f, 317f))
+    check(SoccerAi.kickContact(shootingFeet, stillBall, stillBall) != null)
+    check(SoccerAi.kickContact(DragMotion.Point(180f, 280f), stillBall, stillBall) == null) // Above the ball.
+    check(SoccerAi.kickContact(DragMotion.Point(180f, 300f), stillBall, stillBall) == null) // On its centre, not the edge.
+    val lowestBall = DragMotion.Point(180f, smallPitch.bottom)
+    val lowStance = SoccerAi.plan(pipFeet, SoccerAi.Ball(lowestBall, 0f, 0f), smallPitch, false).feet
+    check(lowStance.y == 717f && SoccerAi.kickContact(lowStance, lowestBall, lowestBall) != null)
+    val wallBall = DragMotion.Point(21f, 300f)
+    check(SoccerAi.kickContact(DragMotion.Point(32f, 317f), wallBall, wallBall) != null) // Window stops at the wall.
+    check(SoccerAi.kickContact(DragMotion.Point(48f, 317f), wallBall, wallBall) == null)
+    check(SoccerAi.headerContact(DragMotion.Point(180f, 45f), DragMotion.Point(180f, 42f),
+        DragMotion.Point(180f, 110f), minimumFeetY = 110f))
+    check(!SoccerAi.headerContact(DragMotion.Point(215f, 45f), DragMotion.Point(180f, 42f),
+        DragMotion.Point(180f, 110f), minimumFeetY = 110f))
     val fromShot = DragMotion.Point(140f, 617f)
     val toShot = DragMotion.Point(200f, 705f)
     val goalX = SoccerAi.crossingX(fromShot, toShot, smallPitch.goalY) ?: error("shot should cross the goal")
     check(goalX in 181f..183f)
     val atLine = DragMotion.Point(goalX, smallPitch.goalY)
-    check(SoccerAi.contact(DragMotion.Point(161f, 650f), fromShot, atLine) != null)
-    check(SoccerAi.contact(DragMotion.Point(285f, 650f), fromShot, atLine) == null)
+    check(SoccerAi.kickContact(DragMotion.Point(161f, 663f), fromShot, atLine) != null)
+    check(SoccerAi.kickContact(DragMotion.Point(285f, 663f), fromShot, atLine) == null)
+    val tooLate = DragMotion.Point(toShot.x, toShot.y + 17f)
+    check(SoccerAi.kickContact(tooLate, fromShot, atLine) == null)
+    check(SoccerAi.kickContact(tooLate, fromShot, toShot) != null)
     check(SoccerAi.crossingX(fromShot, toShot, 720f) == null)
     check(SoccerAi.aim(DragMotion.Point(130f, 360f), 180f, 60f, 0f) > 0f)
 
@@ -1007,39 +1068,35 @@ fun main() {
     check(voiceExchange.takeIfRecent(160_001) == null)
 
     val petBox = OverlayBounds.Box(180, 260, 64, 86)
-    val abovePet = OverlayBounds.Box(96, 190, 232, 62)
-    val belowPet = OverlayBounds.Box(96, 354, 232, 84)
-    check(OverlayBounds.union(petBox, null) == petBox)
-    check(OverlayBounds.union(petBox, abovePet) == OverlayBounds.Box(96, 190, 232, 156))
-    check(OverlayBounds.union(petBox, belowPet) == OverlayBounds.Box(96, 260, 232, 178))
+    check(OverlayBounds.anchoredPanel(petBox, 232, 62, 440, 24, 640, 6, 8) == OverlayBounds.Box(96, 190, 232, 62))
     val edgePet = OverlayBounds.Box(0, 5, 64, 86)
-    val edgeBubble = OverlayBounds.Box(6, 99, 48, 26)
-    check(OverlayBounds.union(edgePet, edgeBubble) == OverlayBounds.Box(0, 5, 64, 120))
+    check(OverlayBounds.anchoredPanel(edgePet, 64, 26, 320, 0, 640, 6, 8) == OverlayBounds.Box(6, 99, 64, 26))
 
-    val overlaySync = OverlayFrameSync()
-    val closedFrame = OverlayBounds.Box(96, 128, 64, 86)
-    val openFrame = OverlayBounds.Box(48, 40, 190, 174)
-    overlaySync.request(closedFrame, 10L)
-    check(overlaySync.canDraw(closedFrame, 10L, screenCoordinates = true))
-    overlaySync.request(openFrame, 20L)
-    check(!overlaySync.canDraw(closedFrame, 25L, screenCoordinates = true))
-    check(!overlaySync.canDraw(openFrame.copy(y = closedFrame.y), 30L, screenCoordinates = true))
-    check(overlaySync.canDraw(openFrame, 35L, screenCoordinates = true))
-    overlaySync.request(closedFrame, 40L)
-    check(!overlaySync.canDraw(openFrame, 41L, screenCoordinates = true))
-    check(overlaySync.canDraw(openFrame, 110L, screenCoordinates = true)) // OEM fallback is bounded.
-    val translatedFrame = closedFrame.copy(y = 140)
-    overlaySync.request(translatedFrame, 120L)
-    check(overlaySync.canDraw(closedFrame, 121L, screenCoordinates = true)) // Ordinary walking is not blocked.
-    val flippedFrame = translatedFrame.copy(y = 90)
-    overlaySync.request(flippedFrame, 130L, DragMotion.Point(0f, 50f))
-    check(!overlaySync.canDraw(translatedFrame, 131L, screenCoordinates = true))
-    check(overlaySync.canDraw(flippedFrame, 132L, screenCoordinates = true))
-    check(OverlayBounds.keyboardEscapeY(150f, 85f, 30f) == 85f)
-    check(OverlayBounds.keyboardEscapeY(150f, 5f, 30f) == 30f)
-    check(OverlayBounds.keyboardEscapeY(30f, 5f, 30f) == null)
-    check(OverlayBounds.keyboardEscapeY(42f, 41.5f, 30f) == null)
-    check(OverlayBounds.keyboardEscapeY(30f, 150f, 20f) == null)
+    val targetSole = 290f
+    val spriteHeight = 172
+    val spriteTop = ToyFooting.topForFeet(targetSole, spriteHeight, 2f)
+    val windowCentre = ToyFooting.centreForFeet(targetSole, spriteHeight, 2f)
+    check(ToyFooting.feetY(spriteTop, spriteHeight, 2f) == targetSole && windowCentre - spriteHeight / 2f == spriteTop)
+    check(ToyFooting.beside(8f, 172, 64, 360, 6f, preferLeft = true) == 218f)
+    check(ToyFooting.beside(180f, 172, 64, 360, 6f, preferLeft = false) == 142f)
+
+    val counter = OverlayBounds.Box(36, 180, 112, 148)
+    val station = LemonadeLayout.station(counter.x.toFloat(), counter.y.toFloat(), counter.width, 86, 1f)
+    check(station == DragMotion.Point(92f, 248f))
+    val sprite = OverlayBounds.Box((station.x - 32).toInt(), (station.y - 43).toInt(), 64, 86)
+    check(sprite.y + 65 == counter.y + 90) // Face clears the 96dp lip.
+    check(sprite.bottom > counter.y + 96 && sprite.bottom <= counter.bottom) // Legs sit behind the cabinet.
+    check(LemonadeLayout.isPipTap(56f, 55f, counter.width, 1f))
+    check(!LemonadeLayout.isPipTap(56f, 96f, counter.width, 1f))
+    check(!LemonadeLayout.isPipTap(14f, 55f, counter.width, 1f))
+    val smallerCaption = OverlayBounds.anchoredPanel(counter, 90, 38, 320, 24, 600, 6, 8)
+    val longerCaption = OverlayBounds.anchoredPanel(counter, 204, 114, 320, 24, 600, 6, 8)
+    check(smallerCaption.bottom == counter.y - 8 && longerCaption.bottom == counter.y - 8)
+    check(longerCaption.x == 6 && sprite == OverlayBounds.Box(60, 205, 64, 86))
+    val topCounter = counter.copy(y = 38)
+    check(OverlayBounds.anchoredPanel(topCounter, 200, 100, 320, 24, 600, 6, 8).y == topCounter.bottom + 8)
+    check(OverlayBounds.keyboardEscapeY(420f, 410f, 24f) == 410f)
+    check(OverlayBounds.keyboardEscapeY(24f, 4f, 24f) == null)
 
     val bubbleClock = SpeechBubbleTiming()
     bubbleClock.hold(null)
@@ -1064,6 +1121,25 @@ fun main() {
     check(bubbleClock.opacity == 1f)
     bubbleClock.advance(100_100L, visible = true, animate = false)
     check(bubbleClock.finished)
+
+    val captionPause = CaptionIdlePause()
+    val preset = SpeechBubbleTiming()
+    check(captionPause.permitsIdleMotion(0L))
+    preset.hold(3_500L)
+    captionPause.visibilityChanged(true, 0L)
+    for (tick in 0L..3_700L step 100L) {
+        preset.advance(tick, visible = true, animate = true)
+        captionPause.visibilityChanged(!preset.finished, tick)
+        check(!captionPause.permitsIdleMotion(tick)) // Also covers expiry of the old 3.5s idle timer.
+    }
+    check(preset.finished)
+    captionPause.visibilityChanged(false, 4_599L) // Layout can run repeatedly after removal.
+    check(!captionPause.permitsIdleMotion(4_599L))
+    check(captionPause.permitsIdleMotion(4_600L))
+    captionPause.visibilityChanged(true, 4_601L)
+    check(!captionPause.permitsIdleMotion(6_000L))
+    captionPause.visibilityChanged(false, 6_000L) // Explicit dismissal gets the same short pause.
+    check(!captionPause.permitsIdleMotion(6_899L) && captionPause.permitsIdleMotion(6_900L))
 
     val spokenReply = "One two three"
     val voiceCaption = checkNotNull(SpeechCaption.from(spokenReply, 420))

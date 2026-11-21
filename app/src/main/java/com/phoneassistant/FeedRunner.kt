@@ -56,6 +56,8 @@ internal object FeedRunner {
                 ?: return "" to "Instagram is not launchable for automatic Reels"
         } else Screen.apps(ctx).singleOrNull { JobProgress.normalize(it.label) == plan.app }
             ?: return "I couldn't identify an installed app named ${plan.app}." to "feed app not resolved"
+        val instagramReels = InstagramReelsPolicy.requested(app.packageName, plan.surface, bulk)
+        var requireReelsViewer = false
         val reaction = plan.reaction
         val shortVideo = JobProgress.shortVideoSurface(plan.surface)
         val singleItemSurface = !bulk && shortVideo
@@ -105,7 +107,8 @@ internal object FeedRunner {
         fun look(): Screen.Snapshot? {
             states.clear()
             playbacks.clear()
-            return Screen.snapshot(feed = true, expectedApp = app.packageName)
+            return if (instagramReels) Screen.instagramReels(requireReelsViewer)
+            else Screen.snapshot(feed = true, expectedApp = app.packageName)
         }
         fun state(item: Screen.Item) = if (reaction == null) ReactionState.UNKNOWN else
             states.getOrPut(item) { Screen.reactionState(item, reaction) }
@@ -119,13 +122,13 @@ internal object FeedRunner {
             return Screen.playback(item, inlineTimeline(item)).also { playbacks[item] = it }
         }
         fun reelAd(view: Screen.Snapshot) = singleItemSurface && plan.surface == "reels" &&
-            view.app == "com.instagram.android" && view.items.any(Screen::reelAd)
+            view.app == InstagramReelsPolicy.PACKAGE && view.items.any(Screen::reelAd)
         fun hasVideoViewer(view: Screen.Snapshot, surface: String) = view.items.any { item ->
             !item.editable && !item.password && JobProgress.matchesFeedViewer(item.id, surface, view.app) &&
                 item.bounds.width() >= metrics.widthPixels * 0.60f &&
                 item.bounds.height() >= metrics.heightPixels * 0.40f
         }
-        fun leftReels(view: Screen.Snapshot): Boolean = singleItemSurface && view.app == "com.instagram.android" &&
+        fun leftReels(view: Screen.Snapshot): Boolean = singleItemSurface && view.app == InstagramReelsPolicy.PACKAGE &&
             view.items.any { Screen.isSelectedFeedTab(it, "home") } &&
             view.items.none { Screen.isSelectedFeedTab(it, "reels") } && !hasVideoViewer(view, "reels") &&
             view.items.none { !it.node.isClickable && Screen.isFeedTab(it, "reels") &&
@@ -243,11 +246,17 @@ internal object FeedRunner {
             }
             if (!active()) return stopped()
             val opened = Screen.open(ctx, app)
-            Diag.jobStep(mine, "open ${app.label}", if (opened) "opened it" else "launch failed", opened)
+            Diag.jobStep(mine, "open ${app.label}", if (opened) "launch requested" else "launch failed", opened)
             if (!opened) return report("I couldn't open ${app.label}.", "launch failed")
             SystemClock.sleep(1_500L)
         }
-        var screen = initialRead() ?: return report("I couldn't read the feed.", "app not in front or unreadable")
+        var screen = initialRead() ?: return when {
+            !active() -> stopped()
+            Screen.inFront() != app.packageName -> report("${app.label} didn't come to the front. Open it and try again.", "target app not in front")
+            instagramReels -> report("I couldn't verify a Reels screen. Open Reels in Instagram and try again.",
+                "Instagram in front, but no readable Reels viewer or tab")
+            else -> report("I couldn't read the feed.", "feed app in front but unreadable")
+        }
         if (plan.surface != null) {
             val surface = plan.surface
             fun tabs(view: Screen.Snapshot) = view.items.filter { Screen.isFeedTab(it, surface) }
@@ -266,7 +275,8 @@ internal object FeedRunner {
             }
             fun alreadyOpen(view: Screen.Snapshot): Boolean {
                 val read = readSurface(view)
-                return read.selected || read.viewer || (read.heading && read.title && candidates(view).isEmpty())
+                return if (instagramReels) read.viewer else
+                    read.selected || read.viewer || (read.heading && read.title && candidates(view).isEmpty())
             }
             var opened = alreadyOpen(screen)
             for (attempt in 1..TAB_TRIES) {
@@ -299,7 +309,8 @@ internal object FeedRunner {
                     if (fresh != null) {
                         val reading = readSurface(fresh)
                         changed = changed || fresh.windowId != originalWindow || fingerprint(fresh) != originalViewport
-                        val signal = JobProgress.surfaceProof(before, reading, accepted, surface)
+                        val signal = if (instagramReels) JobProgress.SurfaceProof.VIEWER.takeIf { reading.viewer }
+                        else JobProgress.surfaceProof(before, reading, accepted, surface)
                         val sameTab = candidates(fresh).singleOrNull()?.let { sameControl(tab, it) } == true
                         if (watch.observe(fresh.windowId, signal, sameTab, reading.labels)) {
                             proof = signal
@@ -332,9 +343,9 @@ internal object FeedRunner {
                     val proof = fresh?.let {
                         val reading = readSurface(it)
                         when {
-                            reading.selected -> JobProgress.SurfaceProof.SELECTED
+                            reading.selected && !instagramReels -> JobProgress.SurfaceProof.SELECTED
                             reading.viewer -> JobProgress.SurfaceProof.VIEWER
-                            reading.heading && reading.title && candidates(it).isEmpty() -> JobProgress.SurfaceProof.TITLE
+                            !instagramReels && reading.heading && reading.title && candidates(it).isEmpty() -> JobProgress.SurfaceProof.TITLE
                             else -> null
                         }
                     }
@@ -350,6 +361,7 @@ internal object FeedRunner {
             if (!opened) return report("I couldn't confirm $surface. Open it in ${app.label} and try again.",
                 "requested feed surface not confirmed")
         }
+        requireReelsViewer = instagramReels
         screen = settledWithRetry(screen.windowId) ?: return if (!active()) stopped() else report(
             "The feed hadn't settled, so I left it alone.", "feed not stable before scan"
         )
@@ -679,7 +691,8 @@ internal object FeedRunner {
         ctx: Context, screen: Screen.Snapshot, eligible: List<Screen.Item>, active: () -> Boolean
     ): Int? {
         val text = screen.items.asSequence()
-            .filter { !it.editable && !it.password }
+            .filter { !it.editable && !it.password &&
+                (screen.app != InstagramReelsPolicy.PACKAGE || InstagramReelsPolicy.publicCaption(it.id)) }
             .map { it.label }.filter { it.count { ch -> ch == ' ' } >= 2 }.distinct().take(18).toList()
         if (text.isEmpty()) return 0
         val controls = eligible.map { item ->
