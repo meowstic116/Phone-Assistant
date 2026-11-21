@@ -283,7 +283,7 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         val bodyW = dp(46f)
         val bodyH = dp(62f)
         val legH = dp(9f)
-        val groundY = height - dp(2f)
+        val groundY = ToyFooting.feetY(0f, height, dp(1f))
         val cx = width / 2f
 
         val transition = powerPose
@@ -337,7 +337,7 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         } else {
             // Stubby legs, alternating while walking.
             val stepPhase = if (walking) kotlin.math.sin(t * 9f) else 0f
-            val legW = dp(7f)
+            val legW = dp(ToyFooting.SHOE_WIDTH_DP)
             val legTop = groundY - legH - bob
             val leftLift = if (walking) maxOf(0f, stepPhase) * dp(3.5f) else 0f
             val rightLift = if (walking) maxOf(0f, -stepPhase) * dp(3.5f) else 0f
@@ -349,8 +349,9 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
                 canvas.drawRoundRect(bodyRect, dp(3f), dp(3f), rimPaint.fillOnly())
                 if (saved != -1) canvas.restoreToCount(saved)
             }
-            foot(cx - dp(11f), leftLift, pickup?.leftFoot ?: 0f)
-            foot(cx + dp(4f), rightLift, pickup?.rightFoot ?: 0f)
+            val spread = dp(ToyFooting.SHOE_CENTRE_DP)
+            foot(cx - spread - legW / 2f, leftLift, pickup?.leftFoot ?: 0f)
+            foot(cx + spread - legW / 2f, rightLift, pickup?.rightFoot ?: 0f)
         }
 
         canvas.save()
@@ -393,7 +394,7 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
         gardenGrip?.let { grip ->
             val shoulder = cx + WateringPose.direction(facingRight) * dp(17f)
             // Body tilt is decorative; the hand stays on the can's fixed pivot.
-            canvas.drawLine(shoulder, bodyCenterY + dp(8f), grip.x, grip.y, facePaint)
+            canvas.drawLine(shoulder, bodyCenterY - dp(8f), grip.x, grip.y, facePaint)
             canvas.drawCircle(grip.x, grip.y, dp(2.5f), accentPaint)
         }
         if (pickupLayer != -1) canvas.restoreToCount(pickupLayer)

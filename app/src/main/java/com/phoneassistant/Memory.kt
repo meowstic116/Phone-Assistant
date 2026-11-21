@@ -21,13 +21,21 @@ object Memory {
         val raw = prefs(ctx).getString(KEY, "[]") ?: "[]"
         return try {
             val array = JSONArray(raw)
-            (0 until array.length()).map { index ->
-                val item = array.getJSONObject(index)
-                Msg(item.getString("role"), bounded(item.getString("content")))
+            (maxOf(0, array.length() - MAX_MESSAGES) until array.length()).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                val role = item.opt("role") as? String ?: return@mapNotNull null
+                val content = item.opt("content") as? String ?: return@mapNotNull null
+                if (role == "user" || role == "assistant") Msg(role, bounded(content)) else null
             }
-        } catch (t: Throwable) {
+        } catch (_: org.json.JSONException) {
             emptyList()
         }
+    }
+
+    /** Sending the current text must not depend on a successful local history write. */
+    internal fun forReply(history: List<Msg>, current: String): List<Msg> {
+        val latest = Msg("user", bounded(current))
+        return if (history.lastOrNull() == latest) history else history.takeLast(MAX_MESSAGES - 1) + latest
     }
 
     @Synchronized

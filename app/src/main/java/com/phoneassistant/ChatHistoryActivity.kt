@@ -146,6 +146,7 @@ class ChatHistoryActivity : Activity() {
 
         AssistantBrain.reply(
             this,
+            text,
             OverlayService.toysOnStage(),
             event,
             turn

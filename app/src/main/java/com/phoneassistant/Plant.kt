@@ -193,12 +193,13 @@ class Plant(host: PropHost) : Prop(host) {
         canvas.drawPath(path, centre)
     }
 
-    private fun potTop() = height - dp(43f + PlantDiscovery.LABEL_SPACE_DP)
+    private fun potBase() = height - dp(6f + PlantDiscovery.LABEL_SPACE_DP)
+    private fun potTop() = potBase() - dp(WateringPose.POT_DEPTH_DP)
 
     override fun onDraw(canvas: Canvas) {
         val cx = width / 2f
         val potTop = potTop()
-        val foot = height - dp(6f + PlantDiscovery.LABEL_SPACE_DP)
+        val foot = potBase()
         canvas.drawOval(cx - dp(35f), foot - dp(4f), cx + dp(35f), foot + dp(5f), shadow)
 
         // Lavender soil beneath a bouncy silhouette that grows from sprout to bloom.

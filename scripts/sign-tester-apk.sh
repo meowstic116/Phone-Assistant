@@ -21,6 +21,7 @@ fi
 command -v aapt2 >/dev/null || fail 'Install Android SDK Build-Tools and set ANDROID_BUILD_TOOLS.'
 command -v apksigner >/dev/null || fail 'Install Android SDK Build-Tools and set ANDROID_BUILD_TOOLS.'
 
+command -v python3 >/dev/null || fail 'Install Python 3 to publish the verified APK safely.'
 badging=$(aapt2 dump badging "$input")
 if ! grep -qF "package: name='com.phoneassistant.pip'" <<< "$badging" ||
     grep -q '^application-debuggable' <<< "$badging"; then
@@ -42,5 +43,6 @@ fi
 if grep -Eiq '(^Signer #1 certificate DN:.*CN=Android Debug|cb3ecf88e83faa707c656d6ae2cf6a4125e0dc677664e9e2606f78ad880d039b)' <<< "$certs"; then
     fail 'Do not distribute APKs signed with Android debug keys or the old public Pip key.'
 fi
-ln -- "$signed" "$output"
+# Create the exact requested filename atomically, even if another process used it during signing.
+python3 -c 'import os, sys; os.link(sys.argv[1], sys.argv[2])' "$signed" "$output"
 printf '%s\n\nReady to share: %s\n' "$certs" "$output"

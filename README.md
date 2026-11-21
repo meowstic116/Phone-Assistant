@@ -421,6 +421,8 @@ APKs are historical builds signed with a public key, not tester releases.
   unlocked phone and doesn’t send the text to the API or save it to chat history. Voice
   requests still need a tap on **Send**. Model-facing screen snapshots skip the default SMS
   app, recognized messaging apps, and apps Pip has seen provide message notifications.
+  Pip’s overlay captions are hidden in screenshots and screen sharing because that window
+  can show private message previews.
 - **“What’s the price shown on this screen?”** can trigger a one-time, read-only screen
   check when Pip’s accessibility access is enabled. Visible app text may go to your
   configured API to answer the question. Pip doesn’t tap, scroll, launch an app, or read

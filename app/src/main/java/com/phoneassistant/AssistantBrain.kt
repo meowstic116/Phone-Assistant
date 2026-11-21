@@ -95,39 +95,35 @@ object AssistantBrain {
         if (!Thread.currentThread().isInterrupted) done(result)
     }
 
-    /**
-     * Replies to the last message in [Memory]. [stage] is what is on the screen right
-     * now and [event] is anything that just happened because of the message. The callback
-     * fires on a background thread and receives (success, text).
-     */
+    /** Replies to this exact turn. History is optional context, never the source of the input. */
     internal fun reply(
         ctx: Context,
+        message: String,
         stage: String? = null,
         event: String? = null,
         turn: Long,
-        voiceMessage: String? = null,
+        handsFree: Boolean = false,
         voiceContext: VoiceExchange.Turn? = null,
         onDone: (Boolean, String) -> Unit
     ) {
         val appContext = ctx.applicationContext
-        // Spoken follow-ups can use the immediately preceding unlocked voice exchange,
-        // but never read conversation history, the screen, or saved facts.
-        val history = if (voiceMessage != null) buildList {
-            voiceContext?.let {
-                add(Memory.Msg("user", it.input))
-                add(Memory.Msg("assistant", it.reply))
-            }
-            add(Memory.Msg("user", voiceMessage))
-        } else ChatRecovery.attempt<List<Memory.Msg>?>(null, { Diag.chatFailure("chat history", it) }) {
-            Memory.history(appContext)
-        }
-        if (history == null) {
-            onDone(false, ChatRecovery.REPLY_FAILED)
-            return
-        }
         executor.execute {
             val result = ChatRecovery.attempt(false to ChatRecovery.REPLY_FAILED, { Diag.chatFailure("chat reply", it) }) {
-                resolveReply(appContext, history, stage, event, turn, voiceMessage != null)
+                if (!ChatTurns.isCurrent(turn)) return@attempt false to ""
+                // Spoken follow-ups can use only the immediately preceding unlocked voice exchange.
+                val history = if (handsFree) buildList {
+                    voiceContext?.let {
+                        add(Memory.Msg("user", it.input))
+                        add(Memory.Msg("assistant", it.reply))
+                    }
+                    add(Memory.Msg("user", message))
+                } else {
+                    val stored = ChatRecovery.attempt(emptyList<Memory.Msg>(), { Diag.chatFailure("chat history", it) }) {
+                        Memory.history(appContext)
+                    }
+                    Memory.forReply(stored, message)
+                }
+                resolveReply(appContext, history, stage, event, turn, handsFree)
             }
             onDone(result.first, result.second)
         }
@@ -351,7 +347,11 @@ object AssistantBrain {
                 // Read only to recognize invalid-key error tags; never log or show provider bodies.
                 connection.errorStream
             } else null
-            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readBounded(256 * 1024) }
+            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use {
+                // A socket read timeout alone is reset by each chunk, so a slow response
+                // that keeps trickling in could stall every reply behind it.
+                it.readBounded(256 * 1024, budgetNanos = (if (setup) 15L else 25L) * 1_000_000_000L)
+            }
             return HttpReply(code, raw)
         } finally {
             connection.disconnect()

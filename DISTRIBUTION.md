@@ -8,7 +8,7 @@ is a separate, local-development build and should not be shared.
 
 ## 1. Create a private signing key once
 
-On your own computer, install JDK 17 and Android SDK Platform 34 / Build-Tools (Android
+On your own computer, install JDK 17, Python 3, and Android SDK Platform 34 / Build-Tools (Android
 Studio can install them). Keep the keystore **outside** the Git checkout. This example
 uses a macOS/Linux-style shell; Windows users can also sign via Android Studio’s
 **Build → Generate Signed Bundle / APK → APK** instead.

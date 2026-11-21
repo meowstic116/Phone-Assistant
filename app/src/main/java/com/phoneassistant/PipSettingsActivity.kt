@@ -88,7 +88,7 @@ class PipSettingsActivity : Activity() {
         button("Choose Pip’s voice") { configureVoice() }
         kokoroStatus = text("")
         kokoroAction = button("Download Kokoro") {
-            if (KokoroVoice.ready(this)) {
+            if (KokoroVoice.hasDownload(this)) {
                 AlertDialog.Builder(this).setTitle("Remove Kokoro?")
                     .setMessage("You can download it again later to hear Pip offline.")
                     .setNegativeButton("Cancel", null).setPositiveButton("Remove") { _, _ -> KokoroVoice.remove(this) }.show()
@@ -210,12 +210,12 @@ class PipSettingsActivity : Activity() {
             VoiceSource.KOKORO -> "${config.kokoro.label} · Kokoro offline"
             VoiceSource.ANDROID -> "Offline Android voice"
         }
-        val showKokoro = config.source == VoiceSource.KOKORO || KokoroVoice.busy() || KokoroVoice.ready(this)
+        val showKokoro = config.source == VoiceSource.KOKORO || KokoroVoice.busy() || KokoroVoice.hasDownload(this)
         kokoroStatus.visibility = if (showKokoro) View.VISIBLE else View.GONE
         kokoroStatus.text = KokoroVoice.status(this)
         kokoroAction.visibility = if (showKokoro && KokoroVoice.supported()) View.VISIBLE else View.GONE
         kokoroAction.isEnabled = !KokoroVoice.busy()
-        kokoroAction.text = if (KokoroVoice.ready(this)) "Remove Kokoro download" else "Download Kokoro"
+        kokoroAction.text = if (KokoroVoice.hasDownload(this)) "Remove Kokoro download" else "Download Kokoro"
     }
 
     override fun onStart() {

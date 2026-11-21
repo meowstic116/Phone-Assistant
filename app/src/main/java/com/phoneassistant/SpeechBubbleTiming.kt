@@ -32,3 +32,17 @@ internal class SpeechBubbleTiming {
 
     private companion object { const val FADE_MS = 180L }
 }
+
+/** A caption may coexist with deliberate toy movement, but doesn't cue a new idle walk. */
+internal class CaptionIdlePause {
+    private var visible = false
+    private var resumeAt = 0L
+
+    fun visibilityChanged(shown: Boolean, now: Long) {
+        if (shown == visible) return
+        visible = shown
+        if (!shown) resumeAt = now + 900L
+    }
+
+    fun permitsIdleMotion(now: Long): Boolean = !visible && now >= resumeAt
+}

@@ -7,13 +7,11 @@ internal object OverlayBounds {
         val bottom get() = y + height
     }
 
-    /** Both children keep their screen position when the shared window expands. */
-    fun union(pet: Box, bubble: Box?): Box {
-        if (bubble == null) return pet
-        val left = minOf(pet.x, bubble.x)
-        val top = minOf(pet.y, bubble.y)
-        return Box(left, top, maxOf(pet.right, bubble.right) - left, maxOf(pet.bottom, bubble.bottom) - top)
-    }
+    /** Position the independently sized panel near its anchor without changing the anchor. */
+    fun anchoredPanel(anchor: Box, width: Int, height: Int, screenWidth: Int, top: Int, bottom: Int,
+                      sideMargin: Int, gap: Int): Box = Box(
+        (anchor.x + (anchor.width - width) / 2).coerceIn(sideMargin, (screenWidth - width - sideMargin).coerceAtLeast(sideMargin)),
+        panelY(anchor.y, anchor.height, height, gap, top, bottom), width, height)
 
     fun clamp(value: Float, start: Float, end: Float) = value.coerceIn(start, end.coerceAtLeast(start))
 

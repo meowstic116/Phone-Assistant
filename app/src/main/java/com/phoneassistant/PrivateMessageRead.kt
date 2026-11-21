@@ -11,7 +11,7 @@ internal object PrivateMessageRead {
     private val packages = setOf("com.google.android.apps.messaging", "com.samsung.android.messaging",
         "com.android.messaging", "com.android.mms", "com.whatsapp", "com.whatsapp.w4b", "org.thoughtcrime.securesms",
         "org.telegram.messenger", "org.telegram.messenger.web", "com.facebook.orca", "com.discord", "com.viber.voip",
-        "jp.naver.line.android", "com.tencent.mm", "com.snapchat.android", "com.instagram.android", "com.Slack",
+        "jp.naver.line.android", "com.tencent.mm", "com.snapchat.android", InstagramReelsPolicy.PACKAGE, "com.Slack",
         "com.microsoft.teams", "com.google.android.gm", "com.microsoft.office.outlook")
 
     private val observed = ConcurrentHashMap.newKeySet<String>()

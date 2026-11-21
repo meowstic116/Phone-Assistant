@@ -51,6 +51,16 @@ jobs:
           APK: ${{ steps.sign.outputs.apk }}
         run: |
           set -euo pipefail
-          gh release create "pip-dev-v$VERSION" "$APK" --target "$GITHUB_SHA" \
+          # --target is ignored if this tag already exists. Don't attach a new build to
+          # a pre-existing tag (including a tag without a corresponding release).
+          tag="pip-dev-v$VERSION"
+          if git -c credential.helper='!gh auth git-credential' ls-remote --exit-code --refs origin "refs/tags/$tag"; then
+            echo "Refusing to publish: $tag already exists." >&2
+            exit 1
+          else
+            status=$?
+            [[ "$status" == 2 ]] || exit "$status"
+          fi
+          gh release create "$tag" "$APK" --target "$GITHUB_SHA" \
             --prerelease --latest=false --title "Pip Dev $VERSION" \
             --notes 'Debug build for personal testing. Separate from privately signed Pip Tester builds.'

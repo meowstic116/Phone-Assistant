@@ -68,6 +68,8 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     private fun cellW(): Float = (width - pad() * 2f) / cols
     private fun cellH(): Float = (gridBottom() - gridTop()) / rows
 
+    private fun domeRadius() = minOf(cellW(), cellH()) * 0.39f
+
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
@@ -88,7 +90,7 @@ class BubbleWrap(host: PropHost) : Prop(host) {
 
         val cw = cellW()
         val ch = cellH()
-        val radius = minOf(cw, ch) * 0.39f
+        val radius = domeRadius()
         for (row in 0 until rows) {
             for (col in 0 until cols) {
                 val cx = pad() + cw * (col + 0.5f)
@@ -235,9 +237,10 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     }
 
     private fun jumpTo(index: Int, now: Long) {
-        val cx = posX + pad() + cellW() * (index % cols + 0.5f)
-        val cy = posY + gridTop() + cellH() * (index / cols + 0.5f)
-        val started = host.petHopOn(this, cx, cy) { landed ->
+        val cx = posX.toInt() + pad() + cellW() * (index % cols + 0.5f)
+        val cy = posY.toInt() + gridTop() + cellH() * (index / cols + 0.5f)
+        val landing = bubbleLanding(cx, cy, domeRadius(), host.petCentreX(), host.petWidth(), host.stageWidth(), dp(1f))
+        val started = host.petHopOn(this, landing.x, landing.y) { landed ->
             val at = SystemClock.uptimeMillis()
             hops.finished(at, landed)
             if (landed && !leaving) pop(index, at, byPip = true)

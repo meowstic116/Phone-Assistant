@@ -14,12 +14,15 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import java.util.concurrent.Future
 
 class PaintingGalleryActivity : Activity() {
     private lateinit var list: LinearLayout
     private lateinit var status: TextView
     private lateinit var add: Button
     private var renderId = 0
+    private var thumbnailWork: Future<*>? = null
+    private var resumed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,11 +55,26 @@ class PaintingGalleryActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         render()
     }
 
+    override fun onStop() {
+        resumed = false
+        cancelThumbnails()
+        super.onStop()
+    }
+
+    private fun cancelThumbnails() {
+        renderId++
+        thumbnailWork?.cancel(true)
+        thumbnailWork = null
+    }
+
     private fun render() {
-        val mine = ++renderId
+        if (!resumed) return
+        cancelThumbnails()
+        val mine = renderId
         val pictures = PaintingGallery.pictures(this)
         val previews = mutableListOf<Pair<PaintingGallery.Picture, ImageView>>()
         list.removeAllViews()
@@ -95,10 +113,13 @@ class PaintingGalleryActivity : Activity() {
             }
         }
         val ctx = applicationContext
-        PaintingGallery.worker.execute {
-            val decoded = previews.map { (picture, image) -> PaintingGallery.bitmap(ctx, picture, thumbnail = true) to image }
+        thumbnailWork = PaintingGallery.worker.submit {
+            val decoded = previews.asSequence().takeWhile { !Thread.currentThread().isInterrupted }
+                .map { (picture, image) -> PaintingGallery.bitmap(ctx, picture, thumbnail = true) to image }.toList()
             runOnUiThread {
-                if (!isDestroyed && !isFinishing && mine == renderId) decoded.forEach { (bitmap, view) -> view.setImageBitmap(bitmap) }
+                if (resumed && !isDestroyed && !isFinishing && mine == renderId) {
+                    decoded.forEach { (bitmap, view) -> view.setImageBitmap(bitmap) }
+                } else decoded.forEach { (bitmap, _) -> bitmap?.recycle() }
             }
         }
     }

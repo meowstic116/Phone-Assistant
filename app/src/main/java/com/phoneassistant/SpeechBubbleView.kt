@@ -37,6 +37,8 @@ internal class SpeechBubbleView(context: Context) : View(context) {
     private var padX = 0
     private var padY = 0
     private var body: StaticLayout? = null
+    private var styledBody: SpannableString? = null
+    private val unrevealedInk = ForegroundColorSpan(Color.TRANSPARENT)
     private var dotsStartedAt = 0L
     var panelWidth = 1
         private set
@@ -60,6 +62,7 @@ internal class SpeechBubbleView(context: Context) : View(context) {
             panelWidth = dp(52f).coerceAtMost(maxWidth)
             panelHeight = dp(28f).coerceAtMost(maxHeight)
             body = null
+            styledBody = null
             contentDescription = "Pip is thinking"
         } else {
             if (newLayout) {
@@ -70,21 +73,21 @@ internal class SpeechBubbleView(context: Context) : View(context) {
                 val font = pen.fontMetricsInt
                 val lineHeight = (font.bottom - font.top + dp(2f)).coerceAtLeast(1)
                 lines = ((maxHeight - padY * 2) / lineHeight).coerceAtLeast(1)
-                val full = layout(value)
+                val styled = SpannableString(value)
+                styledBody = styled
+                val full = layout(styled)
+                body = full
                 panelWidth = bodyWidth + padX * 2
                 panelHeight = (full.height + padY * 2).coerceIn(dp(26f).coerceAtMost(maxHeight), maxHeight)
-                if (end >= value.length) body = full
             }
-            if (!newLayout || end < value.length) {
-                body = if (end >= value.length) layout(value) else {
-                    val masked = SpannableString(value).apply {
-                        setSpan(ForegroundColorSpan(Color.TRANSPARENT), end.coerceIn(0, length), length,
-                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    }
-                    layout(masked)
-                }
+            // This span changes only ink, not measurement. Keep line breaks and the
+            // StaticLayout for the whole utterance, including during word-by-word reveal.
+            val visibleEnd = end.coerceIn(0, value.length)
+            styledBody?.apply {
+                if (visibleEnd == length) removeSpan(unrevealedInk)
+                else setSpan(unrevealedInk, visibleEnd, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            contentDescription = value.take(end.coerceIn(0, value.length))
+            contentDescription = value.take(visibleEnd)
         }
         invalidate()
     }
@@ -92,6 +95,11 @@ internal class SpeechBubbleView(context: Context) : View(context) {
     private fun layout(value: CharSequence) = StaticLayout.Builder.obtain(value, 0, value.length, pen, bodyWidth)
         .setLineSpacing(dp(2f).toFloat(), 1f).setMaxLines(lines).setEllipsize(TextUtils.TruncateAt.END)
         .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE).build()
+
+    override fun onDetachedFromWindow() {
+        hasDrawn = false
+        super.onDetachedFromWindow()
+    }
 
     override fun onDraw(canvas: Canvas) {
         hasDrawn = width > 0 && height > 0

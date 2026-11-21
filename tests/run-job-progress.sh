@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-kotlinc app/src/main/java/com/phoneassistant/JobProgress.kt \
+kotlinc app/src/main/java/com/phoneassistant/JobProgress.kt app/src/main/java/com/phoneassistant/InstagramReelsPolicy.kt \
   app/src/main/java/com/phoneassistant/WorkLifetime.kt app/src/main/java/com/phoneassistant/ToyLifetime.kt \
   app/src/main/java/com/phoneassistant/PopSheet.kt app/src/main/java/com/phoneassistant/PlantGrowth.kt \
   app/src/main/java/com/phoneassistant/DragMotion.kt app/src/main/java/com/phoneassistant/PipTransition.kt \
@@ -18,7 +18,7 @@ kotlinc app/src/main/java/com/phoneassistant/JobProgress.kt \
   app/src/main/java/com/phoneassistant/VoiceProtocol.kt app/src/main/java/com/phoneassistant/SpeechCaption.kt \
   app/src/main/java/com/phoneassistant/VoiceChoice.kt app/src/main/java/com/phoneassistant/KokoroHealth.kt \
   app/src/main/java/com/phoneassistant/ChatRecovery.kt app/src/main/java/com/phoneassistant/BoundedText.kt \
-  app/src/main/java/com/phoneassistant/OverlayBounds.kt app/src/main/java/com/phoneassistant/OverlayFrameSync.kt \
+  app/src/main/java/com/phoneassistant/OverlayBounds.kt app/src/main/java/com/phoneassistant/LemonadeLayout.kt app/src/main/java/com/phoneassistant/ToyFooting.kt \
   app/src/main/java/com/phoneassistant/ReplyBubbleState.kt app/src/main/java/com/phoneassistant/KokoroPcm.kt \
   app/src/main/java/com/phoneassistant/SpeechBubbleTiming.kt app/src/main/java/com/phoneassistant/WakePhrase.kt \
   app/src/main/java/com/phoneassistant/WakeStartupPolicy.kt app/src/main/java/com/phoneassistant/VoiceExchange.kt \

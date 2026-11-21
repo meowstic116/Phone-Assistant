@@ -122,6 +122,75 @@ object Screen {
         return Snapshot(app, windowId, visible, if (localFeed) "" else listing(visible, web))
     }
 
+    /** No generic Instagram snapshot: inspect structural IDs first, then read only allowed
+     * public fields under a recognized Reels viewer. Never read inbox, chat or comment text. */
+    internal fun instagramReels(requireViewer: Boolean): Snapshot? = runCatching {
+        val svc = service ?: return null
+        val root = svc.rootInActiveWindow ?: return null
+        if (root.packageName?.toString() != InstagramReelsPolicy.PACKAGE) return null
+        val items = ArrayList<Item>()
+        if (!scanInstagramReels(svc, root, requireViewer, items)) return null
+        Snapshot(InstagramReelsPolicy.PACKAGE, root.windowId, items, "")
+    }.onFailure { Diag.caught("Instagram Reels read", it) }.getOrNull()
+
+    private fun scanInstagramReels(
+        svc: AccessibilityService, root: AccessibilityNodeInfo, requireViewer: Boolean, out: MutableList<Item>? = null
+    ): Boolean {
+        if (root.packageName?.toString() != InstagramReelsPolicy.PACKAGE) return false
+        val size = svc.resources.displayMetrics
+        val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Boolean>>()
+        val candidates = ArrayList<Pair<AccessibilityNodeInfo, Boolean>>()
+        queue.add(root to false)
+        var scanned = 0
+        var complete = true
+        var blocked = false
+        var hasViewer = false
+        var hasReelsTab = false
+        val bounds = Rect()
+        val prefix = "${InstagramReelsPolicy.PACKAGE}:id/"
+        while (queue.isNotEmpty() && !blocked && complete) {
+            val (node, insideViewer) = queue.removeFirst()
+            scanned++
+            val foreign = node.packageName?.toString() != InstagramReelsPolicy.PACKAGE || node.windowId != root.windowId
+            if (foreign || !node.isVisibleToUser) {
+                if (node !== root) hand(node)
+                continue
+            }
+            // Check resource namespace as well as the short ID, before reading any text.
+            val id = node.viewIdResourceName?.takeIf { it.startsWith(prefix) }?.removePrefix(prefix)
+            node.getBoundsInScreen(bounds)
+            val wide = bounds.width() >= size.widthPixels * 0.60f
+            val viewer = InstagramReelsPolicy.viewer(id, wide && bounds.height() >= size.heightPixels * 0.40f)
+            val protectedField = !bounds.isEmpty && (node.isEditable || node.isPassword)
+            blocked = protectedField || InstagramReelsPolicy.blocked(id, wide && bounds.height() >= size.heightPixels * 0.20f)
+            val tab = InstagramReelsPolicy.tab(id)
+            hasViewer = hasViewer || viewer
+            hasReelsTab = hasReelsTab || tab == "reels" && node.isEnabled && node.isClickable
+            val remaining = MAX_NODES - scanned - queue.size
+            val children = node.childCount
+            if (children > remaining) complete = false
+            if (!blocked && complete) for (child in 0 until children) {
+                node.getChild(child)?.let { queue.add(it to (insideViewer || viewer)) }
+            }
+            if (out != null && !blocked && (viewer || tab != null || InstagramReelsPolicy.reelItem(id, insideViewer))) {
+                // A container's description can aggregate text; never retain the viewer's label.
+                candidates.add(node to (viewer || tab != null))
+            } else if (node !== root) hand(node)
+        }
+        while (queue.isNotEmpty()) hand(queue.removeFirst().first)
+        val readable = InstagramReelsPolicy.readable(blocked, complete, hasViewer, hasReelsTab, requireViewer)
+        for ((node, structural) in candidates) {
+            if (!(readable && out != null && consider(node, out, feed = true, structuralOnly = structural, instagram = true)) && node !== root) hand(node)
+        }
+        return readable
+    }
+
+    private fun recheckInstagramReels(screen: Snapshot, requireViewer: Boolean): Boolean = runCatching {
+        val svc = service ?: return false
+        val root = svc.rootInActiveWindow ?: return false
+        root.windowId == screen.windowId && scanInstagramReels(svc, root, requireViewer)
+    }.getOrDefault(false)
+
     /**
      * Walks the tree in reading order. Our own overlay windows are skipped: Pip's bubble and
      * his panel are not things he should be pressing.
@@ -171,22 +240,29 @@ object Screen {
     }
 
     /** Whether this node became an item. One that did is kept until its snapshot is released. */
-    private fun consider(node: AccessibilityNodeInfo, out: MutableList<Item>, feed: Boolean): Boolean {
+    private fun consider(
+        node: AccessibilityNodeInfo, out: MutableList<Item>, feed: Boolean,
+        structuralOnly: Boolean = false, instagram: Boolean = false
+    ): Boolean {
         val editable = node.isEditable
         val password = node.isPassword
         // What a field contains is never put in the listing, and the listing is the one thing
         // that leaves the phone: a username, a search for something private, or a password in
         // a field the app did not flag. Only the field's own label, whether it has anything in
         // it, and the app's placeholder go out — never the text.
-        val label = nodeLabel(node)
+        val id = node.viewIdResourceName?.substringAfterLast('/')
+        val label = when {
+            structuralOnly -> ""
+            instagram && InstagramReelsPolicy.publicCaption(id) -> node.text?.toString()?.replace(WHITESPACE, " ")?.trim()?.take(LABEL_MAX).orEmpty()
+            else -> nodeLabel(node)
+        }
         val filled = editable && !password && !node.text.isNullOrEmpty()
         val scrollable = node.isScrollable
         // Everything that can be pressed, typed into or scrolled, plus plain text: the text
         // is how the model knows it is looking at the right conversation or message.
-        val id = node.viewIdResourceName?.substringAfterLast('/')
         val feedViewer = feed && (JobProgress.matchesFeedViewer(id, "reels", node.packageName?.toString()) ||
             JobProgress.matchesFeedViewer(id, "shorts"))
-        if (!editable && !node.isClickable && !node.isCheckable && !scrollable && label.isEmpty() && !feedViewer &&
+        if (!editable && !node.isClickable && !node.isCheckable && !scrollable && label.isEmpty() && !feedViewer && !structuralOnly &&
             !(feed && node.rangeInfo != null)) {
             return false
         }
@@ -198,7 +274,7 @@ object Screen {
             index = out.size + 1,
             role = role,
             label = label,
-            hint = if (password) "" else node.hintText?.toString()?.replace(WHITESPACE, " ")?.trim()
+            hint = if (password || instagram) "" else node.hintText?.toString()?.replace(WHITESPACE, " ")?.trim()
                 ?.take(HINT_MAX).orEmpty(),
             editable = editable,
             password = password,
@@ -228,7 +304,9 @@ object Screen {
         sameWindow(screen) && node.refresh() && node.isVisibleToUser && node.isEnabled &&
             node.windowId == screen.windowId && node.packageName?.toString() == screen.app &&
             node.isEditable == item.editable && node.isPassword == item.password &&
-            nodeLabel(node) == item.label && Rect().also(node::getBoundsInScreen) == item.bounds
+            (if (screen.app == InstagramReelsPolicy.PACKAGE && InstagramReelsPolicy.tab(item.id) != null)
+                node.viewIdResourceName == "${screen.app}:id/${item.id}" else nodeLabel(node) == item.label) &&
+            Rect().also(node::getBoundsInScreen) == item.bounds
     }.getOrDefault(false)
 
     private fun listing(items: List<Item>, web: Boolean): String {
@@ -313,7 +391,8 @@ object Screen {
 
     internal fun reactionState(item: Item, reaction: JobProgress.Reaction): JobProgress.ReactionState {
         val node = item.node
-        if (node.isEditable || node.isPassword) return JobProgress.ReactionState.UNKNOWN
+        if (node.isEditable || node.isPassword || node.packageName?.toString() == InstagramReelsPolicy.PACKAGE &&
+            !InstagramReelsPolicy.likeControl(item.id)) return JobProgress.ReactionState.UNKNOWN
         val state = if (Build.VERSION.SDK_INT >= 30) node.stateDescription?.toString().orEmpty() else ""
         val result = JobProgress.reactionState(
             reaction, node.contentDescription?.toString().orEmpty(), node.text?.toString().orEmpty(), state,
@@ -334,6 +413,7 @@ object Screen {
     internal fun pressReaction(
         item: Item, screen: Snapshot, reaction: JobProgress.Reaction, active: () -> Boolean
     ): ReactionPress {
+        if (screen.app == InstagramReelsPolicy.PACKAGE && !recheckInstagramReels(screen, requireViewer = true)) return ReactionPress.STALE
         if (!targetStillVisible(screen, item) || reactionState(item, reaction) != JobProgress.ReactionState.READY || !active()) {
             return ReactionPress.STALE
         }
@@ -343,27 +423,31 @@ object Screen {
     }
 
     internal fun isFeedTab(item: Item, surface: String): Boolean = !item.editable && !item.password &&
-        listOf(item.node.text, item.node.contentDescription).any {
+        (if (item.node.packageName?.toString() == InstagramReelsPolicy.PACKAGE) InstagramReelsPolicy.tab(item.id) == surface
+        else listOf(item.node.text, item.node.contentDescription).any {
             JobProgress.matchesFeedTab(it?.toString().orEmpty(), surface)
-        }
+        })
 
     internal fun isSelectedFeedTab(item: Item, surface: String): Boolean =
         isFeedTab(item, surface) && (item.node.isSelected || item.node.isChecked ||
-            listOf(item.node.text, item.node.contentDescription).any {
+            item.node.packageName?.toString() != InstagramReelsPolicy.PACKAGE && listOf(item.node.text, item.node.contentDescription).any {
                 JobProgress.selectedFeedTab(it?.toString().orEmpty(), surface)
             })
 
     internal fun pressFeedTab(item: Item, screen: Snapshot, surface: String): Boolean = runCatching {
-        targetStillVisible(screen, item) && item.node.isClickable && isFeedTab(item, surface) &&
+        (screen.app != InstagramReelsPolicy.PACKAGE || recheckInstagramReels(screen, requireViewer = false)) &&
+            targetStillVisible(screen, item) && item.node.isClickable && isFeedTab(item, surface) &&
             item.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }.getOrDefault(false)
 
     internal fun reelAd(item: Item): Boolean = !item.editable && !item.password &&
+        (item.node.packageName?.toString() != InstagramReelsPolicy.PACKAGE || InstagramReelsPolicy.adBadge(item.id)) &&
         (JobProgress.reelAdDisclosure(item.id, item.node.text?.toString().orEmpty(), description = false) ||
             JobProgress.reelAdDisclosure(item.id, item.node.contentDescription?.toString().orEmpty(), description = true))
 
     internal fun playback(item: Item, inlineTimeline: Boolean = false): JobProgress.Playback? {
-        if (item.editable || item.password) return null
+        if (item.editable || item.password || item.node.packageName?.toString() == InstagramReelsPolicy.PACKAGE &&
+            !InstagramReelsPolicy.timeline(item.id)) return null
         val id = item.id.orEmpty().lowercase()
         val relevantId = id.contains("progress") && (id.contains("playback") || id.contains("video") || id.contains("reel"))
         val timeline = item.role == "SeekBar" || relevantId || inlineTimeline
@@ -406,7 +490,13 @@ object Screen {
         val root = runCatching { svc.rootInActiveWindow }.getOrNull() ?: return false
         if (root.windowId != screen.windowId || root.packageName?.toString() != screen.app) return false
         val metrics = svc.resources.displayMetrics
-        val area = Rect().also(root::getBoundsInScreen)
+        val area = if (screen.app == InstagramReelsPolicy.PACKAGE) {
+            val viewer = screen.items.filter {
+                InstagramReelsPolicy.viewer(it.id, broad = true) && it.bounds.width() >= metrics.widthPixels * 0.60f &&
+                    it.bounds.height() >= metrics.heightPixels * 0.40f
+            }.maxByOrNull { it.bounds.width().toLong() * it.bounds.height() } ?: return false
+            Rect(viewer.bounds)
+        } else Rect().also(root::getBoundsInScreen)
         if (!area.intersect(0, 0, metrics.widthPixels, metrics.heightPixels) ||
             area.width() < metrics.widthPixels * 0.45f || area.height() < metrics.heightPixels * 0.45f) return false
         val swipe = JobProgress.feedSwipe(shortVideo, retry)
@@ -819,6 +909,7 @@ object Screen {
             if (!guard.overlay(footprint) || !guard.active() || service !== svc) return false
             val front = svc.rootInActiveWindow ?: return false
             if (front.windowId != window || front.packageName?.toString() != app) return false
+            if (expected?.app == InstagramReelsPolicy.PACKAGE && !scanInstagramReels(svc, front, requireViewer = true)) return false
             val complete = CountDownLatch(1)
             var landed = false
             val callback = object : AccessibilityService.GestureResultCallback() {
