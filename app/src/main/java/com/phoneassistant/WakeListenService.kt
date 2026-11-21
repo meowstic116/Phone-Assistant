@@ -38,7 +38,7 @@ internal class WakeListenService : Service() {
             val listener = instance ?: return false
             if (!listener.active || listener.commandPending || !feedback.canSpeak || PipVoice.microphoneBlocked()) return false
             listener.manualRequest += 1
-            listener.publish(WakeFeedback.SPEAK_NOW)
+            listener.publish(WakeFeedback.OPENING_MIC)
             return true
         }
         var running = false
@@ -121,7 +121,7 @@ internal class WakeListenService : Service() {
         if (status.isMicEvent) Diag.wakeInput(status)
         if (status.isOutcome) Diag.wakeOutcome(status)
         val now = SystemClock.elapsedRealtime()
-        if (status in listOf(WakeFeedback.LISTENING, WakeFeedback.PLAYING) && now < outcomeUntil) return
+        if ((status == WakeFeedback.LISTENING || status == WakeFeedback.PLAYING) && now < outcomeUntil) return
         main.removeCallbacks(resetOutcome)
         if (status.isOutcome) {
             outcomeUntil = now + 7_000L
@@ -173,10 +173,15 @@ internal class WakeListenService : Service() {
                     update(WakeFeedback.OPENING_MIC)
                     val min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
                     check(min > 0)
-                    val mic = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE, AudioFormat.CHANNEL_IN_MONO,
-                        AudioFormat.ENCODING_PCM_16BIT, maxOf(min * 2, 32_000))
+                    fun openRecorder() = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE, AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT, maxOf(min * 2, 32_000)).also { recorder ->
+                        if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+                            recorder.release()
+                            error("Microphone did not initialize")
+                        }
+                    }
+                    var mic = openRecorder()
                     try {
-                        check(mic.state == AudioRecord.STATE_INITIALIZED)
                         val samples = ShortArray(640)
                         val floats = FloatArray(samples.size)
                         val phrase = WakePhrase()
@@ -184,9 +189,38 @@ internal class WakeListenService : Service() {
                         var filled = 0
                         var handledManual = 0
                         var lastSignal = 0L
+                        var lastPcmAt = 0L
+                        val recovery = WakeCaptureRecovery()
                         var nextHypothesis = 0L
+                        var nextInputCheck = 0L
                         var showedName = false
-                        var silent = false
+                        var inputProblem: WakeFeedback? = null
+                        fun androidMuted() = Build.VERSION.SDK_INT >= 29 &&
+                            runCatching { mic.activeRecordingConfiguration?.isClientSilenced == true }.getOrDefault(false)
+                        fun restartCapture() {
+                            update(WakeFeedback.MIC_RESTARTING)
+                            if (!active) return
+                            mic.release()
+                            mic = openRecorder()
+                            recording = false
+                            filled = 0
+                            phrase.reset()
+                            showedName = false
+                            recognizer.reset(stream)
+                        }
+                        fun markNoSignal(muted: Boolean) {
+                            val problem = if (muted) WakeFeedback.MIC_MUTED else WakeFeedback.MIC_SILENT
+                            if (inputProblem == problem) return
+                            // Never combine speech buffered before input loss with a new utterance.
+                            if (inputProblem == null) {
+                                filled = 0
+                                phrase.reset()
+                                showedName = false
+                                recognizer.reset(stream)
+                            }
+                            inputProblem = problem
+                            update(problem)
+                        }
                         while (active) {
                             val now = SystemClock.elapsedRealtime()
                             if (commandPending || PipVoice.microphoneBlocked()) {
@@ -216,8 +250,11 @@ internal class WakeListenService : Service() {
                                 mic.startRecording()
                                 check(mic.recordingState == AudioRecord.RECORDSTATE_RECORDING)
                                 recording = true
-                                silent = false
+                                inputProblem = null
                                 lastSignal = now
+                                lastPcmAt = now
+                                nextHypothesis = now
+                                nextInputCheck = now
                                 main.removeCallbacks(startupDeadline)
                                 update(if (phrase.awaiting) WakeFeedback.SPEAK_NOW else WakeFeedback.LISTENING)
                             }
@@ -227,15 +264,25 @@ internal class WakeListenService : Service() {
                                 update(WakeFeedback.NO_MESSAGE)
                             }
                             val n = mic.read(samples, filled, samples.size - filled, AudioRecord.READ_NON_BLOCKING)
+                            if (n == AudioRecord.ERROR_DEAD_OBJECT && recovery.tryRestart(now)) {
+                                restartCapture()
+                                continue
+                            }
                             check(n >= 0)
                             if (n == 0) {
-                                if (!silent && now - lastSignal >= 4_000L) {
-                                    silent = true
-                                    update(WakeFeedback.MIC_SILENT)
+                                if (now >= nextInputCheck && recovery.stalled(now, lastPcmAt)) {
+                                    nextInputCheck = now + 1_000L
+                                    val muted = androidMuted()
+                                    if (!muted && recovery.tryRestart(now)) {
+                                        restartCapture()
+                                        continue
+                                    }
+                                    markNoSignal(muted)
                                 }
                                 Thread.sleep(15L)
                                 continue
                             }
+                            lastPcmAt = now
                             filled += n
                             if (filled < samples.size) continue
                             filled = 0
@@ -247,16 +294,23 @@ internal class WakeListenService : Service() {
                             }
                             if (hasSignal) {
                                 lastSignal = now
-                                if (silent) {
-                                    silent = false
+                                if (inputProblem != null) {
+                                    inputProblem = null
                                     update(if (phrase.awaiting) WakeFeedback.SPEAK_NOW else WakeFeedback.LISTENING)
                                 }
-                            } else if (!silent && now - lastSignal >= 4_000L) {
-                                silent = true
-                                update(WakeFeedback.MIC_SILENT)
+                            } else if (recovery.stalled(now, lastSignal)) {
+                                if (now >= nextInputCheck) {
+                                    nextInputCheck = now + 1_000L
+                                    markNoSignal(androidMuted())
+                                }
+                                continue
                             }
                             stream.acceptWaveform(floats, RATE)
-                            while (active && recognizer.isReady(stream)) recognizer.decode(stream)
+                            var decoded = false
+                            while (active && recognizer.isReady(stream)) {
+                                recognizer.decode(stream)
+                                decoded = true
+                            }
                             if (!active) break
                             if (recognizer.isEndpoint(stream)) {
                                 val heard = recognizer.getResult(stream).text
@@ -264,11 +318,12 @@ internal class WakeListenService : Service() {
                                 val message = phrase.accept(heard, now)
                                 showedName = phrase.awaiting
                                 if (message != null) dispatch(message)
-                                else if (!silent && phrase.awaiting && heard.isNotBlank()) update(WakeFeedback.NAME_HEARD)
-                                else if (!silent && heard.isNotBlank()) update(WakeFeedback.NO_NAME)
-                            } else if (!showedName && now >= nextHypothesis) {
-                                nextHypothesis = now + 300L
-                                if (phrase.hasAddress(recognizer.getResult(stream).text)) {
+                                else if (phrase.awaiting && heard.isNotBlank()) update(WakeFeedback.NAME_HEARD)
+                                else if (heard.isNotBlank()) update(WakeFeedback.NO_NAME)
+                            } else if (decoded && now >= nextHypothesis) {
+                                nextHypothesis = now + 180L
+                                val addressed = phrase.observePartial(recognizer.getResult(stream).text)
+                                if (addressed && !showedName) {
                                     showedName = true
                                     update(WakeFeedback.NAME_HEARD)
                                 }

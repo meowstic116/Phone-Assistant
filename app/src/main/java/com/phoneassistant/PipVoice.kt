@@ -145,17 +145,17 @@ internal object PipVoice {
     }
 
     /** Explicit read-aloud uses only Android voices marked offline, never model/TTS API paths. */
-    fun readPrivate(context: Context, text: String, unavailable: (String) -> Unit, finished: () -> Unit = {}) {
+    fun readPrivate(context: Context, text: String, unavailable: (String) -> Unit, finished: () -> Unit = {}): Long? {
         val line = SpeechCaption.literal(text, TextToSpeech.getMaxSpeechInputLength())
         if (line == null) {
             unavailable("This text is empty or too long for Android’s offline voice. Try sharing a shorter selection.")
             finished()
-            return
+            return null
         }
         stop()
         val id = sequence
         val ctx = context.applicationContext
-        if (!mayPlay(ctx, id)) return
+        if (!mayPlay(ctx, id)) return null
         // The overlay isn't always running (e.g. when invoked from Android's Share menu).
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
@@ -170,7 +170,7 @@ internal object PipVoice {
         if (!registered) {
             unavailable("Android couldn’t start private playback.")
             finished()
-            return
+            return null
         }
         privatePlaybackCleanup = { runCatching { ctx.unregisterReceiver(receiver) } }
         speaking = true
@@ -180,6 +180,12 @@ internal object PipVoice {
             finished()
         }
         local(ctx, id, line, { if (it.isNotEmpty()) unavailable(it) }, "")
+        return id
+    }
+
+    /** A closing share screen may only stop the playback it owns. */
+    fun stopPrivate(id: Long) {
+        if (id == sequence && privatePlaybackCleanup != null) stop()
     }
 
     fun preview(context: Context, report: (String) -> Unit) =

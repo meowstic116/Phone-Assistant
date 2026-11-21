@@ -5,6 +5,9 @@ import org.apache.tools.tar.TarConstants
 import org.apache.tools.tar.TarInputStream
 import java.io.File
 import java.io.InputStream
+import java.io.IOException
+import java.io.InterruptedIOException
+import java.net.SocketTimeoutException
 import java.security.MessageDigest
 
 internal object KokoroFiles {
@@ -23,16 +26,27 @@ internal object KokoroFiles {
     fun ready(dir: File) = files.all { File(dir, it).isFile && File(dir, it).length() > 0 } &&
         File(dir, LEXICON).length() == LEXICON_BYTES
 
-    fun copyVerified(input: InputStream, output: File, bytes: Long, sha: String, progress: (Long) -> Unit) {
+    fun copyVerified(input: InputStream, output: File, bytes: Long, sha: String,
+                     budgetNanos: Long = 20L * 60 * 1_000_000_000, nanoTime: () -> Long = System::nanoTime,
+                     progress: (Long) -> Unit) {
+        require(bytes >= 0 && budgetNanos > 0)
+        val started = nanoTime()
+        fun checkBudget() {
+            if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Download interrupted")
+            if (nanoTime() - started >= budgetNanos) throw SocketTimeoutException("Model download took too long")
+        }
         val digest = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(64 * 1024)
         var total = 0L
         output.outputStream().buffered().use { dest ->
             while (true) {
+                checkBudget()
                 val read = input.read(buffer)
+                checkBudget()
                 if (read < 0) break
+                if (read == 0) throw IOException("Download made no progress")
+                check(read <= bytes - total)
                 total += read
-                check(total <= bytes)
                 digest.update(buffer, 0, read)
                 dest.write(buffer, 0, read)
                 progress(total)
@@ -50,8 +64,8 @@ internal object KokoroFiles {
         TarInputStream(CBZip2InputStream(input)).use { tar ->
             while (true) {
                 val entry = tar.nextEntry ?: break
+                check(entry.size in 0..(MAX_EXPANDED_BYTES - expanded))
                 expanded += entry.size
-                check(entry.size >= 0 && expanded <= MAX_EXPANDED_BYTES)
                 val leaf = entry.name.substringAfter("$PACK/", "")
                 if (leaf !in files || entry.name != "$PACK/$leaf") continue
                 check((entry.linkFlag == TarConstants.LF_NORMAL || entry.linkFlag == TarConstants.LF_OLDNORM) &&

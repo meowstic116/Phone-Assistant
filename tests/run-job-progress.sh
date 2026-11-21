@@ -20,7 +20,7 @@ kotlinc app/src/main/java/com/phoneassistant/JobProgress.kt app/src/main/java/co
   app/src/main/java/com/phoneassistant/ChatRecovery.kt app/src/main/java/com/phoneassistant/BoundedText.kt \
   app/src/main/java/com/phoneassistant/OverlayBounds.kt app/src/main/java/com/phoneassistant/LemonadeLayout.kt app/src/main/java/com/phoneassistant/ToyFooting.kt \
   app/src/main/java/com/phoneassistant/ReplyBubbleState.kt app/src/main/java/com/phoneassistant/KokoroPcm.kt \
-  app/src/main/java/com/phoneassistant/SpeechBubbleTiming.kt app/src/main/java/com/phoneassistant/WakePhrase.kt \
+  app/src/main/java/com/phoneassistant/SpeechBubbleTiming.kt app/src/main/java/com/phoneassistant/WakePhrase.kt app/src/main/java/com/phoneassistant/WakeCaptureRecovery.kt \
   app/src/main/java/com/phoneassistant/WakeStartupPolicy.kt app/src/main/java/com/phoneassistant/VoiceExchange.kt \
   app/src/main/java/com/phoneassistant/CarCommand.kt app/src/main/java/com/phoneassistant/WakeFeedback.kt app/src/main/java/com/phoneassistant/SpontaneousToyChoice.kt \
   app/src/main/java/com/phoneassistant/TimedRequest.kt app/src/main/java/com/phoneassistant/PaintingStart.kt \

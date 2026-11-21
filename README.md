@@ -274,6 +274,9 @@ with the screen locked.
 If he doesn't respond, check the live status under **Talk to Pip** or, if enabled, in the
 listening notification. **Speak now (no wake word)** opens a short window to say one message without
 the name, useful for checking that the microphone and chat work independently of wake detection.
+Wait until the status says **Speak now** after tapping it. **Diagnostics → Hands-free voice**
+can distinguish a missed name from an interrupted or Android-muted microphone. Pip can retry
+a lost audio stream during a listening session, but won’t start a new session on its own.
 
 Listening is off by default. To skip the extra tap each session, turn on **Start listening when
 Pip starts** under **Talk to Pip**. The next time you tap **Start assistant** in the app,

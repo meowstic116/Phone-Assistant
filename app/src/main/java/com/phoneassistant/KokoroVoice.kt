@@ -95,7 +95,7 @@ internal object KokoroVoice {
             connection.readTimeout = 30_000
             connection.setRequestProperty("Accept-Encoding", "identity")
             check(connection.responseCode == 200)
-            connection.inputStream.use { KokoroFiles.copyVerified(it, file, size, sha, progress) }
+            connection.inputStream.use { KokoroFiles.copyVerified(it, file, size, sha, progress = progress) }
         } finally { connection.disconnect() }
     }
 
