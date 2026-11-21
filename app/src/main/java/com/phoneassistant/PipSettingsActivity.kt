@@ -103,6 +103,11 @@ class PipSettingsActivity : Activity() {
             }
         }
 
+        button("Preview reply bubble") {
+            if (!OverlayService.previewBubble()) Toast.makeText(this,
+                "Start Pip and let him finish any current reply, then try again.", Toast.LENGTH_LONG).show()
+        }
+
         heading("Talk to Pip")
         text("Say ‘Pip’ or ‘Hey Pip’, then speak in English. Listening runs on your phone, even after locking. It can use battery and stops when you stop Pip or tap Stop listening. Audio is not saved or sent; recognized chat uses your chat API. Phone actions require unlocking and tapping Send. Turn on Read Pip’s replies aloud to hear answers while locked.")
         wakeAction = button("") { changeWakeListening() }

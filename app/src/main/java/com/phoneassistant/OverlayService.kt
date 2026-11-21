@@ -35,6 +35,7 @@ import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -143,6 +144,13 @@ class OverlayService : Service(), PropHost {
         }
 
         internal fun discardVoiceDraft() { instance?.voiceDraft = null }
+
+        internal fun previewBubble(): Boolean {
+            val service = instance ?: return false
+            if (service.ending || !service.bubbleScreenUsable() || service.awaitingReply || service.voicedReply != null) return false
+            service.sayAloud("This is Pip’s speech bubble.")
+            return true
+        }
 
         /** Main-screen buttons: put one of Pip's toys on the screen. */
         fun bringOut(toy: Toy): Boolean {
@@ -274,6 +282,8 @@ class OverlayService : Service(), PropHost {
     private lateinit var windowManager: WindowManager
     private lateinit var petParams: WindowManager.LayoutParams
     private var pet: PetView? = null
+    private var petHost: FrameLayout? = null
+    private var bubbleBox: OverlayBounds.Box? = null
 
     private var voicedReply: ReplyBubbleState? = null
     private lateinit var speechBubble: SpeechBubble
@@ -435,10 +445,10 @@ class OverlayService : Service(), PropHost {
         instance = this
         running = true
         windowManager = getSystemService(WindowManager::class.java)
-        speechBubble = SpeechBubble(this, windowManager, limits = {
+        speechBubble = SpeechBubble(this, limits = {
             (screenW - dpInt(12f)).coerceIn(1, dpInt(232f).coerceAtLeast(1)) to
                 (screenH - topInset - bottomInset - dpInt(12f)).coerceIn(1, dpInt(280f).coerceAtLeast(1))
-        }, place = ::placePanel)
+        }, onBoundsChanged = ::layoutPetOverlay)
 
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(
@@ -460,7 +470,7 @@ class OverlayService : Service(), PropHost {
 
         // A restarted service should know whether anyone is actually looking.
         paused = getSystemService(PowerManager::class.java)?.isInteractive != true
-        speechBubble.setScreenHidden(!screenUsable())
+        speechBubble.setScreenHidden(!bubbleScreenUsable())
 
         // Every start, extension and early end reconciles the timer with the new deadline.
         Quiet.onChanged = { settleBreak() }
@@ -474,7 +484,7 @@ class OverlayService : Service(), PropHost {
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
+            gravity = Gravity.TOP or Gravity.LEFT
             x = posX.toInt()
             y = posY.toInt()
         }
@@ -491,7 +501,15 @@ class OverlayService : Service(), PropHost {
         if (entrance) view.powerPose = PipTransition.pose(entering = true, fraction = 0f)
         pet = view
 
-        val added = runCatching { windowManager.addView(view, petParams) }.isSuccess
+        val host = FrameLayout(this).apply {
+            addView(view, FrameLayout.LayoutParams(petW, petH, Gravity.TOP or Gravity.LEFT))
+            addView(speechBubble.view, FrameLayout.LayoutParams(1, 1, Gravity.TOP or Gravity.LEFT))
+            // Only the expanded area uses this click; Pip's own drag/tap still handles his view.
+            setOnClickListener { hideBubble() }
+        }
+        petHost = host
+        val added = runCatching { windowManager.addView(host, petParams) }.isSuccess
+        if (added) layoutPetOverlay()
         if (!added) {
             stopSelf()
             return
@@ -529,7 +547,7 @@ class OverlayService : Service(), PropHost {
         super.onConfigurationChanged(newConfig)
         if (ending || pet == null) return
         readDisplayBounds()
-        speechBubble.reflow()
+        bubbleBox = null
         petDrag?.cancel()
         cancelToyHop()
         cancelGardenVisit()
@@ -539,8 +557,7 @@ class OverlayService : Service(), PropHost {
         posY = OverlayBounds.clamp(posY, topInset.toFloat(), bottom)
         targetX = OverlayBounds.clamp(targetX, 0f, right)
         targetY = OverlayBounds.clamp(targetY, topInset.toFloat(), bottom)
-        petParams.width = petW
-        petParams.height = petH
+        speechBubble.reflow()
         props.toList().forEach { it.moveTo(it.posX, it.posY) }
         applyPetPosition()
         positionJobBar()
@@ -774,8 +791,7 @@ class OverlayService : Service(), PropHost {
         hideHud()
         props.toList().forEach(::dropProp)
         resetToIdle()
-        pet?.let { view ->
-            if (!::petParams.isInitialized) return@let
+        petHost?.let { view ->
             petParams.flags = petParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             petParams.alpha = 1f
             runCatching { windowManager.updateViewLayout(view, petParams) }
@@ -824,7 +840,8 @@ class OverlayService : Service(), PropHost {
         ChatTurns.begin()
         ImeWatch.onChange = null
         keyboardUp = false
-        pet?.let { view -> runCatching { windowManager.removeView(view) } }
+        petHost?.let { view -> runCatching { windowManager.removeViewImmediate(view) } }
+        petHost = null
         pet = null
         runCatching { unregisterReceiver(screenReceiver) }
         Quiet.onChanged = null
@@ -1027,8 +1044,8 @@ class OverlayService : Service(), PropHost {
             val pour = ((elapsed - visit.travelMs) / PlantGrowth.PIP_POUR_DURATION_MS.toFloat()).coerceIn(0f, 1f)
             view.gardenLean = kotlin.math.sin(pour * Math.PI).toFloat()
             // Layout params are rounded to whole pixels; use the same origin as the window.
-            view.gardenGrip = DragMotion.Point(visit.grip.x + (visit.owner.posX - visit.ownerX) - petParams.x,
-                visit.grip.y + (visit.owner.posY - visit.ownerY) - petParams.y)
+            view.gardenGrip = DragMotion.Point(visit.grip.x + (visit.owner.posX - visit.ownerX) - posX.toInt(),
+                visit.grip.y + (visit.owner.posY - visit.ownerY) - posY.toInt())
             visit.progress(pour)
             if (pour >= 1f) {
                 cancelGardenVisit()
@@ -1046,8 +1063,9 @@ class OverlayService : Service(), PropHost {
         if (raisedFor !== owner) {
             // Separate overlay windows are stacked in attachment order. Raise Pip once per
             // sheet so the jump and his feet are visible above the bubbles.
-            if (!runCatching { windowManager.removeViewImmediate(view) }.isSuccess) return false
-            if (!runCatching { windowManager.addView(view, petParams) }.isSuccess) {
+            val host = petHost ?: return false
+            if (!runCatching { windowManager.removeViewImmediate(host) }.isSuccess) return false
+            if (!runCatching { windowManager.addView(host, petParams) }.isSuccess) {
                 stopSelf()
                 return false
             }
@@ -1284,6 +1302,11 @@ class OverlayService : Service(), PropHost {
     }
 
     /** Whether anything said right now would actually be seen. */
+    private fun bubbleScreenUsable() = runCatching {
+        getSystemService(PowerManager::class.java)?.isInteractive == true &&
+            getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != true
+    }.getOrDefault(false)
+
     private fun screenUsable(): Boolean {
         if (paused) return false
         return runCatching { getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == false }.getOrDefault(false)
@@ -1320,10 +1343,12 @@ class OverlayService : Service(), PropHost {
         val still = standingStill()
 
         speechBubble.onFrame()
+        layoutPetOverlay()
 
         keyboardWatch -= frameMs
         if (keyboardWatch <= 0L) {
             keyboardWatch = 400L
+            speechBubble.setScreenHidden(!bubbleScreenUsable())
             watchKeyboard()
         }
 
@@ -1528,10 +1553,8 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun applyPetPosition() {
-        petParams.x = posX.toInt()
-        petParams.y = posY.toInt()
-        pet?.let { view -> runCatching { windowManager.updateViewLayout(view, petParams) } }
-        repositionPanels()
+        layoutPetOverlay()
+        positionInputBar()
     }
 
     private fun dp(value: Float) = value * resources.displayMetrics.density
@@ -1548,7 +1571,7 @@ class OverlayService : Service(), PropHost {
             posX = x.coerceIn(0f, (screenW - petW).coerceAtLeast(0).toFloat())
             posY = y.coerceIn(minY, (screenH - petH - bottomInset).toFloat().coerceAtLeast(minY))
             view.pullPickup((posX - oldX) / dp(16f))
-            if (petParams.x != posX.toInt() || petParams.y != posY.toInt()) applyPetPosition()
+            applyPetPosition()
         },
         allowed = ::userDragAllowed,
         grip = { holding ->
@@ -1582,20 +1605,51 @@ class OverlayService : Service(), PropHost {
 
     // ------------------------------------------------------------ anchored panels
 
-    /** Places a panel above him, or below when there is no room at the top. */
-    private fun placePanel(width: Int, height: Int, params: WindowManager.LayoutParams) {
-        var x = (posX + petW / 2f - width / 2f).toInt()
-        x = x.coerceIn(dpInt(6f), (screenW - width - dpInt(6f)).coerceAtLeast(dpInt(6f)))
-
-        val y = OverlayBounds.panelY(posY.toInt(), petH, height, dpInt(8f), topInset, screenH - bottomInset)
-
-        params.x = x
-        params.y = y
-    }
-
-    private fun repositionPanels() {
-        speechBubble.reposition()
-        positionInputBar()
+    /** Expand the existing pet window without moving either child on screen. */
+    private fun layoutPetOverlay() {
+        val host = petHost ?: return
+        val petView = pet ?: return
+        val petRect = OverlayBounds.Box(posX.toInt(), posY.toInt(), petW, petH)
+        val panel = speechBubble.view
+        val bubble = if (!speechBubble.shown) null else {
+            val width = panel.panelWidth
+            val height = panel.panelHeight
+            bubbleBox?.takeIf { speechBubble.fading && it.width == width && it.height == height }
+                ?: OverlayBounds.Box((posX + petW / 2f - width / 2f).toInt()
+                    .coerceIn(dpInt(6f), (screenW - width - dpInt(6f)).coerceAtLeast(dpInt(6f))),
+                    OverlayBounds.panelY(petRect.y, petH, height, dpInt(8f), topInset, screenH - bottomInset), width, height)
+        }
+        bubbleBox = bubble
+        host.isClickable = bubble != null
+        val frame = OverlayBounds.union(petRect, bubble)
+        fun layoutChild(child: View, rect: OverlayBounds.Box) {
+            val left = rect.x - frame.x
+            val top = rect.y - frame.y
+            val previous = child.layoutParams as FrameLayout.LayoutParams
+            if (previous.width != rect.width || previous.height != rect.height ||
+                previous.leftMargin != left || previous.topMargin != top) {
+                child.layoutParams = FrameLayout.LayoutParams(rect.width, rect.height, Gravity.TOP or Gravity.LEFT).apply {
+                    leftMargin = left
+                    topMargin = top
+                }
+            }
+        }
+        layoutChild(petView, petRect)
+        bubble?.let { layoutChild(panel, it) }
+        if (!host.isAttachedToWindow || petParams.x == frame.x && petParams.y == frame.y &&
+            petParams.width == frame.width && petParams.height == frame.height) return
+        val last = OverlayBounds.Box(petParams.x, petParams.y, petParams.width, petParams.height)
+        petParams.x = frame.x
+        petParams.y = frame.y
+        petParams.width = frame.width
+        petParams.height = frame.height
+        runCatching { windowManager.updateViewLayout(host, petParams) }.onFailure {
+            petParams.x = last.x
+            petParams.y = last.y
+            petParams.width = last.width
+            petParams.height = last.height
+            if (it is Exception) Diag.chatFailure("bubble layout", it)
+        }
     }
 
     // --------------------------------------------------------------- speech bubble
@@ -1652,6 +1706,7 @@ class OverlayService : Service(), PropHost {
 
     private fun startThinking() {
         if (ending) return
+        speechBubble.setScreenHidden(!bubbleScreenUsable())
         attentive = true
         walking = false
         toyWalk = false
@@ -1694,6 +1749,7 @@ class OverlayService : Service(), PropHost {
         // A reply can land after the overlay has been stopped, and a bubble added to a dead
         // service is a window nothing will ever take down again.
         if (ending || !running) return
+        speechBubble.setScreenHidden(!bubbleScreenUsable())
         // Speaking is a pause, not attention. Attention belongs to the chat bar and to sitting
         // at his easel; claiming it here is what used to root him to the spot, because nothing
         // ever gave it back.
@@ -1940,7 +1996,7 @@ class OverlayService : Service(), PropHost {
         if (walking || !view.isLaidOut) return
         val onScreen = IntArray(2)
         view.getLocationOnScreen(onScreen)
-        windowOffset = (onScreen[1] - petParams.y).toFloat()
+        windowOffset = (onScreen[1] - posY.toInt()).toFloat()
     }
 
     /**
@@ -2426,10 +2482,11 @@ class OverlayService : Service(), PropHost {
             finishToyFlights()
         }
         var ok = setChipDucked(jobBar?.let(::overlaps) == true)
-        pet?.let { if (!duckLayout(it, petParams, overlaps(it), DUCK_ALPHA)) ok = false }
+        // Pip and the bubble share the input region now. Duck that whole window before a gesture.
+        speechBubble.setDucked(overlayDucked)
+        petHost?.let { if (!duckLayout(it, petParams, overlayDucked, DUCK_ALPHA)) ok = false }
         if (!setHudDucked(hud?.let(::overlaps) == true)) ok = false
         props.forEach { prop -> if (!duckLayout(prop, prop.params, overlaps(prop))) ok = false }
-        if (!speechBubble.setDucked(overlayDucked)) ok = false
         fading.forEach { view ->
             val params = view.layoutParams as? WindowManager.LayoutParams
             if (params != null && !duckLayout(view, params, overlaps(view), alwaysUntouchable = true)) ok = false
@@ -2738,7 +2795,7 @@ class OverlayService : Service(), PropHost {
                     if (ending) return
                     val resume = paused
                     paused = false
-                    speechBubble.setScreenHidden(!screenUsable())
+                    speechBubble.setScreenHidden(!bubbleScreenUsable())
                     pet?.animating = true
                     if (resume) handler.post(tick)
                     settleBreak()
