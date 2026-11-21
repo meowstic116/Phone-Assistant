@@ -296,10 +296,8 @@ object Toys {
                         )
                     }
                     else -> {
-                        // He walks round behind the counter first, and the glass appears when
-                        // he actually gets there — a stand he was nowhere near, or one that
-                        // has been dragged, still ends with him serving from behind it.
-                        stand.pourNow()
+                        if (!stand.pourNow()) return Outcome(false,
+                            "the stand is out but you couldn't put down a glass. Say so; don't say you served one.")
                         Outcome(
                             true,
                             if (existing == null) {
@@ -324,14 +322,14 @@ object Toys {
                         "at the one you already made."
                 )
             } else {
-                val picture = PaintingGallery.pictures(ctx).filter { PaintingGallery.enabled(ctx, it) }.randomOrNull()
-                    ?: return Outcome(false, "There are no enabled pictures. Ask them to enable one in the Painting gallery.")
-                PaintingScene(host, picture).begin()
-                Outcome(
-                    true,
-                    "you climbed onto the screen with a canvas and are painting " +
-                        "${picture.blurb}. answer briefly and tell them to hold on."
-                )
+                val pictures = PaintingGallery.pictures(ctx).filter { PaintingGallery.enabled(ctx, it) }.shuffled()
+                if (pictures.isEmpty()) return Outcome(false, "There are no enabled pictures. Ask them to enable one in the Painting gallery.")
+                when (PaintingStart.tryEnabledPictures(pictures) { PaintingScene(host, it).begin() }) {
+                    PaintingStart.Result.SHOWN -> Outcome(true, "you have put a canvas on screen and started painting. " +
+                        "give them a short line about it, but don't guess the title or say it is finished.")
+                    PaintingStart.Result.UNREADABLE -> Outcome(false, "you couldn't load any of the enabled pictures. Say so; there is no canvas out.")
+                    PaintingStart.Result.NO_ROOM -> Outcome(false, "you couldn't put a canvas on the screen. Say so instead of promising a painting.")
+                }
             }
 
             Toy.SOCCER -> if (out.isNotEmpty()) {
@@ -340,13 +338,10 @@ object Toys {
                     "there is already a game of soccer going. cheer them on and tell them " +
                         "to score something."
                 )
+            } else if (SoccerGame(host).start()) {
+                Outcome(true, "you set up two goals and a ball. you are keeping score, it is first to three.")
             } else {
-                SoccerGame(host).start()
-                Outcome(
-                    true,
-                    "you set up two goals and a ball. you are keeping score, it is first to " +
-                        "three, and you intend to win."
-                )
+                Outcome(false, "there wasn't room to set up the entire soccer pitch. Say so.")
             }
 
             Toy.BUBBLES -> when {
@@ -577,8 +572,7 @@ object Toys {
             when (toy) {
                 Toy.LEMONADE ->
                     "opening the stand. fifty cents, or a compliment."
-                Toy.PAINTING ->
-                    "painting something. it'll be a limited edition either way."
+                Toy.PAINTING -> return // The painting scene spoke after the canvas was attached.
                 Toy.SOCCER ->
                     "first to three. the goals stay where I put them."
                 Toy.BUBBLES ->

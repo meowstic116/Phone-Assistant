@@ -1,15 +1,18 @@
 package com.phoneassistant
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 
 /**
  * The full conversation, and a place to keep chatting. Replies here also surface in
@@ -23,6 +26,7 @@ class ChatHistoryActivity : Activity() {
     private lateinit var input: EditText
     private lateinit var sendButton: Button
     private var pendingTurn: Long? = null
+    private var messagePreview: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +70,12 @@ class ChatHistoryActivity : Activity() {
         OverlayService.beginHistoryAttention()
     }
 
+    override fun onStop() {
+        messagePreview?.dismiss()
+        messagePreview = null
+        super.onStop()
+    }
+
     override fun onDestroy() {
         OverlayService.endHistoryAttention()
         super.onDestroy()
@@ -80,6 +90,23 @@ class ChatHistoryActivity : Activity() {
         val turn = ChatTurns.begin()
         pendingTurn = turn
         input.setText("")
+        MessageNotifications.request(text)?.let { request ->
+            OverlayService.clearConversationFeedback()
+            PrivateMessageRead.present(this, PipMediaAccess.messageAnswer(this, request), turn) { reply, quote ->
+                if (quote) {
+                    messagePreview = AlertDialog.Builder(this)
+                        .setTitle("Message notification")
+                        .setMessage(reply)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .create().apply {
+                            window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                            setOnDismissListener { messagePreview = null; PipVoice.stop() }
+                            show()
+                        }
+                } else Toast.makeText(this, reply, Toast.LENGTH_LONG).show()
+            }
+            return
+        }
         addBubble(text, true)
         if (NowPlaying.requested(text)) {
             Agent.cancel()

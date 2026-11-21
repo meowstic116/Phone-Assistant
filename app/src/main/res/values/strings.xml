@@ -13,7 +13,7 @@
     <string name="setup_privacy_api">Chat goes directly to your chosen AI provider and may include recent messages and Memory notes. If Pip needs help with a task, he may send your request and visible app text. Your provider’s privacy policy applies.</string>
     <string name="setup_privacy_passwords">Passwords in fields Android identifies as password fields and passwords saved in Pip’s login vault are not sent to the API. Don’t paste passwords into chat or leave them visible as plain text in another app while Pip is working.</string>
     <string name="setup_access_optional">Accessibility is optional. Leave it off and you can still chat and play with on-screen toys. Pip won’t be able to tap, type, or scroll in other apps for you, so features like Doomscroll and in-app playback controls won’t work. He also won’t be able to see when another app’s keyboard is open.</string>
-    <string name="setup_permissions_intro">API verified. Choose the permissions you want to grant. You can finish setup without granting accessibility, and change permissions later in Pip settings → Permissions.</string>
+    <string name="setup_permissions_intro">API verified. Choose which permissions to grant. You can finish setup without granting any of them and change them later in Pip settings → Permissions.</string>
     <string name="main_privacy_summary">The developer does not collect your chats or Memory notes. Requests go directly to your selected AI provider and may include chat context or visible app text. Password fields and saved vault passwords aren’t sent; don’t put passwords in chat.</string>
     <item name="pipSettingsScroll" type="id" />
     <string name="settings_personal_heading">Personality &amp; data</string>
@@ -33,11 +33,14 @@
     <string name="permissions_overlay">Display over other apps</string>
     <string name="permissions_overlay_info">Pip needs this to appear on your screen.</string>
     <string name="permissions_access_switch">Let Pip use accessibility</string>
-    <string name="permissions_access_android">Android accessibility permission</string>
+    <string name="permissions_access_android">Accessibility · optional</string>
     <string name="permissions_usage">Usage access · optional</string>
     <string name="permissions_usage_info">Lets Pip answer questions about the last app in front without sharing app usage with your chat provider.</string>
     <string name="permissions_notifications">Notifications · optional</string>
-    <string name="permissions_notifications_info">Pip can run and listen without notifications. To stop listening, use Talk to Pip in settings. Android may still show the microphone indicator or list Pip among active apps.</string>
+    <string name="permissions_notifications_info">Shows Pip’s status and a shortcut to stop him. Pip can run and listen without notifications. To stop listening, use Talk to Pip in settings. Android may still show the microphone indicator or list Pip among active apps.</string>
+    <string name="permissions_microphone">Microphone · optional</string>
+    <string name="permissions_microphone_info">Needed for voice requests and listening for Pip’s name. Granting it doesn’t start listening. To set up listening, go to Pip settings → Talk to Pip.</string>
+    <string name="permissions_microphone_manage">Manage microphone permission</string>
     <string name="permissions_notifications_manage">Manage notifications</string>
     <string name="permissions_manage">Open Android settings</string>
     <string name="permissions_status">%1$s · %2$s</string>
@@ -53,7 +56,10 @@
     <string name="debug_setup_replay_notice">Your current API settings are filled in. Any API changes are saved only when you finish setup.</string>
     <string name="debug_setup_exit">Back to Debug options</string>
     <string name="debug_back">Back to Pip settings</string>
-    <string name="permissions_now_playing">Pip · Now playing access</string>
-    <string name="permissions_now_playing_info">Optional. Android calls this Notification access. Pip checks active media controls when you ask what’s playing. Pip does not read notification messages or send track metadata to the API.</string>
-    <string name="permissions_now_playing_manage">Manage Now playing access</string>
+    <string name="permissions_now_playing">Pip · Notification access</string>
+    <string name="permissions_now_playing_info">Optional Android access for media controls and, if enabled below, message previews.</string>
+    <string name="permissions_now_playing_manage">Manage Notification access</string>
+    <string name="permissions_message_previews">Read message notifications</string>
+    <string name="read_message_with_pip">Read with Pip</string>
+    <string name="permissions_message_previews_info">Off by default. When you ask who texted you, Pip checks current message previews only while the phone is unlocked. Pip reads the preview with an offline voice. The message is never saved to chat history or sent to the API.</string>
 </resources>

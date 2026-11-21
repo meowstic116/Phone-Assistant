@@ -6,10 +6,10 @@ import android.content.Context
 internal object PipSettings {
     enum class Option(val key: String) {
         ACCESSIBILITY("accessibility"), WANDER("wander"), TOYS("toys"), SPONTANEOUS("spontaneous_toys"),
-        LEARN_FROM_CHAT("learn_from_chat")
+        LEARN_FROM_CHAT("learn_from_chat"), MESSAGE_NOTIFICATIONS("message_notifications")
     }
 
-    fun enabled(ctx: Context, option: Option): Boolean = prefs(ctx).getBoolean(option.key, true)
+    fun enabled(ctx: Context, option: Option): Boolean = prefs(ctx).getBoolean(option.key, option != Option.MESSAGE_NOTIFICATIONS)
 
     fun set(ctx: Context, option: Option, enabled: Boolean) {
         prefs(ctx).edit().putBoolean(option.key, enabled).apply()

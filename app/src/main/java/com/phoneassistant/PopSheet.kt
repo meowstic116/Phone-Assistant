@@ -50,3 +50,32 @@ internal fun hopLift(fraction: Float): Float {
     val t = fraction.coerceIn(0f, 1f)
     return 4f * t * (1f - t)
 }
+
+/** Timings for one sheet. A blocked launch is not a hop, and an interrupted hop is not a pop. */
+internal class BubbleHopSchedule(bornAt: Long) {
+    private var nextAt = bornAt + 750L
+    private var keepUntil = bornAt + 45_000L
+    private var betweenHops = false
+    private var inAir = false
+
+    fun due(now: Long): Boolean = !inAir && now >= nextAt
+
+    fun attempted(now: Long, started: Boolean) {
+        inAir = started
+        nextAt = now + 100L
+        if (!started) betweenHops = false
+    }
+
+    fun finished(now: Long, landed: Boolean) {
+        inAir = false
+        betweenHops = landed
+        nextAt = now + if (landed) 380L else 200L
+        // Give an interrupted or nearly finished sheet time to resume instead of retiring it
+        // against the original spawn time as soon as Pip's attention is needed elsewhere.
+        keepUntil = maxOf(keepUntil, now + 30_000L)
+    }
+
+    fun reservesInput(now: Long): Boolean = inAir || (betweenHops && now < nextAt + 100L)
+
+    fun keepsSheet(now: Long): Boolean = inAir || now < keepUntil
+}

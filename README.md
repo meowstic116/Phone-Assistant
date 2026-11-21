@@ -151,8 +151,9 @@ stand", "paint something", "let's play soccer"), or just leave the screen alone 
 bored every few minutes and starts something himself.
 
 **Pip settings → Painting gallery** lets you turn individual paintings on or off. Pip
-can paint his original subjects plus three crayon scenes: a space kitten, a frog in a
-teacup, and a ghost holding a daisy. Use **Add pictures** to copy up to 24 images from
+has eight built-in crayon scenes: a space kitten, a frog in a teacup, a ghost with a daisy,
+a snail delivering mail, a raccoon librarian, a penguin baker, a dragon watering a sunflower,
+and an otter playing ukulele. Use **Add pictures** to copy up to 24 images from
 Android's picture picker. These copies are resized and stay on the phone; neither the
 images nor their filenames are sent to the AI. **Remove** deletes Pip's copy without
 changing the original. Only enabled pictures are picked for a new canvas.
@@ -194,37 +195,35 @@ is disabled stays in the catalog, with a note explaining why it can’t be launc
   two at a time. The glass is its own prop: tap it once to drink, tap the empty glass
   again to hand it back. Ask him for "a lemonade" in chat and the glass is on the screen
   at once: he pours first and hurries round behind the counter with it, rather than making
-  you wait out the crossing. One request makes exactly one glass: the debt is cleared
-  before each pour and capped at the stand's two glasses, so a second pour can never double
-  it. Ask twice quickly and the second glass arrives about a second after the first,
-  silently — one serve line per pair, not the same line twice. The counter is drawn
+  you wait out the crossing. A request can place one glass, up to the stand’s two-glass limit.
+  If his walk back is interrupted, he can retry without pouring a second glass. The counter is drawn
   over his hips and feet — it starts 6dp below his chin — with the sign and the awning
   clear of him, so he stands behind the stand rather than in front of it. Tapping him
   while he is back there still talks to him; tapping the counter pours a glass. Drag the
   stand and he walks back round behind it at the new spot, says something about it and
-  keeps station there — the stand holds a post he will not wander away from — until it is
+  keeps station there instead of wandering until he has another toy to tend or the stand is
   taken off the screen.
-- **Canvas** — he walks somewhere, sits down with folded legs, and paints for about seven
-  seconds while the picture fills in brush-stroke by brush-stroke. There are five paintings,
-  all drawn in code: a dog in a tiny hat who owes him twenty bucks, Pip as a hundred-foot
-  city-stomping monster, a crowned sandwich with one small patient person beside it, a
-  toaster in sunglasses plugged into a lemon, and a fish in a space helmet planting a flag
-  on the moon. When he is done he gets up, says what it is called, and wanders off leaving
-  it on the screen. Tap the painting to hear his artist's statement, or ask him about it.
+- **Canvas** — he puts out the canvas, walks over, and sits down with folded legs. The
+  picture fills in brush-stroke by brush-stroke even if his walk is interrupted. When he’s
+  done, he says what it’s called and leaves the canvas on screen. Tap it to hear his
+  artist’s statement, or ask him about it.
 - **Soccer** — goals at the top and bottom of the pitch, a ball in the middle, and a score
   pill. If a keyboard is showing when the game starts, the pitch fits above it rather than
   putting his goal behind it, and it re-fits once that keyboard has gone — but only if the
   ball is provably untouched, since a goal line must never move under a ball in play. Tap the ball to
   boot it at Pip's goal (tap left or right of the middle to angle it);
-  he walks over and kicks it back at yours. First to three or ninety seconds, and he
-  announces the result either way. The goals are draggable, which he notices: he calls it
+  he runs to intercept the rolling ball and kicks it back when he can reach it. If you’re
+  playing the ball and Pip is too far away, he covers his goal instead. Saves still require
+  contact with the ball, so an open corner can beat him. First to three or ninety seconds of play; the clock
+  pauses while the keyboard is up, the screen is off, or Pip is doing a phone job. The goals are draggable, which he notices: he calls it
   cheating (cheerfully), and three goalpost moves and he calls the game off.
-- **Bubble wrap** — A compact sheet of 20 candy-colored bubbles with confetti. Tap any
-  bubble, or watch Pip hop onto a random unpopped bubble, pausing briefly between hops.
-  He has his own milestone lines and clears the sheet
-  after the last pop. An active round can finish even if the normal toy timer runs out.
+- **Bubble wrap** — A compact sheet of 20 candy-colored bubbles with confetti. Tap exposed
+  bubbles, or watch Pip hop onto a random unpopped bubble. Taps on Pip don’t open chat
+  while he’s hopping. If a job, keyboard, or moving sheet interrupts him, he can pick up
+  where he left off. He clears the sheet after the last pop.
 - **Plant** — Grow a flower together. Pip spaces out his pours, and you need to tap the
-  pot to water it at least once before it can bloom. Fast taps still get a warning. A finished bloom gets a shimmering nameplate beneath
+  pot to water it at least once before it can bloom. Interrupted pours can be retried without
+  duplicating a drop, and the plant gives you more time to take your turn. Fast taps still get a warning. A finished bloom gets a shimmering nameplate beneath
   its pot and a ladybug visit. Open **Toys → Plant Collection** to see all ten
   regular varieties and how many times each has reached full bloom. First blooms get a
   special color and animation. Once all ten are discovered, each new pot has a 1 in 10
@@ -278,9 +277,14 @@ the name, useful for checking that the microphone and chat work independently of
 
 Listening is off by default. To skip the extra tap each session, turn on **Start listening when
 Pip starts** under **Talk to Pip**. The next time you tap **Start assistant** in the app,
-Pip will start listening if the offline model and permissions are ready. If they aren't,
-Pip still appears with the mic off. This setting doesn't open the mic at phone boot or
-automatic service recovery.
+Pip will start listening if the offline model and microphone permission are ready. If they
+aren’t, Pip still appears with the mic off. If **Start Pip when the phone starts** is also on,
+Pip can start listening when the overlay starts after your first unlock on older Android
+versions. On Android 11 or newer, listening resumes when Pip’s app screen opens after
+unlocking. To have Pip try to open that screen automatically, turn on **Open the Pip app after
+restart** under **Movement & startup**. This is off by default and opens the regular app screen
+once after unlock. If Android or the phone maker blocks the launch, open Pip yourself. No
+notification permission is needed, and automatic service recovery never restarts the mic.
 
 Listening can continue after locking and uses battery; Android
 or the phone maker may suspend it. To stop listening, use **Stop listening for Pip** under
@@ -307,7 +311,7 @@ Connect Android Auto and try:
 - **“Pip, navigate to 123 Main Street.”** Google Maps receives a standard directions
   intent. Set a local home destination in Pip settings for **“Pip, navigate home.”**
 - **“Pip, pause Spotify,” “resume Spotify,” “next song on Spotify,”** or **“previous
-  track on Spotify.”** Start Spotify while parked and grant **Now playing access** so
+  track on Spotify.”** Start Spotify while parked and grant **Notification access** so
   Pip can control the existing local session. It cannot search for songs in this mode.
 
 Pip checks the Android Auto projection connection and handles only these commands on the
@@ -370,8 +374,9 @@ APKs are historical builds signed with a public key, not tester releases.
    fields and in Pip’s login vault are not sent. Avoid pasting passwords into chat or leaving
    them visible as plain text while Pip is working.
 3. In **Make room for Pip**, grant **Display over other apps** to show Pip on your screen.
-   **Accessibility** (needed for phone jobs), **Usage access**, and **Notifications** are
-   optional. Without accessibility you can still chat and use on-screen toys, but Pip can’t
+   **Notifications** for Pip’s status, **Notification access** for media and optional message
+   previews, **Microphone**, **Usage access**, and **Accessibility** are optional. Granting the
+   microphone does not start listening. Without accessibility you can still chat and use on-screen toys, but Pip can’t
    control other apps (including Doomscroll or in-app playback) or detect their keyboards.
    You can change those grants later in **Pip settings → Permissions**. **Pip settings → Debug options → Diagnostics** shows whether
    accessibility is connected and records the last phone job’s steps.
@@ -389,7 +394,7 @@ APKs are historical builds signed with a public key, not tester releases.
      last toy when picking on his own, and waits if there’s no other eligible toy. You can
      still request the same toy yourself. Open the **Painting gallery** below the toy switches.
    - **Personality & data:** Edit Pip’s personality, review his memory, or open his login vault.
-   - **Permissions:** Manage overlay, Android accessibility, usage access, and notifications.
+   - **Permissions:** Manage notifications, Notification access, overlay, microphone, usage access, and accessibility.
      To turn off notifications while Pip keeps running, open **Manage notifications** and
      turn them off in Android. Android may still list Pip among active apps.
    - **API & model:** Configure the API key, base URL, and model in their own section.
@@ -400,10 +405,22 @@ APKs are historical builds signed with a public key, not tester releases.
 ### Questions about your phone
 
 - **“What song am I listening to right now?”** checks Android’s active media controls.
-  Enable **Now playing access** under **Pip settings → Permissions** (Android calls it
-  **Notification access**). Pip reads the active player’s title and artist on-device;
-  he doesn’t read notification messages, send the media metadata to the API, or change
-  playback. Paused tracks aren’t reported as playing. Some players don’t share a title.
+  Enable **Notification access** under **Pip settings → Permissions**. Pip reads the active
+  player’s title and artist on-device without sending it to the API or changing playback.
+  Paused tracks aren’t reported as playing. Some players don’t share a title.
+- **“What did Maya text me?”** reads a matching Android notification preview verbatim using
+  an installed offline Android voice. In **Pip settings → Permissions**, turn on **Read
+  message notifications** and allow Pip under **Manage Notification access**. You can name
+  a messaging app, for example **“What did Maya text me on WhatsApp?”** If Pip can’t read
+  the preview, he says so and opens the matching notification’s app (or your default SMS
+  app when there’s no match and you didn’t name an app).
+  To read text from inside any messaging app, select the message and choose **Share → Read
+  with Pip**. If it only supports copying, copy the message and use **Pip settings →
+  Permissions → Read with Pip → Read copied text aloud**. Pip doesn’t guess which chat
+  bubble belongs to the sender or use the model to search your inbox. Readout requires an
+  unlocked phone and doesn’t send the text to the API or save it to chat history. Voice
+  requests still need a tap on **Send**. Model-facing screen snapshots skip the default SMS
+  app, recognized messaging apps, and apps Pip has seen provide message notifications.
 - **“What’s the price shown on this screen?”** can trigger a one-time, read-only screen
   check when Pip’s accessibility access is enabled. Visible app text may go to your
   configured API to answer the question. Pip doesn’t tap, scroll, launch an app, or read

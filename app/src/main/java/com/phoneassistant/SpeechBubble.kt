@@ -13,7 +13,7 @@ internal class SpeechBubble(
 ) {
     private sealed interface Content {
         data object Dots : Content
-        data class Text(val value: String, val end: Int, val conversation: Boolean) : Content
+        data class Text(val value: String, val end: Int, val conversation: Boolean, val privatePreview: Boolean) : Content
     }
     val view = SpeechBubbleView(context).apply { visibility = View.GONE }
     private var content: Content? = null
@@ -32,8 +32,9 @@ internal class SpeechBubble(
         sync()
     }
 
-    fun text(value: String, end: Int = value.length, readMs: Long? = null, conversation: Boolean = false) {
-        content = Content.Text(value, end, conversation)
+    fun text(value: String, end: Int = value.length, readMs: Long? = null, conversation: Boolean = false,
+             privatePreview: Boolean = false) {
+        content = Content.Text(value, end, conversation, privatePreview)
         timing.hold(readMs)
         sync()
     }
@@ -58,7 +59,7 @@ internal class SpeechBubble(
         if (screenHidden == value) return
         timing.suspend()
         screenHidden = value
-        sync()
+        if (value && (content as? Content.Text)?.privatePreview == true) clear() else sync()
     }
 
     fun onFrame() {
@@ -77,6 +78,7 @@ internal class SpeechBubble(
         val previousHeight = view.panelHeight
         if (mode == null || ducked || screenHidden) {
             view.visibility = View.GONE
+            if (mode == null) view.display(null, 0, 1, 1)
         } else {
             val (widthLimit, heightLimit) = limits()
             val line = mode as? Content.Text

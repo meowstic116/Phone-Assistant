@@ -10,7 +10,6 @@ import android.os.SystemClock
 import kotlin.math.cos
 import kotlin.math.sin
 import com.phoneassistant.PopSheet.Milestone
-import kotlin.math.abs
 
 /**
  * A sheet of bubble wrap. You can tap bubbles, or let Pip hop through every bubble left.
@@ -26,13 +25,14 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     private val total = game.total
     private val burstAt = LongArray(total)
     private var removeAt = 0L
-    private var nextPipPop = bornAt + FIRST_HOP_DELAY_MS
-    private var lastHopAt = 0L
+    private val hops = BubbleHopSchedule(bornAt)
 
     // If play is already going, let the remaining jumps and the victory line finish
     // instead of cutting him off at the usual idle timeout.
-    internal fun playingThrough(now: Long): Boolean =
-        removeAt > now || (lastHopAt != 0L && now - lastHopAt <= 1_000L && game.count < total)
+    internal override fun keepsToy(now: Long): Boolean =
+        removeAt > now || (game.count < total && hops.keepsSheet(now))
+
+    internal fun reservesPetInput(now: Long): Boolean = game.count < total && hops.reservesInput(now)
 
     private val sheet = Paint(Paint.ANTI_ALIAS_FLAG)
     private var sheetHeight = -1f
@@ -217,7 +217,7 @@ class BubbleWrap(host: PropHost) : Prop(host) {
             return
         }
 
-        if (!held && width > 0 && height > 0 && now >= nextPipPop) {
+        if (!movingByUser && width > 0 && height > 0 && hops.due(now)) {
             game.nextBubble()?.let { jumpTo(it, now) }
         }
 
@@ -235,19 +235,14 @@ class BubbleWrap(host: PropHost) : Prop(host) {
     }
 
     private fun jumpTo(index: Int, now: Long) {
-        val sheetX = posX
-        val sheetY = posY
-        val cx = sheetX + pad() + cellW() * (index % cols + 0.5f)
-        val cy = sheetY + gridTop() + cellH() * (index / cols + 0.5f)
-        nextPipPop = now + 100L // Don't retry on every frame if another activity has his attention.
-        if (host.petHopOn(this, cx, cy) {
-                val landedAt = SystemClock.uptimeMillis()
-                nextPipPop = landedAt + HOP_PAUSE_MS
-                if (!leaving && !held && abs(posX - sheetX) < dp(1f) && abs(posY - sheetY) < dp(1f)) {
-                    lastHopAt = landedAt
-                    pop(index, landedAt, byPip = true)
-                }
-            }) lastHopAt = now
+        val cx = posX + pad() + cellW() * (index % cols + 0.5f)
+        val cy = posY + gridTop() + cellH() * (index / cols + 0.5f)
+        val started = host.petHopOn(this, cx, cy) { landed ->
+            val at = SystemClock.uptimeMillis()
+            hops.finished(at, landed)
+            if (landed && !leaving) pop(index, at, byPip = true)
+        }
+        hops.attempted(now, started)
     }
 
     override fun describe(): String =
@@ -297,9 +292,6 @@ class BubbleWrap(host: PropHost) : Prop(host) {
             "no bubbles left. my feet would like a tiny round of applause.",
             "and that's the last hop. I retire undefeated in packaging."
         )
-
-        private const val FIRST_HOP_DELAY_MS = 750L
-        private const val HOP_PAUSE_MS = 380L
 
         /** How long the little burst stays on screen after a pop. */
         private const val BURST_MS = 260L

@@ -12,16 +12,18 @@ kotlinc app/src/main/java/com/phoneassistant/JobProgress.kt \
   app/src/main/java/com/phoneassistant/SetupPolicy.kt app/src/main/java/com/phoneassistant/WateringPose.kt \
   app/src/main/java/com/phoneassistant/PreferredName.kt app/src/main/java/com/phoneassistant/MemorySuggestion.kt \
   app/src/main/java/com/phoneassistant/NowPlaying.kt app/src/main/java/com/phoneassistant/PhoneContext.kt \
+  app/src/main/java/com/phoneassistant/MessageNotifications.kt \
   app/src/main/java/com/phoneassistant/JobApproach.kt app/src/main/java/com/phoneassistant/PickupMotion.kt \
-  app/src/main/java/com/phoneassistant/PlantSpecies.kt app/src/main/java/com/phoneassistant/SoccerLayout.kt \
+  app/src/main/java/com/phoneassistant/PlantSpecies.kt app/src/main/java/com/phoneassistant/SoccerLayout.kt app/src/main/java/com/phoneassistant/SoccerAi.kt \
   app/src/main/java/com/phoneassistant/VoiceProtocol.kt app/src/main/java/com/phoneassistant/SpeechCaption.kt \
   app/src/main/java/com/phoneassistant/VoiceChoice.kt app/src/main/java/com/phoneassistant/KokoroHealth.kt \
   app/src/main/java/com/phoneassistant/ChatRecovery.kt app/src/main/java/com/phoneassistant/BoundedText.kt \
-  app/src/main/java/com/phoneassistant/OverlayBounds.kt \
+  app/src/main/java/com/phoneassistant/OverlayBounds.kt app/src/main/java/com/phoneassistant/OverlayFrameSync.kt \
   app/src/main/java/com/phoneassistant/ReplyBubbleState.kt app/src/main/java/com/phoneassistant/KokoroPcm.kt \
   app/src/main/java/com/phoneassistant/SpeechBubbleTiming.kt app/src/main/java/com/phoneassistant/WakePhrase.kt \
   app/src/main/java/com/phoneassistant/WakeStartupPolicy.kt app/src/main/java/com/phoneassistant/VoiceExchange.kt \
   app/src/main/java/com/phoneassistant/CarCommand.kt app/src/main/java/com/phoneassistant/SpontaneousToyChoice.kt \
-  app/src/main/java/com/phoneassistant/TimedRequest.kt tests/JobProgressTest.kt \
+  app/src/main/java/com/phoneassistant/TimedRequest.kt app/src/main/java/com/phoneassistant/PaintingStart.kt \
+  tests/JobProgressTest.kt \
   -include-runtime -d "$tmp/job-progress.jar"
 java -jar "$tmp/job-progress.jar"

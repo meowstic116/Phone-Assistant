@@ -10,7 +10,10 @@ import android.widget.Toast
 class MainActivity : Activity() {
 
     private lateinit var startButton: Button
-    private val powerStateListener: () -> Unit = { refreshPowerButton() }
+    private val powerStateListener: () -> Unit = {
+        refreshPowerButton()
+        if (hasWindowFocus()) OverlayService.onPipWindowFocused()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +53,11 @@ class MainActivity : Activity() {
         if (!::startButton.isInitialized) return
         OverlayService.onPowerStateChanged = powerStateListener
         refreshPowerButton()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && ::startButton.isInitialized) OverlayService.onPipWindowFocused()
     }
 
     override fun onPause() {

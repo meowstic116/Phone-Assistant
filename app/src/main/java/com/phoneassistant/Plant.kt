@@ -33,8 +33,11 @@ class Plant(host: PropHost) : Prop(host) {
     private var firstPour = true
     private var discovery = false
 
-    internal fun tendingThrough(now: Long): Boolean =
-        if (growth.blooming) now - growthAt < 3_400L else lastAutoAt != 0L && now - lastAutoAt < 1_250L
+    internal override fun keepsToy(now: Long): Boolean = when {
+        growth.blooming -> now - growthAt < 8_000L
+        growth.waitingForUser -> now - maxOf(lastAutoAt, growthAt, bornAt) < 60_000L
+        else -> now - maxOf(lastAutoAt, bornAt) < 30_000L
+    }
 
     /** Degrees of lean toward Pip, eased rather than set, so a step is a sway and not a jump. */
     private var lean = 0f
@@ -100,7 +103,7 @@ class Plant(host: PropHost) : Prop(host) {
     }
 
     private fun tryPour(now: Long) {
-        if (held || !growth.pipMayWater || now < nextPourAt || now - lastTap < 450L || width <= 0) return
+        if (movingByUser || !growth.pipMayWater || now < nextPourAt || now - lastTap < 450L || width <= 0) return
         nextPourAt = now + 160L
         val cx = posX + width / 2f
         val potTop = posY + potTop()

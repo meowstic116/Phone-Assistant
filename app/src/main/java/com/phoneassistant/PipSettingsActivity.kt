@@ -21,6 +21,7 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.phoneassistant.PipSettings.Option
+import com.phoneassistant.SetupPolicy.Permission
 
 class PipSettingsActivity : Activity() {
     companion object {
@@ -29,6 +30,7 @@ class PipSettingsActivity : Activity() {
 
     private lateinit var content: LinearLayout
     private lateinit var bootHint: TextView
+    private lateinit var openAtBoot: Switch
     private lateinit var accessHint: TextView
     private lateinit var voiceSummary: TextView
     private lateinit var kokoroStatus: TextView
@@ -66,6 +68,10 @@ class PipSettingsActivity : Activity() {
             refreshHints()
         }
         bootHint = text("")
+        openAtBoot = toggle("Open the Pip app after restart", PipStartup.openAppAtBoot(this)) {
+            PipStartup.setOpenAppAtBoot(this, it)
+        }
+        text("Opens Pip’s main screen once after your first unlock. Requires Start Pip when the phone starts. Some phones block apps from opening automatically.")
 
         heading("Phone access")
         option(getString(R.string.permissions_access_switch), Option.ACCESSIBILITY)
@@ -115,7 +121,7 @@ class PipSettingsActivity : Activity() {
                 Toast.makeText(this, it, Toast.LENGTH_LONG).show()
             }
         }.isEnabled = KokoroVoice.supported()
-        text("Only starts the microphone when you tap Start assistant in the app, not at phone boot. Requires the offline model and microphone permission.")
+        text("Starts the microphone when you tap Start assistant. If Start Pip when the phone starts is also on, listening can resume after a reboot. On Android 11 or newer, Pip starts listening when his app screen opens after unlocking. Turn on Open the Pip app after restart to try opening it automatically. Requires the offline model and microphone permission.")
         wakeAction = button("") { changeWakeListening() }
         wakeStatus = text("")
         wakeSpeak = button("Speak now (no wake word)") {
@@ -299,22 +305,16 @@ class PipSettingsActivity : Activity() {
 
     private fun addPermissions() {
         heading(getString(R.string.permissions_heading))
-        permission(R.string.permissions_overlay, { Settings.canDrawOverlays(this) }, R.string.permissions_overlay_info) {
-            PipPermissions.openOverlay(this)
-        }
-        permission(R.string.permissions_access_android, { ImeWatch.enabled(this) }) {
-            PipPermissions.openAccessibility(this)
-        }
-        permission(R.string.permissions_usage, { AppWatcher.hasPermission(this) }, R.string.permissions_usage_info) {
-            PipPermissions.openUsage(this)
-        }
-        permission(R.string.permissions_now_playing, { PipMediaAccess.enabled(this) },
-            R.string.permissions_now_playing_info, R.string.permissions_now_playing_manage) {
-            PipPermissions.openMediaAccess(this)
-        }
-        permission(R.string.permissions_notifications, { PipPermissions.notificationsEnabled(this) },
-            R.string.permissions_notifications_info, R.string.permissions_notifications_manage) {
-            PipPermissions.openNotifications(this)
+        for (permission in Permission.entries) {
+            val row = PipPermissions.row(permission)
+            permission(row.title, { PipPermissions.granted(this, permission) }, row.description, row.manage) {
+                PipPermissions.manage(this, permission)
+            }
+            if (permission == Permission.NOTIFICATION_ACCESS) {
+                option(getString(R.string.permissions_message_previews), Option.MESSAGE_NOTIFICATIONS)
+                text(getString(R.string.permissions_message_previews_info))
+                button(getString(R.string.read_message_with_pip)) { startActivity(Intent(this, ReadMessageActivity::class.java)) }
+            }
         }
     }
 
@@ -377,6 +377,11 @@ class PipSettingsActivity : Activity() {
         }
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) OverlayService.onPipWindowFocused()
+    }
+
     override fun onResume() {
         super.onResume()
         refreshApiIfChanged()
@@ -388,6 +393,7 @@ class PipSettingsActivity : Activity() {
         permissionStatuses.forEach { it() }
         bootHint.setText(if (PipStartup.enabled(this) && !Settings.canDrawOverlays(this))
             R.string.start_at_boot_needs_overlay else R.string.start_at_boot_hint)
+        openAtBoot.isEnabled = PipStartup.enabled(this)
         accessHint.text = when {
             !PipSettings.enabled(this, Option.ACCESSIBILITY) ->
                 "Pip won't read other apps or use accessibility to keep clear of their keyboards. Android's separate permission is unchanged."

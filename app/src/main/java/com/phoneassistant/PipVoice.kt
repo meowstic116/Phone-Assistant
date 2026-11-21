@@ -1,10 +1,14 @@
 package com.phoneassistant
 
 import android.app.KeyguardManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
@@ -40,6 +44,7 @@ internal object PipVoice {
     private var lastCaptionEnd = 0
     private var captionClock: Runnable? = null
     private var speechDeadline: Runnable? = null
+    private var privatePlaybackCleanup: (() -> Unit)? = null
 
     private fun clearClocks() {
         captionClock?.let(main::removeCallbacks)
@@ -56,6 +61,8 @@ internal object PipVoice {
 
     private fun finishCaptions() {
         clearClocks()
+        privatePlaybackCleanup?.invoke()
+        privatePlaybackCleanup = null
         if (speaking) {
             keepMicMutedUntil = SystemClock.elapsedRealtime() + 400L
             speaking = false
@@ -124,6 +131,44 @@ internal object PipVoice {
         val config = VoiceSettings.config(context)
         if (config.enabled) speak(context.applicationContext, text, config, null, captions, allowLocked)
         else captions?.invoke(null)
+    }
+
+    /** Explicit read-aloud uses only Android voices marked offline, never model/TTS API paths. */
+    fun readPrivate(context: Context, text: String, unavailable: (String) -> Unit, finished: () -> Unit = {}) {
+        val line = SpeechCaption.literal(text, TextToSpeech.getMaxSpeechInputLength())
+        if (line == null) {
+            unavailable("This text is empty or too long for Android’s offline voice. Try sharing a shorter selection.")
+            finished()
+            return
+        }
+        stop()
+        val id = sequence
+        val ctx = context.applicationContext
+        if (!mayPlay(ctx, id)) return
+        // The overlay isn't always running (e.g. when invoked from Android's Share menu).
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_SCREEN_OFF && id == sequence) stop()
+            }
+        }
+        val registered = runCatching {
+            val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+            if (Build.VERSION.SDK_INT >= 33) ctx.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            else ctx.registerReceiver(receiver, filter)
+        }.isSuccess
+        if (!registered) {
+            unavailable("Android couldn’t start private playback.")
+            finished()
+            return
+        }
+        privatePlaybackCleanup = { runCatching { ctx.unregisterReceiver(receiver) } }
+        speaking = true
+        captionUpdate = { end -> if (end == null && id == sequence) finished() }
+        timeLimit(id, 8_000L) {
+            unavailable("Android’s offline voice didn’t start.")
+            finished()
+        }
+        local(ctx, id, line, { if (it.isNotEmpty()) unavailable(it) }, "")
     }
 
     fun preview(context: Context, report: (String) -> Unit) =
@@ -208,7 +253,7 @@ internal object PipVoice {
                     main.post {
                         if (utteranceId != id.toString() || id != sequence) return@post
                         val start = SystemClock.uptimeMillis()
-                        timeLimit(id, 60_000L)
+                        timeLimit(id, if (success.isEmpty()) 360_000L else 60_000L)
                         // Engines that don't implement word ranges still get a timed reveal.
                         if (!timedByEngine) estimate(id, line) {
                             if (timedByEngine) null else (SystemClock.uptimeMillis() - start - 260L) / line.estimatedDurationMs.toFloat()
@@ -222,13 +267,14 @@ internal object PipVoice {
                         reveal(id, line.displayEndForRange(start, end))
                     }
                 }
-                override fun onDone(utteranceId: String?) = finish(utteranceId)
+                override fun onDone(utteranceId: String?) = finish(utteranceId, false)
                 @Deprecated("Android fallback callback")
-                override fun onError(utteranceId: String?) = finish(utteranceId)
-                private fun finish(utteranceId: String?) {
+                override fun onError(utteranceId: String?) = finish(utteranceId, true)
+                private fun finish(utteranceId: String?, error: Boolean) {
                     main.post {
                         if (utteranceId == id.toString() && id == sequence) {
                             releaseAudio()
+                            if (error) report?.invoke("Android couldn’t play the voice.")
                             finishCaptions()
                         }
                     }

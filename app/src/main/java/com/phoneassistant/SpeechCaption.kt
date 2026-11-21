@@ -27,6 +27,10 @@ internal class SpeechCaption private constructor(val text: String, private val w
                 else -> 0
             }
 
+        /** Pass message text to speech exactly as supplied, not through persona parsing. */
+        fun literal(text: String, limit: Int): SpeechCaption? =
+            text.takeIf { it.isNotBlank() && it.length <= limit }?.let { SpeechCaption(it, emptyList(), 0) }
+
         fun from(display: String, limit: Int): SpeechCaption? {
             val line = display.trimStart()
             if (line.isEmpty() || line.startsWith('{') || line.startsWith('[') || line.trimEnd() == "(silence)") return null
