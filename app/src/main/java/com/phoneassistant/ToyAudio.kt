@@ -55,12 +55,10 @@ internal object ToyAudio {
     @Volatile
     private var cachedEnabled: Boolean? = null
 
-    /** Read per play, so the switch takes effect on the next squeak. Cached per process start. */
+    /** Read per play, so the switch takes effect immediately. */
     fun enabled(ctx: Context): Boolean {
-        cachedEnabled?.let { return it }
         val value = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_ENABLED, true)
-        cachedEnabled = value
         return value
     }
 
