@@ -1083,12 +1083,12 @@ fun main() {
     check(wakePhrase.accept("Good one, Piper", 47_000) == null)
     check(wakePhrase.accept("That was funny", 48_000) == null)
     check(wakePhrase.accept("Hey Pep, pause Spotify", 49_000) == "pause Spotify")
-    check(wakePhrase.accept("Pep, pause Spotify", 49_100) == null)
+    check(wakePhrase.accept("Pep, pause Spotify", 49_100) == "pause Spotify") // Variant spelling as a direct address.
     check(wakePhrase.accept("Pip’s next move", 49_200) == null)
     check(wakePhrase.accept("Pip…", 50_000) == null && wakePhrase.awaiting)
     check(wakePhrase.accept("pause Spotify", 50_600) == "pause Spotify")
     check(wakePhrase.observePartial("Hey Pip pause Spotify"))
-    check(wakePhrase.accept("pause Spotify", 60_000) == null) // One hint isn't enough.
+    check(wakePhrase.accept("pause Spotify", 60_000) == "pause Spotify") // A live name sighting is enough.
     check(wakePhrase.observePartial("Hey Pip pause Spotify"))
     check(wakePhrase.observePartial("Hey Pip pause Spotify now"))
     check(!wakePhrase.observePartial("pause Spotify now"))
@@ -1098,18 +1098,30 @@ fun main() {
     check(wakePhrase.observePartial("Pip tell me a joke"))
     check(wakePhrase.accept("tell me a joke", 63_000) == "tell me a joke")
     wakePhrase.observePartial("Hey Pip turn left")
-    wakePhrase.observePartial("Hey Pip turn left")
-    check(wakePhrase.accept("turn right", 64_000) == null) // The command itself changed.
+    check(wakePhrase.accept("turn right", 64_000) == "turn right") // The name was heard.
     wakePhrase.observePartial("Hey Pip turn left")
     wakePhrase.observePartial("Hey Pip turn left")
     wakePhrase.reset() // Recorder restart or playback pause.
     check(wakePhrase.accept("turn left", 65_000) == null)
     wakePhrase.observePartial("Hey Pip")
-    wakePhrase.observePartial("Hey Pip")
-    check(wakePhrase.accept("turn left", 66_000) == null)
+    check(wakePhrase.accept("turn left", 66_000) == "turn left") // One name sighting is enough.
     check(!wakePhrase.observePartial("I said hey Pip turn left"))
     check(!wakePhrase.observePartial("I said hey Pip turn left"))
     check(wakePhrase.accept("turn left", 67_000) == null)
+    // The name is honored anywhere in the sentence, with or without commas or "hey".
+    check(wakePhrase.accept("could you pip turn the music down", 70_000) == "could you turn the music down")
+    check(wakePhrase.accept("OK Pip", 71_000) == null && wakePhrase.awaiting)
+    check(wakePhrase.accept("pause the music", 71_500) == "pause the music")
+    check(wakePhrase.accept("pipe the output through grep", 72_000) == null)
+    check(!wakePhrase.hasAddress("Piper is a nice name"))
+    check(wakePhrase.accept("Pip what time is it?", 73_000) == "what time is it?")
+    check(wakePhrase.accept("Peep, pause Spotify", 75_000) == "pause Spotify")
+    check(wakePhrase.accept("peep the window", 75_500) == null)
+    check(wakePhrase.accept("pepperoni pizza please", 75_700) == null) // Not a name spelling.
+    check(wakePhrase.accept("Pip, is it going to rain?", 76_000) == "is it going to rain?")
+    check(wakePhrase.accept("Pip is on my phone", 76_500) == "is on my phone") // He still answers.
+    check(wakePhrase.accept("Could you Pip turn it down?", 77_000) == "Could you turn it down?")
+    check(wakePhrase.accept("pass me the pip", 74_000) == null) // "the pip" is an object, not his name.
     val captureRecovery = WakeCaptureRecovery()
     check(!captureRecovery.stalled(3999, lastPcmAt = 0) && captureRecovery.stalled(4000, lastPcmAt = 0))
     check(captureRecovery.tryRestart(4000) && captureRecovery.tryRestart(8000))
