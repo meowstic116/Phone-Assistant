@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
+import android.widget.TextView
 import android.widget.Toast
 
 class MainActivity : Activity() {
@@ -46,6 +47,27 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.historyButton).setOnClickListener {
             startActivity(Intent(this, ChatHistoryActivity::class.java))
         }
+
+        // A crash is shown here rather than only in Diagnostics, because Diagnostics is
+        // reached through Pip settings — the screen that a crash may have just killed.
+        findViewById<Button>(R.id.crashClear).setOnClickListener {
+            Diag.clearCrash(this)
+            showCrash()
+        }
+    }
+
+    private fun showCrash() {
+        val summary = Diag.crashSummary(this)
+        val panel = findViewById<TextView>(R.id.crashPanel)
+        val clear = findViewById<Button>(R.id.crashClear)
+        if (summary == null) {
+            panel.visibility = android.view.View.GONE
+            clear.visibility = android.view.View.GONE
+            return
+        }
+        panel.text = "Pip closed unexpectedly the last time he ran.\n\n$summary"
+        panel.visibility = android.view.View.VISIBLE
+        clear.visibility = android.view.View.VISIBLE
     }
 
     override fun onResume() {
@@ -53,6 +75,7 @@ class MainActivity : Activity() {
         if (!::startButton.isInitialized) return
         OverlayService.onPowerStateChanged = powerStateListener
         refreshPowerButton()
+        showCrash()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

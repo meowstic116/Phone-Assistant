@@ -99,8 +99,67 @@ class PipSettingsActivity : Activity() {
             "offline voice. The message is never saved to chat history or sent to the API."
     }
 
+    /**
+     * Which section is being built. A crash here used to say only that the screen died; with
+     * this in the record, Diagnostics names the step and the frame that threw.
+     */
+    private var building = "start"
+
+    /** Set when the screen could not be built, so later callbacks stay out of the way. */
+    private var buildFailed = false
+
+    private fun step(name: String) {
+        building = name
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            buildScreen(savedInstanceState)
+        } catch (t: Throwable) {
+            buildFailed = true
+            Diag.caught("settings screen · while building $building", t)
+            // Also kept on disk and shown on the main screen. This caught the throw, so it
+            // never reaches the process-wide handler, and it is exactly the case the user
+            // has to be able to report.
+            Diag.recordCrash(t)
+            // Shown here as well as recorded: the record is what survives, this is what the
+            // user can act on without leaving the screen.
+            showBuildFailure(t)
+        }
+    }
+
+    /** A last-resort screen: a crash in settings must still leave something usable behind. */
+    private fun showBuildFailure(t: Throwable) {
+        val origin = t.stackTrace.firstOrNull { it.className.startsWith("com.phoneassistant") }
+            ?.let { "${it.fileName}:${it.lineNumber} ${it.methodName}" }
+        val text = TextView(this).apply {
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+            textSize = 15f
+            setTextColor(getColor(R.color.text))
+            setTextIsSelectable(true)
+            text = "Pip settings couldn’t open.\n\n" +
+                "While building: $building\n" +
+                "${t.javaClass.simpleName}: ${t.message?.take(300).orEmpty()}\n" +
+                (origin?.let { "At: $it\n" } ?: "") +
+                "\nThis is also kept on the main screen, so it survives closing Pip."
+        }
+        val back = Button(this).apply {
+            setText("Close")
+            isAllCaps = false
+            setOnClickListener { finish() }
+        }
+        setContentView(ScrollView(this).apply {
+            setBackgroundColor(getColor(R.color.bg))
+            addView(LinearLayout(this@PipSettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text)
+                addView(back)
+            })
+        })
+    }
+
+    private fun buildScreen(savedInstanceState: Bundle?) {
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             isFocusableInTouchMode = true
@@ -114,7 +173,9 @@ class PipSettingsActivity : Activity() {
         setContentView(scroll)
         content.requestFocus()
 
+        step("start")
         text("Pip settings", 30f, R.color.text)
+        step("Movement & startup")
         heading("Movement & startup")
         option("Wander around the screen", Option.WANDER, Notes.wander)
         toggleLive(getString(R.string.start_at_boot), PipStartup.enabled(this), ::bootNote) {
@@ -126,13 +187,16 @@ class PipSettingsActivity : Activity() {
             PipStartup.setOpenAppAtBoot(this, it)
         }
 
+        step("Phone access")
         heading("Phone access")
         optionLive(getString(R.string.permissions_access_switch), Option.ACCESSIBILITY, ::accessNote)
         button("Lock the screen now", ScreenLocker.explanation()) { lockNow() }
 
+        step("Memory")
         heading("Memory")
         option("Learn from chat", Option.LEARN_FROM_CHAT, Notes.learnFromChat)
 
+        step("Voice")
         heading("Voice")
         toggle("Read Pip’s replies aloud", VoiceSettings.config(this).enabled, Notes.readingAloud) {
             VoiceSettings.setEnabled(this, it)
@@ -166,6 +230,7 @@ class PipSettingsActivity : Activity() {
                 "Start Pip and let him finish any current reply, then try again.", Toast.LENGTH_LONG).show()
         }
 
+        step("Talk to Pip")
         heading("Talk to Pip", Notes.listening)
         toggle("Start listening when Pip starts", PipStartup.listenOnStart(this), Notes.listenOnStart) { enabled ->
             PipStartup.setListenOnStart(this, enabled)
@@ -182,6 +247,7 @@ class PipSettingsActivity : Activity() {
         }
         refreshWakeAction()
 
+        step("Hands-free driving")
         heading("Hands-free driving", Notes.driving)
         toggle("Allow hands-free driving commands", VoiceSettings.drivingEnabled(this), null) {
             VoiceSettings.setDrivingEnabled(this, it)
@@ -222,9 +288,13 @@ class PipSettingsActivity : Activity() {
                 .show()
         }
 
+        step("Toys")
         val toyHeading = addToySettings()
+        step("Personality & data")
         addPersonalityAndData()
+        step("Permissions")
         addPermissions()
+        step("API & model")
         addApiSettings()
         button(getString(R.string.debug_options)) { startActivity(Intent(this, DebugOptionsActivity::class.java)) }
         button("Done") { finish() }
@@ -304,6 +374,7 @@ class PipSettingsActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        if (buildFailed) return
         KokoroVoice.observe(kokoroChanged)
         WakeListenService.onChanged = ::refreshWakeAction
         WakeModel.observe(wakeModelChanged)
@@ -493,9 +564,16 @@ class PipSettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        refreshApiIfChanged()
-        refreshHints()
-        refreshWakeAction()
+        // After a failed build none of this exists yet, and throwing here would replace the
+        // real failure with a second one before the user could read the first.
+        if (buildFailed) return
+        try {
+            refreshApiIfChanged()
+            refreshHints()
+            refreshWakeAction()
+        } catch (t: Throwable) {
+            Diag.caught("settings screen · while refreshing", t)
+        }
     }
 
     /** Automatic start says the same thing whether or not the permission is in place. */

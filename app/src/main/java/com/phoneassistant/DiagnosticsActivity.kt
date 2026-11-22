@@ -389,6 +389,17 @@ class DiagnosticsActivity : Activity() {
         }
         line("last good reply", Diag.ago(Diag.lastApiOkAt))
 
+        section("LAST CRASH")
+        val crash = Diag.crashSummary(this)
+        if (crash == null) {
+            line("crash", "none recorded")
+        } else {
+            val halves = crash.split("\n\n", limit = 2)
+            line("crash", halves.getOrNull(1) ?: "recorded")
+            detail(halves[0])
+            detail("a crash record survives the app closing; the exception below does not")
+        }
+
         section("LAST SWALLOWED EXCEPTION")
         val caught = Diag.lastCaught
         if (caught == null) {

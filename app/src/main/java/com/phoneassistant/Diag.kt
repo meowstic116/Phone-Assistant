@@ -1,5 +1,6 @@
 package com.phoneassistant
 
+import android.content.Context
 import android.os.SystemClock
 
 /**
@@ -54,6 +55,22 @@ object Diag {
     @Volatile
     var lastApiOkAt = 0L
         private set
+
+    /**
+     * A crash from a previous run, kept on disk because the process that saw it is gone.
+     *
+     * This exists because it is the only channel that survives: the phone is not plugged into
+     * anything, nothing is logged where it can be read, and a screen that dies before its
+     * first frame leaves no trace anyone can retrieve. Written from the uncaught handler, so
+     * it catches even a failure during class loading that no try/catch in onCreate can.
+     */
+    @Volatile
+    var lastCrash: Event? = null
+        private set
+
+    private const val CRASH_PREFS = "pip_diag"
+    private const val CRASH_KEY = "last_crash"
+    private const val CRASH_AT_KEY = "last_crash_wall"
 
     /** The last exception nobody reported, and a count if it keeps happening. */
     @Volatile
@@ -218,7 +235,110 @@ object Diag {
     private fun describe(what: String, t: Throwable): String {
         val name = t.javaClass.simpleName.ifEmpty { t.javaClass.name.substringAfterLast('.') }
         val message = t.message?.replace("\n", " ")?.trim()?.take(140).orEmpty()
-        return if (message.isEmpty()) "$what · $name" else "$what · $name: $message"
+        // The frame that threw, not the whole trace: enough to find the line without making
+        // the readout unreadable, and the only clue available when nothing else is logged.
+        val frame = writableFrame(t)
+        val head = if (message.isEmpty()) "$what · $name" else "$what · $name: $message"
+        return if (frame == null) head else "$head @ $frame"
+    }
+
+    /** The first stack frame inside Pip, which is the code that actually failed. */
+    private fun writableFrame(t: Throwable): String? = runCatching {
+        t.stackTrace.firstOrNull { it.className.startsWith("com.phoneassistant") }
+            ?.let { "${it.fileName}:${it.lineNumber} ${it.methodName}" }
+    }.getOrNull()
+
+    // --------------------------------------------------------------- crash record
+
+    /**
+     * Records a crash that is about to kill the process, then returns so the caller can pass
+     * it on to whoever handled it before. Never throws: a failure while recording is worse
+     * than the failure being recorded.
+     */
+    fun recordCrash(t: Throwable, thread: Thread? = null) {
+        runCatching {
+            // t's own trace is the throw site. The dying thread's stack is not: by the time
+            // the handler runs it holds the handler's frames, not the frames that failed.
+            val frames = t.stackTrace.takeIf { it.isNotEmpty() } ?: thread?.stackTrace.orEmpty()
+            val origin = frames.firstOrNull { it.className.startsWith("com.phoneassistant") }
+            val where = origin?.let { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+            val reason = "${t.javaClass.name}: ${t.message?.replace("\n", " ")?.trim().orEmpty()}".trim()
+            val text = (if (where == null) reason else "$where · $reason").take(400)
+            lastCrash = Event(text, now())
+            // commit, not apply: apply writes to disk on another thread, and this process is
+            // about to be killed before that thread gets a turn. It blocks, which is fine —
+            // the process is dying anyway and nothing else is waiting on this.
+            runCatching {
+                crashPrefs(crashContext)?.edit()
+                    ?.putString(CRASH_KEY, text)
+                    ?.putLong(CRASH_AT_KEY, System.currentTimeMillis())
+                    ?.commit()
+            }
+        }
+    }
+
+    /**
+     * The context kept for the crash handler. The handler is handed a thread and a throwable
+     * and nothing else, so the one thing it cannot supply for itself is saved up front.
+     */
+    @Volatile
+    private var crashContext: Context? = null
+
+    fun crashSink(context: Context) {
+        crashContext = context.applicationContext
+        runCatching { lastCrash = load(context) }
+    }
+
+    private fun crashPrefs(context: Context?) =
+        context?.getSharedPreferences(CRASH_PREFS, Context.MODE_PRIVATE)
+
+    private fun load(context: Context): Event? = runCatching {
+        val prefs = crashPrefs(context) ?: return null
+        val text = prefs.getString(CRASH_KEY, null)?.takeIf { it.isNotBlank() } ?: return null
+        Event(text, 0L)
+    }.getOrNull()
+
+    /** Wall-clock time of the recorded crash, so "yesterday" is not shown as "just now". */
+    fun crashWhen(context: Context): Long =
+        crashPrefs(context)?.getLong(CRASH_AT_KEY, 0L) ?: 0L
+
+    /**
+     * Installs the process-wide crash handler. Called once from the application object, before
+     * anything else can fail, and passes every crash to whatever handler was there first so
+     * ordinary crash reporting keeps working.
+     */
+    fun watchForCrashes(context: Context) {
+        crashSink(context)
+        runCatching {
+            val previous = Thread.getDefaultUncaughtExceptionHandler()
+            Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+                recordCrash(error, thread)
+                previous?.uncaughtException(thread, error)
+            }
+        }
+    }
+
+    /** A one-line summary for the main screen, or null when nothing has crashed. */
+    fun crashSummary(context: Context): String? {
+        val text = lastCrash?.text ?: load(context)?.text ?: return null
+        val when_ = crashWhen(context)
+        val age = if (when_ > 0L) {
+            val minutes = (System.currentTimeMillis() - when_) / 60_000L
+            when {
+                minutes < 1L -> "just now"
+                minutes < 60L -> "${minutes}m ago"
+                minutes < 1_440L -> "${minutes / 60}h ago"
+                else -> "${minutes / 1_440}d ago"
+            }
+        } else "earlier"
+        return "$text\n\n$age"
+    }
+
+    /** Forgets the record. Writes on a worker: clearing happens from a tap, not from a crash. */
+    fun clearCrash(context: Context) {
+        lastCrash = null
+        val prefs = crashPrefs(context) ?: return
+        Thread({ runCatching { prefs.edit().clear().apply() } }, "PipCrashClear").start()
     }
 
     private fun oneLine(text: String, max: Int): String =
