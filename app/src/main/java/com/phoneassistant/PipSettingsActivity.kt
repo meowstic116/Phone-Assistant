@@ -190,7 +190,6 @@ class PipSettingsActivity : Activity() {
         step("Phone access")
         heading("Phone access")
         optionLive(getString(R.string.permissions_access_switch), Option.ACCESSIBILITY, ::accessNote)
-        button("Lock the screen now", ScreenLocker.explanation()) { lockNow() }
 
         step("Memory")
         heading("Memory")
@@ -443,8 +442,7 @@ class PipSettingsActivity : Activity() {
         option("Allow toys", Option.TOYS, Notes.allowToys)
         toySwitches += option("Bring out toys on his own", Option.SPONTANEOUS, Notes.spontaneous)
         for (toy in Toy.values()) {
-            toySwitches += toggle(toy.label, PipSettings.toySelected(this, toy),
-                ToyNotes.text(toy) { getString(it) }) {
+            toySwitches += toggle(toy.label, PipSettings.toySelected(this, toy), null) {
                 PipSettings.setToy(this, toy, it)
                 OverlayService.behaviorSettingsChanged()
             }
@@ -494,10 +492,7 @@ class PipSettingsActivity : Activity() {
             if (permission == Permission.NOTIFICATION_ACCESS) {
                 option(getString(R.string.permissions_message_previews), Option.MESSAGE_NOTIFICATIONS,
                     Notes.messagePreviews)
-                plainButton(getString(R.string.read_message_with_pip)) {
-                    startActivity(Intent(this, ReadMessageActivity::class.java))
                 }
-            }
         }
     }
 

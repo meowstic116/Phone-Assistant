@@ -199,10 +199,10 @@ internal object ToyAudio {
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
 
-    /** True when the ringer is silent or vibrate, so a toy can stay quiet without a setting. */
+    /** True when the ringer is silent, so a toy can play on vibrate but stay quiet on silent. */
     fun ringerMuted(ctx: Context): Boolean = runCatching {
         when (ctx.getSystemService(AudioManager::class.java)?.ringerMode) {
-            AudioManager.RINGER_MODE_SILENT, AudioManager.RINGER_MODE_VIBRATE -> true
+            AudioManager.RINGER_MODE_SILENT -> true
             else -> false
         }
     }.getOrDefault(false)
