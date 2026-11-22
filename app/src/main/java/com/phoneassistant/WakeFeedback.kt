@@ -18,7 +18,7 @@ internal enum class WakeFeedback(val message: String, val canSpeak: Boolean = fa
     REPLIED("Pip replied. Check the bubble or chat history.", true),
     CAR_COMMAND("Driving request handed off. Listen for Pip’s reply.", true),
     CAR_NOT_RUN("Driving request not run. Listen for Pip’s reply; troubleshoot only when parked.", true),
-    REVIEW("Phone action heard. Unlock and review it before tapping Send.", true),
+    PURCHASE_REVIEW("Purchase heard. Pip never buys or pays; review it yourself.", true),
     DRAFT("Pip heard you. Send or close your unfinished text draft first.", true),
     BUSY("Pip heard you, but he’s busy. Try again in a moment.", true),
     CHAT_FAILED("Message heard, but Pip couldn’t reply. Check the chat API settings or try a typed message.", true),
@@ -33,7 +33,7 @@ internal enum class WakeFeedback(val message: String, val canSpeak: Boolean = fa
     }
 
     val isOutcome: Boolean get() = when (this) {
-        REPLIED, CAR_COMMAND, CAR_NOT_RUN, REVIEW, DRAFT, BUSY, CHAT_FAILED, CHAT_TIMED_OUT -> true
+        REPLIED, CAR_COMMAND, CAR_NOT_RUN, PURCHASE_REVIEW, DRAFT, BUSY, CHAT_FAILED, CHAT_TIMED_OUT -> true
         else -> false
     }
 }

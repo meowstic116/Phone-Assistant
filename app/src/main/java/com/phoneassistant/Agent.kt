@@ -355,6 +355,14 @@ object Agent {
                     return
                 }
 
+                // Spending money is the user's decision, even mid-job: stop before the tap
+                // that would pay, buy, or check out.
+                val spendTarget = screen.items.firstOrNull { it.index == decision.target }?.label.orEmpty()
+                if (decision.action == "tap" && PurchasePolicy.asksToPay("${decision.text} $spendTarget")) {
+                    finish("I stopped before anything that spends money. Purchases are yours to confirm.",
+                        "paused at a purchase control; no payment action taken")
+                    return
+                }
                 val target = screen.items.firstOrNull { it.index == decision.target }
                 if (!alive()) return
                 val browserTarget = target?.takeIf {

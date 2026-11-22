@@ -159,7 +159,6 @@ class OverlayService : Service(), PropHost {
 
         internal fun discardVoiceDraft() {
             instance?.let {
-                it.voiceDraft = null
                 it.voiceExchange.clear()
             }
         }
@@ -205,7 +204,6 @@ class OverlayService : Service(), PropHost {
             Agent.cancel()
             instance?.let {
                 it.awaitingReply = false
-                it.voiceDraft = null
                 it.voiceExchange.clear()
                 it.hideThinking()
                 it.hideBubble()
@@ -313,7 +311,6 @@ class OverlayService : Service(), PropHost {
     private var voicedReply: ReplyBubbleState? = null
     private lateinit var speechBubble: SpeechBubble
 
-    private var voiceDraft: Pair<String, Long>? = null
     private val voiceExchange = VoiceExchange()
     private var screenOffGeneration = 0L
     private var inputBar: LinearLayout? = null
@@ -2309,27 +2306,21 @@ class OverlayService : Service(), PropHost {
         shiftedPitch.clear()
     }
 
-    private fun showVoiceDraft() {
-        val (text, expires) = voiceDraft ?: return
-        if (!WakeListenService.running || SystemClock.elapsedRealtime() >= expires) {
-            voiceDraft = null
-            return
+    /** A spoken purchase: put it in the composer for the user, never run or send it. */
+    private fun reviewPurchase(text: String, done: (WakeFeedback) -> Unit) {
+        if (screenUsable()) {
+            showInputBar()
+            inputField?.let {
+                it.setText(text)
+                it.setSelection(it.text.length)
+                android.widget.Toast.makeText(this, "Purchases stay yours. Review it and tap Send if you want help.",
+                    android.widget.Toast.LENGTH_LONG).show()
+            }
+        } else {
+            PipVoice.reply(this, "Purchases stay yours. Unlock your phone to review that request.",
+                allowLocked = true)
         }
-        if (!screenUsable() || inputField != null || ending) return
-        showInputBar()
-        inputField?.let {
-            voiceDraft = null
-            it.setText(text)
-            it.setSelection(it.text.length)
-            android.widget.Toast.makeText(this, "Review the voice request and tap Send to confirm.",
-                android.widget.Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun confirmVoiceRequest(text: String) {
-        voiceDraft = text to (SystemClock.elapsedRealtime() + 60_000L)
-        showVoiceDraft()
-        if (!screenUsable()) PipVoice.reply(this, "Unlock your phone and tap Send to confirm.", allowLocked = true)
+        done(WakeFeedback.PURCHASE_REVIEW)
     }
 
     private fun handleVoice(text: String, stillListening: () -> Boolean, done: (WakeFeedback) -> Unit) {
@@ -2363,8 +2354,7 @@ class OverlayService : Service(), PropHost {
 
     private fun handleOrdinaryVoice(text: String, stillListening: () -> Boolean, done: (WakeFeedback) -> Unit,
                                     driving: Boolean) {
-        fun review(): WakeFeedback {
-            if (!driving) { confirmVoiceRequest(text); return WakeFeedback.REVIEW }
+        fun parkedOnly(): WakeFeedback {
             val reason = "That’s not a hands-free driving command. Try again when parked."
             Diag.handsFreeCommand(reason)
             PipVoice.reply(this, reason, allowLocked = true)
@@ -2383,11 +2373,25 @@ class OverlayService : Service(), PropHost {
             done(WakeFeedback.DRAFT)
             return
         }
+        // Spending money is the one request that still stops for a person.
+        if (PurchasePolicy.asksToPay(text)) {
+            if (driving) {
+                PipVoice.reply(this, "I can’t buy things while driving. Save that for when you’re parked.", allowLocked = true)
+                done(WakeFeedback.PURCHASE_REVIEW)
+            } else reviewPurchase(text, done)
+            return
+        }
         // Tapping Pip first opens an empty composer. It shouldn't swallow a spoken request.
         if (inputBar != null) closeChat()
-        if (CarCommand.looksLikeTask(text) || JobProgress.routePhoneLocally(text) || PhoneContext.mayInspect(text) ||
-            PhoneContext.asksForAppLabel(text) || NowPlaying.requested(text) || MessageNotifications.request(text) != null) {
-            done(review())
+        val local = JobProgress.routePhoneLocally(text)
+        if (!driving && (local || PhoneContext.asksForAppLabel(text) || NowPlaying.requested(text) ||
+                MessageNotifications.request(text) != null)) {
+            runLocally(text, done)
+            return
+        }
+        if (CarCommand.looksLikeTask(text) || PhoneContext.mayInspect(text)) {
+            if (driving) { done(parkedOnly()); return }
+            runVoiceTask(text, stillListening, done, unlocked = bubbleScreenUsable())
             return
         }
         val turn = ChatTurns.begin()
@@ -2396,10 +2400,9 @@ class OverlayService : Service(), PropHost {
         val previousVoice = voiceExchange.takeIfRecent(SystemClock.elapsedRealtime()).takeIf { unlocked }
         beginReply()
         if (screenUsable()) startThinking()
-        // No app/screen context, local phone shortcuts, toy reactions or memory changes occur
-        // on an unconfirmed voice turn. Only a later tap on the ordinary Send button can act.
-        // The wake listener pauses capture until this turn completes. A slow chat provider
-        // must not hold the microphone indefinitely or deliver a reply after it has resumed.
+        // Ordinary conversation is read-only: the provider sees no app or screen context and
+        // cannot start a phone job from a spoken turn. Work on the phone is recognized above,
+        // and only a purchase stops for confirmation.
         var timedOut = false
         val deadline = Runnable {
             timedOut = true
@@ -2422,12 +2425,6 @@ class OverlayService : Service(), PropHost {
                     if (instance !== this || ending || !ChatTurns.isCurrent(turn)) return@post
                     awaitingReply = false
                     if (!stillListening()) { hideThinking(); leaveAttention(); return@post }
-                    if (reply == "{\"action\":\"confirm_phone\"}") {
-                        hideThinking()
-                        leaveAttention()
-                        result = review()
-                        return@post
-                    }
                     ChatRecovery.attempt(Unit, { Diag.chatFailure("voice chat history", it) }) {
                         Memory.append(this, "user", text)
                         if (ok) Memory.append(this, "assistant", reply)
@@ -2445,6 +2442,112 @@ class OverlayService : Service(), PropHost {
                     }
                     result = if (ok) WakeFeedback.REPLIED else WakeFeedback.CHAT_FAILED
                 } finally { done(result) }
+            }
+        }
+    }
+
+    /** Phone jobs recognized on the phone run right away, exactly like a typed message. */
+    private fun runLocally(text: String, done: (WakeFeedback) -> Unit) {
+        val turn = ChatTurns.begin()
+        // A spoken message check is answered by its own route and reads nothing aloud to
+        // anyone nearby unless the user asked for it.
+        MessageNotifications.request(text)?.let { request ->
+            Agent.cancel()
+            hideThinking()
+            awaitingReply = false
+            PrivateMessageRead.present(this, PipMediaAccess.messageAnswer(this, request), turn) { reply, _ ->
+                speechBubble.setScreenHidden(false)
+                speechBubble.text(reply, readMs = bubbleLifetime(reply), conversation = true, privatePreview = true)
+            }
+            done(WakeFeedback.REPLIED)
+            return
+        }
+        if (NowPlaying.requested(text)) {
+            val reply = ChatRecovery.attempt(ChatRecovery.REPLY_FAILED, { Diag.chatFailure("now playing reply", it) }) {
+                PipMediaAccess.answer(this)
+            }
+            modelSays(reply)
+            done(WakeFeedback.REPLIED)
+            return
+        }
+        // The job's own spoken lines carry the result.
+        if (startJob(text, text, turn)) {
+            voiceExchange.clear()
+            done(WakeFeedback.REPLIED)
+        } else {
+            val line = "I couldn’t start that one. Unlock the phone and check Pip settings, then try again."
+            if (screenUsable()) sayAloud(line, finalReply = true, handsFree = true)
+            done(WakeFeedback.CHAT_FAILED)
+        }
+    }
+
+    /** A phone task the model must hand over, run without the review step. */
+    private fun runVoiceTask(text: String, stillListening: () -> Boolean, done: (WakeFeedback) -> Unit, unlocked: Boolean) {
+        val turn = ChatTurns.begin()
+        val screenGeneration = screenOffGeneration
+        val previousVoice = voiceExchange.takeIfRecent(SystemClock.elapsedRealtime()).takeIf { unlocked }
+        beginReply()
+        if (screenUsable()) startThinking()
+        var timedOut = false
+        val deadline = Runnable {
+            timedOut = true
+            if (instance === this && !ending && ChatTurns.isCurrent(turn)) {
+                ChatTurns.begin()
+                awaitingReply = false
+                hideThinking()
+                leaveAttention()
+                if (stillListening()) PipVoice.reply(this, "That took too long. You can try again.", allowLocked = true)
+            }
+            done(WakeFeedback.CHAT_TIMED_OUT)
+        }
+        handler.postDelayed(deadline, 18_000L)
+        AssistantBrain.delegate(this, text, turn, previousVoice) { outcome ->
+            handler.post {
+                if (timedOut) return@post
+                handler.removeCallbacks(deadline)
+                try {
+                    // No early return here: the wake listener stays paused until done() runs.
+                    if (instance !== this || ending || !ChatTurns.isCurrent(turn)) {
+                        hideThinking()
+                        return@post
+                    }
+                    if (!stillListening()) {
+                        hideThinking()
+                        leaveAttention()
+                        done(WakeFeedback.BUSY)
+                        return@post
+                    }
+                    awaitingReply = false
+                    hideThinking()
+                    if (outcome is AssistantBrain.TaskOutcome.RefusedPurchase) {
+                        leaveAttention()
+                        reviewPurchase(text, done)
+                        return@post
+                    }
+                    val task = (outcome as? AssistantBrain.TaskOutcome.Task)?.job
+                    if (task == null) {
+                        leaveAttention()
+                        val line = "I couldn’t work out how to do that one. Try saying it another way."
+                        if (screenUsable()) sayAloud(line, finalReply = true, handsFree = true)
+                        else PipVoice.reply(this, line, allowLocked = true)
+                        done(WakeFeedback.CHAT_FAILED)
+                        return@post
+                    }
+                    // The model may have turned the request into something that spends money
+                    // even though the user's words did not; that still needs a person.
+                    if (PurchasePolicy.asksToPay(task)) {
+                        leaveAttention()
+                        reviewPurchase(text, done)
+                        return@post
+                    }
+                    if (startJob(task, text, turn)) {
+                        voiceExchange.remember(text, "On it.", SystemClock.elapsedRealtime())
+                        done(WakeFeedback.REPLIED)
+                    } else {
+                        leaveAttention()
+                        done(WakeFeedback.CHAT_FAILED)
+                    }
+                } finally { /* Every path above calls done(). */ }
             }
         }
     }
@@ -3103,7 +3206,6 @@ class OverlayService : Service(), PropHost {
                     pet?.animating = true
                     if (resume) handler.post(tick)
                     settleBreak()
-                    if (intent.action == Intent.ACTION_USER_PRESENT) showVoiceDraft()
                     maybeOpenPipAfterBoot()
                 }
             }

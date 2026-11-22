@@ -300,8 +300,13 @@ he won’t normally wake himself. Microphone audio is processed in memory on the
 saved or sent to a server. Only recognized messages addressed to Pip enter the regular chat
 flow and use your configured chat API. Pip checks locally whether speech sounds addressed to him. For an unlocked follow-up, he can use
 the previous spoken exchange for up to 90 seconds; he doesn’t read typed chat history or saved
-facts. This temporary context clears when you lock the phone or stop listening. Phone actions and screen
-access require unlocking, reviewing the transcript, and tapping **Send**.
+facts. This temporary context clears when you lock the phone or stop listening.
+
+Spoken phone requests run straight away, the same as a typed message: “open Instagram and
+doomscroll”, “text Alex I’m running late”, “what did Maya text me?”. Only spending money
+stops for you — asking him to buy, pay, check out, subscribe, or order puts the request in
+the composer for you to handle; he never pays and never confirms a purchase. Work that needs
+the phone unlocked still waits for you to unlock it.
 
 Offline recognition uses the English [Kroko community model](https://github.com/kroko-ai/kroko-onnx)
 [distributed by sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models),

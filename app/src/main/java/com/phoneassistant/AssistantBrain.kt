@@ -129,6 +129,53 @@ object AssistantBrain {
         }
     }
 
+    /**
+     * Turns one spoken request into a phone job, with no spoken answer and no screen or app
+     * context. Used when the user clearly asked Pip to work an app; ordinary chat never
+     * reaches this, and the caller still checks the job for spending money.
+     */
+    /** What a spoken phone request turned into. */
+    internal sealed interface TaskOutcome {
+        data class Task(val job: String) : TaskOutcome
+        /** The provider recognized a purchase; the user must handle it. */
+        data object RefusedPurchase : TaskOutcome
+        data object Failed : TaskOutcome
+    }
+
+    internal fun delegate(
+        ctx: Context,
+        message: String,
+        turn: Long,
+        voiceContext: VoiceExchange.Turn?,
+        onDone: (TaskOutcome) -> Unit
+    ) {
+        val appContext = ctx.applicationContext
+        executor.execute {
+            val result = ChatRecovery.attempt(TaskOutcome.Failed, { Diag.chatFailure("voice task", it) }) {
+                if (!ChatTurns.isCurrent(turn)) return@attempt TaskOutcome.Failed
+                val history = buildList {
+                    voiceContext?.let {
+                        add(Memory.Msg("user", it.input))
+                        add(Memory.Msg("assistant", it.reply))
+                    }
+                    add(Memory.Msg("user", message))
+                }
+                val prompt = Persona.systemPrompt(appContext, canAct = true, includePersonalContext = false) +
+                    "\n\nThis is a spoken request to work the phone. " + TASK_INSTRUCTIONS
+                val (ok, reply) = request(config(appContext), prompt, history, suggestMemory = false)
+                if (!ok) return@attempt TaskOutcome.Failed
+                val line = MemorySuggestion.splitReply(reply).line
+                val refused = runCatching { JSONObject(line).optString("action") == "refuse_purchase" }
+                    .getOrDefault(false)
+                if (refused) return@attempt TaskOutcome.RefusedPurchase
+                Agent.delegated(line)?.let { return@attempt TaskOutcome.Task(it) }
+                // Plain text where a job was expected: nothing to run.
+                TaskOutcome.Failed
+            }
+            onDone(result)
+        }
+    }
+
     private fun resolveReply(appContext: Context, history: List<Memory.Msg>, stage: String?, event: String?, turn: Long, handsFree: Boolean): Pair<Boolean, String> {
         if (!ChatTurns.isCurrent(turn)) return false to ""
         val config = config(appContext)
@@ -153,13 +200,15 @@ object AssistantBrain {
             appContext,
             stage,
             event,
-            canAct = !handsFree && Screen.available(),
+            // Spoken chat never runs a job by itself, but the job path already handed the
+            // work over, so he must not claim his hands are switched off.
+            canAct = handsFree || Screen.available(),
             includePersonalContext = !handsFree
         )
 
         val result = try {
             val prompt = when {
-                handsFree -> "$systemPrompt\n\nThis is hands-free chat. For requests to use the phone, inspect the screen, change settings, save or delete information, or use a toy, return exactly {\"action\":\"confirm_phone\"}. For ordinary conversation reply in plain text."
+                handsFree -> "$systemPrompt\n\nThis is hands-free chat. Phone work was already handed over before this reply, so never claim you will do something later: just answer what was said. For a request to pay, buy, or check out, say that purchases are the user's to confirm. For anything else, reply in plain text."
                 mayInspect -> "$systemPrompt\n\n$INSPECT_INSTRUCTIONS"
                 else -> systemPrompt
             }
@@ -170,8 +219,9 @@ object AssistantBrain {
         }
         if (!result.first) return result
         val (line, payload) = MemorySuggestion.splitReply(result.second)
+        // A spoken turn is read-only: a stray delegation must not become a secret phone job.
         if (handsFree && (line.trimStart().startsWith("{") || Agent.delegated(line) != null)) {
-            return true to "{\"action\":\"confirm_phone\"}"
+            return true to "I’d rather do that from the phone screen. Tap Pip to type it."
         }
         if (line.startsWith("{") && runCatching {
                 JSONObject(line).optString("action") == "inspect_screen"
@@ -222,6 +272,13 @@ object AssistantBrain {
         // stick even when the model feels chatty.
         return send(config, messages, temperature = 0.8, maxTokens = if (suggestMemory) 270 else 150)
     }
+
+    private const val TASK_INSTRUCTIONS = """
+        Reply with exactly one JSON object and nothing else:
+        {"action":"delegate","task":"what to do, concretely"}
+        Put the request into the task, with only the context this job needs. Paying, buying,
+        or checking out is never a phone job: for those return {"action":"refuse_purchase"}.
+    """
 
     private const val INSPECT_INSTRUCTIONS = """
         READ-ONLY SCREEN CHECK
