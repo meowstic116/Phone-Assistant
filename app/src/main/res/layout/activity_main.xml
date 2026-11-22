@@ -63,6 +63,27 @@
             android:textColor="@color/text" />
 
         <TextView
+            android:id="@+id/crashPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:background="@color/surfaceAlt"
+            android:padding="14dp"
+            android:textColor="@color/text"
+            android:textSize="13sp"
+            android:textIsSelectable="true"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/crashClear"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:text="Clear crash record"
+            android:textColor="@color/textDim"
+            android:visibility="gone" />
+
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="28dp"
