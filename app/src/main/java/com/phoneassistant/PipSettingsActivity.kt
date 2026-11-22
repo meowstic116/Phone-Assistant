@@ -236,7 +236,7 @@ class PipSettingsActivity : Activity() {
             if (enabled) WakeListenService.startProblem(this)?.let {
                 Toast.makeText(this, it, Toast.LENGTH_LONG).show()
             }
-        }.isEnabled = KokoroVoice.supported()
+        }.isEnabled = true
         wakeAction = button("") { changeWakeListening() }
         wakeStatus = text("")
         wakeSpeak = button("Speak now (no wake word)") {
@@ -368,7 +368,7 @@ class PipSettingsActivity : Activity() {
         val showKokoro = config.source == VoiceSource.KOKORO || KokoroVoice.busy() || KokoroVoice.hasDownload(this)
         kokoroStatus.visibility = if (showKokoro) View.VISIBLE else View.GONE
         kokoroStatus.text = KokoroVoice.status(this)
-        kokoroAction.visibility = if (showKokoro && KokoroVoice.supported()) View.VISIBLE else View.GONE
+        kokoroAction.visibility = if (showKokoro) View.VISIBLE else View.GONE
         kokoroAction.isEnabled = !KokoroVoice.busy()
         kokoroAction.text = if (KokoroVoice.hasDownload(this)) "Remove Kokoro download" else "Download Kokoro"
     }
