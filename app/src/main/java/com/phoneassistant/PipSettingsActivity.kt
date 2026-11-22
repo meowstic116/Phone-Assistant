@@ -364,7 +364,8 @@ class PipSettingsActivity : Activity() {
         dialog.show()
     }
 
-    private fun addToySettings(): TextView {
+    /** Returns the Toys heading's row, so the deep link can scroll to the section itself. */
+    private fun addToySettings(): View {
         val toyHeading = heading("Toys")
         option("Allow toys", Option.TOYS, Notes.allowToys)
         toySwitches += option("Bring out toys on his own", Option.SPONTANEOUS, Notes.spontaneous)
@@ -560,12 +561,24 @@ class PipSettingsActivity : Activity() {
     }
 
     /**
-     * A control with an information button beside it. The explanation lives behind the button
-     * rather than under the row, so the screen reads as a list of controls and the long text
-     * arrives only when it is wanted.
+     * Puts [control] in a row with its information button, and adds that row to the screen.
+     *
+     * It returns nothing on purpose. Returning the row invited callers to add it a second time,
+     * which Android rejects with "The specified child already has a parent" — that is what used
+     * to crash this screen on open. A caller that needs a handle for scrolling asks for the row
+     * through [infoRow] instead, where the return value is clearly the thing to scroll to.
      */
     private fun withInfo(label: String, note: () -> String?, control: View,
-                         padTop: Int = 0, padBottom: Int = 0): View {
+                         padTop: Int = 0, padBottom: Int = 0) {
+        infoRow(label, note, control, padTop, padBottom)
+    }
+
+    /**
+     * The row [withInfo] builds, returned for a caller that needs to scroll to it. Adding this
+     * to [content] again is the bug that crashed settings, so it exists only for headings.
+     */
+    private fun infoRow(label: String, note: () -> String?, control: View,
+                        padTop: Int = 0, padBottom: Int = 0): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -575,12 +588,15 @@ class PipSettingsActivity : Activity() {
         val info = infoButton(label, note)
         if (info != null) row.addView(info, LinearLayout.LayoutParams(dp(40), dp(48)))
         content.addView(row, -1, -2)
-        return control
+        return row
     }
 
     /** A button that carries an explanation, for controls that are not switches. */
-    private fun button(label: String, note: String?, click: () -> Unit): Button =
-        withInfo(label, { note }, button(label, click)) as Button
+    private fun button(label: String, note: String?, click: () -> Unit): Button {
+        val built = button(label, click)
+        withInfo(label, { note }, built)
+        return built
+    }
 
     private fun toggle(label: String, checked: Boolean, note: String?, change: (Boolean) -> Unit): Switch =
         toggleLive(label, checked, { note }, change)
@@ -589,14 +605,17 @@ class PipSettingsActivity : Activity() {
      * The same row, with the explanation worked out when the button is tapped — for the few
      * notes that depend on permissions that can change while this screen is open.
      */
-    private fun toggleLive(label: String, checked: Boolean, note: () -> String?, change: (Boolean) -> Unit): Switch =
-        withInfo(label, note, Switch(this).apply {
+    private fun toggleLive(label: String, checked: Boolean, note: () -> String?, change: (Boolean) -> Unit): Switch {
+        val switch = Switch(this).apply {
             text = label
             setTextColor(getColor(R.color.text))
             minHeight = dp(48)
             isChecked = checked
             setOnCheckedChangeListener { _, enabled -> change(enabled) }
-        }) as Switch
+        }
+        withInfo(label, note, switch)
+        return switch
+    }
 
     /**
      * The information button itself. A null note means the row has nothing more to say, and
@@ -629,15 +648,18 @@ class PipSettingsActivity : Activity() {
     private fun toggle(label: String, checked: Boolean, change: (Boolean) -> Unit): Switch =
         toggle(label, checked, null, change)
 
-    private fun heading(label: String, note: String? = null): TextView {
+    /**
+     * A section heading, with the section's long explanation behind its information button.
+     * Returns the row as added, so a caller can scroll to the section itself.
+     */
+    private fun heading(label: String, note: String? = null): View {
         val title = TextView(this).apply {
             text = label
             textSize = 18f
             setTextColor(getColor(R.color.text))
             if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
         }
-        content.addView(withInfo(label, { note }, title, dp(20), dp(4)), -1, -2)
-        return title
+        return infoRow(label, { note }, title, dp(20), dp(4))
     }
 
     private fun text(label: String, size: Float = 14f, color: Int = R.color.textDim): TextView = TextView(this).apply {
