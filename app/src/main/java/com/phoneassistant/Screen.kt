@@ -550,6 +550,31 @@ object Screen {
             gestureScroll(forward)
     }
 
+    /**
+     * Darkens and locks the screen. Android 9 added this global action for exactly this purpose;
+     * it needs no device-admin grant and leaves biometric unlock working. On 8 and below there
+     * is no such action, and the caller falls back to the Quick Settings tile.
+     */
+    fun lockScreen(): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < 28) return false
+        @Suppress("DEPRECATION")
+        return global(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
+    }
+
+    /**
+     * The first control on screen whose own label is a lock, for the Android 8 fallback. Matching
+     * is on the label only: an unlabelled tappable tile is not a lock, and guessing would mean
+     * tapping something else entirely.
+     */
+    fun findLockControl(): Item? {
+        val snap = snapshot() ?: return null
+        val words = listOf("lock", "lock screen", "screen lock", "lock device")
+        return snap.items.firstOrNull { item ->
+            val label = item.label.trim().lowercase()
+            label in words || label == "lock now"
+        }
+    }
+
     fun back(): Boolean = global(AccessibilityService.GLOBAL_ACTION_BACK)
 
     fun home(): Boolean = global(AccessibilityService.GLOBAL_ACTION_HOME)

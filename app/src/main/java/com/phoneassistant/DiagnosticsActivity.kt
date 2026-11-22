@@ -196,10 +196,16 @@ class DiagnosticsActivity : Activity() {
         line("maps notification access", if (PipMediaAccess.enabled(this)) "on — navigation can be read and stopped"
             else "off — navigation stops run blind")
         line("toy sounds", ToyAudio.summary(this))
+        line("lock screen", when {
+            !ScreenLocker.available() -> "unavailable — accessibility is off"
+            !ScreenLocker.supported() -> "unavailable on this Android version"
+            else -> "ready"
+        })
         line("location", if (CarNavigation.locationEnabled(this)) "on"
             else "off — Maps can’t route until it’s turned on")
         fun voiceEvent(label: String, event: Diag.Event?) =
             line(label, event?.let { "${it.text} · ${Diag.ago(it.at)}" } ?: "none this run")
+        voiceEvent("last screen lock", Diag.lastScreenLock)
         voiceEvent("last mic event", Diag.lastWakeInput)
         voiceEvent("last voice result", Diag.lastWakeOutcome)
         voiceEvent("last car connection", Diag.lastCarConnection)

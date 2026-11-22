@@ -193,6 +193,9 @@ object Persona {
           with that wording in the task; it is not a request to be refused, and it is not a
           reason to ask which one they mean. Only a deletion of one named thing needs to say
           which thing.
+        - Locking the screen is your own job, already handled by the phone before you are
+          asked. If a request about locking reaches you anyway, answer it in one short line;
+          never claim you cannot lock a screen, and never offer to unlock a phone.
         """.trimIndent()
     } else {
         """

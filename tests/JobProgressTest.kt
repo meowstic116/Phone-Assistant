@@ -1419,5 +1419,41 @@ fun main() {
     check(KokoroPcm.parse(kokoroWav.copyOf().apply { this[40] = 0 }) == null) // invalid length
     check(KokoroPcm.parse(kokoroWav.copyOf().apply { this[36] = 'l'.code.toByte() }) == null)
     check(pcmWav(floatArrayOf(), 24_000) == null)
+    // Locking the screen is recognised on the phone, before the model is asked, so this matcher
+    // is the whole safety story: a miss means the phone stays awake and the model is consulted
+    // about something the phone already does; a false positive means the screen goes dark
+    // during an unrelated request.
+    val lockRequests = listOf(
+        "lock my screen", "lock the screen", "Lock my phone", "lock my phone please",
+        "can you lock the screen", "could you lock my screen?", "please lock the screen",
+        "turn off the screen", "turn my screen off", "switch the screen off",
+        "put my screen to sleep", "sleep the screen", "screen off",
+        "Hey Pip, lock my screen", "lock my display", "lock this phone",
+        "shut the screen off", "lock up my screen", "ok now lock my screen"
+    )
+    for (message in lockRequests) {
+        check(ScreenLock.requested(message) == ScreenLock.Match.NAMED) { "lock request missed: $message" }
+    }
+    val notLockRequests = listOf(
+        "lock the door", "lock my keys in the car", "unlock the screen", "block the screen",
+        "how do I lock my screen", "what button locks the screen",
+        "remind me to lock the screen", "don't lock the screen", "never lock the phone",
+        "stop locking my screen", "lock it", "lock the car", "lock the folder",
+        "the screen is locked", "my phone locked itself", "play locked",
+        "how long until the screen locks", "tell me a joke", "lock",
+        "lock screen wallpaper", "what's my lock screen", "lock the door and tell me",
+        "how long until my screen locks", "lock my car", "is my screen locked",
+        "can I lock my screen", "does my screen lock automatically",
+        "lock screen settings", "turn on the screen"
+    )
+    for (message in notLockRequests) {
+        check(ScreenLock.requested(message) == null) { "false lock request: $message" }
+    }
+    // A pronoun only means the phone when the conversation has just been about locking it.
+    check(ScreenLock.requested("lock it") == null)
+    check(ScreenLock.requested("lock it", afterLockRequest = true) == ScreenLock.Match.REFERRED)
+    check(ScreenLock.requested("lock it up", afterLockRequest = true) == ScreenLock.Match.REFERRED)
+    // Neither label ever quotes the user back into diagnostics.
+    check(ScreenLock.label(ScreenLock.Match.NAMED) == "lock the screen")
     println("Job progress tests passed.")
 }

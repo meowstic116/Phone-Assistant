@@ -34,12 +34,16 @@ object Diag {
         private set
     @Volatile var lastHandsFreeAudio: Event? = null
         private set
+    /** The last "lock my screen" request and what happened to it. Never the user's words. */
+    @Volatile var lastScreenLock: Event? = null
+        private set
 
     internal fun wakeInput(status: WakeFeedback) { lastWakeInput = Event(status.message, now()) }
     internal fun wakeOutcome(status: WakeFeedback) { lastWakeOutcome = Event(status.message, now()) }
     internal fun handsFreeCommand(status: String) { lastHandsFreeCommand = Event(status, now()) }
     internal fun carConnection(status: String) { lastCarConnection = Event(status, now()) }
     internal fun handsFreeAudio(status: String) { lastHandsFreeAudio = Event(status, now()) }
+    internal fun screenLock(status: String) { lastScreenLock = Event(status, now()) }
 
     /** The last refused or failed request. Null until the brain has been asked something. */
     @Volatile

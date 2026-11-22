@@ -526,6 +526,21 @@ APKs are historical builds signed with a public key, not tester releases.
   app, recognized messaging apps, and apps Pip has seen provide message notifications.
   Pip’s overlay captions are hidden in screenshots and screen sharing because that window
   can show private message previews.
+- **“Pip, lock my screen.”** The screen goes dark and locks. This one is done on the phone
+  before the model is ever asked, because the reply has to land while the screen is still
+  lit — a round trip that returned a clarifying question would leave the phone awake. Pip
+  says **“Locking up.”** and the phone sleeps.
+  It uses the accessibility service Pip already needs. On Android 9 and newer Android locks
+  through that service directly (`GLOBAL_ACTION_LOCK_SCREEN`): no device-admin permission,
+  and fingerprint or face unlock still works afterwards. On Android 8 there is no such
+  action, so Pip opens Quick Settings and taps a control labelled as a lock; if none is on
+  screen he says so rather than tapping something else.
+  Recognition is deliberately narrow: **“lock the door”**, **“lock the folder”**,
+  **“unlock the screen”**, **“how do I lock my screen”**, and **“remind me to lock the
+  screen”** are not lock requests. **“Lock it”** only counts straight after a lock request.
+  While driving Pip leaves the screen alone and says he will lock it when you park. Try it
+  from **Pip settings → Phone access → Lock the screen now**, and **Diagnostics** reports
+  whether locking is ready and what happened last time.
 - **“What’s the price shown on this screen?”** can trigger a one-time, read-only screen
   check when Pip’s accessibility access is enabled. Visible app text may go to your
   configured API to answer the question. Pip doesn’t tap, scroll, launch an app, or read
@@ -599,5 +614,8 @@ limited to 4,096 characters.
   been told to stay out of the toy box. `ToySounds.kt` synthesises every toy sound from
   scratch and `ToyAudio.kt` plays them: pitch variation and cache, the silent-mode and
   speaking checks, and the volume setting. There are no audio assets in the APK.
+- Locking the screen: `ScreenLock.kt` decides whether a message is a lock request, and
+  `ScreenLocker.kt` performs it — the accessibility global action on Android 9+, the Quick
+  Settings tile below that — and reports honestly when it cannot.
 
 The API key is stored only in this app's private preferences on the device.

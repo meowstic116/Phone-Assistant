@@ -128,6 +128,7 @@ class PipSettingsActivity : Activity() {
 
         heading("Phone access")
         optionLive(getString(R.string.permissions_access_switch), Option.ACCESSIBILITY, ::accessNote)
+        button("Lock the screen now", ScreenLocker.explanation(this)) { lockNow() }
 
         heading("Memory")
         option("Learn from chat", Option.LEARN_FROM_CHAT, Notes.learnFromChat)
@@ -502,6 +503,29 @@ class PipSettingsActivity : Activity() {
         if (PipStartup.enabled(this@PipSettingsActivity) && !Settings.canDrawOverlays(this@PipSettingsActivity)) {
             append("\n\n").append(getString(R.string.start_at_boot_needs_overlay))
         }
+    }
+
+    /**
+     * Locks the screen from settings, so the feature can be tried without going through a
+     * spoken request first. Failures say what is missing rather than failing silently.
+     */
+    private fun lockNow() {
+        if (!ScreenLocker.canLockNow(this)) {
+            Toast.makeText(this, ScreenLocker.message(
+                if (!ScreenLocker.available()) ScreenLocker.Result.NO_ACCESS
+                else ScreenLocker.Result.NEEDS_UNLOCK_TO_LOCK), Toast.LENGTH_LONG).show()
+            return
+        }
+        Thread({
+            val result = ScreenLocker.lock()
+            if (result == ScreenLocker.Result.NEEDS_UNLOCK_TO_LOCK || result == ScreenLocker.Result.NO_ACCESS) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        Toast.makeText(this, ScreenLocker.message(result), Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }, "PipScreenLockSettings").start()
     }
 
     /** What the accessibility switch is doing right now, including the step still missing. */
