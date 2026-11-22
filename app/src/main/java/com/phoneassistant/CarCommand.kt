@@ -62,8 +62,12 @@ internal sealed interface CarCommand {
         fun parse(text: String): CarCommand? {
             if (text.length > 300 || text.any { it.isISOControl() && it != '\t' }) return null
             val spoken = spoken(text)
+            // One lowercase, then both lookups on it: the offline media path runs while driving
+            // and allocates twice otherwise.
             val media = spoken.lowercase(java.util.Locale.ROOT).removePrefix("please ")
-            (spotify[media] ?: spotify[media.removeSuffix(" on spotify")])?.let { return it }
+            val exact = spotify[media]
+            if (exact != null) return exact
+            spotify[media.removeSuffix(" on spotify")]?.let { return it }
             playlist(spoken.replace(Regex("^please ", RegexOption.IGNORE_CASE), ""))?.let { return SpotifyPlaylist(it) }
             if (home.matches(spoken)) return Navigate("home")
             if (stop.matches(spoken)) return StopNavigation

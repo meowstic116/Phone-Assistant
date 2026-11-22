@@ -95,15 +95,15 @@ internal object CarNavigation {
         }.start()
     }
 
-    fun status(ctx: Context, done: (Boolean?) -> Unit) {
-        val app = ctx.applicationContext
+    /** Read-only: the answer comes from the navigation notification, so no context is needed. */
+    fun status(done: (Boolean?) -> Unit) {
         Thread {
-            val navigation = runCatching { navigating(app) }.getOrNull()
+            val navigation = runCatching { navigating() }.getOrNull()
             Handler(Looper.getMainLooper()).post { done(navigation) }
         }.start()
     }
 
-    private fun navigating(ctx: Context): Boolean? {
+    private fun navigating(): Boolean? {
         val active = PipMediaAccess.snapshot() ?: return null
         return active.any { isNavigation(it) }
     }
