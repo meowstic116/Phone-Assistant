@@ -9,11 +9,14 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.Gravity
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -29,9 +32,7 @@ class PipSettingsActivity : Activity() {
     }
 
     private lateinit var content: LinearLayout
-    private lateinit var bootHint: TextView
     private lateinit var openAtBoot: Switch
-    private lateinit var accessHint: TextView
     private lateinit var voiceSummary: TextView
     private lateinit var kokoroStatus: TextView
     private lateinit var kokoroAction: Button
@@ -43,6 +44,60 @@ class PipSettingsActivity : Activity() {
     private var refreshApiIfChanged: () -> Unit = {}
     private val permissionStatuses = mutableListOf<() -> Unit>()
     private val toySwitches = mutableListOf<Switch>()
+
+    /** Every explanation, in one place, so a pop-up cannot disagree with a switch. */
+    private object Notes {
+        val wander = "Pip can still move to clear his chat box or keyboard, or to use a toy."
+        val openAtBoot = "Opens Pip’s main screen once after your first unlock. Requires Start Pip " +
+            "when the phone starts. Some phones block apps from opening automatically."
+        val accessibility = "Lets Pip work other apps when you ask and stay clear of their " +
+            "keyboards. Turn this off and Pip won’t read other apps or use accessibility, though " +
+            "Android’s separate permission is unchanged."
+        val learnFromChat = "Let Pip save useful details from your conversations. Turning this off " +
+            "leaves existing notes and direct requests to remember something unchanged."
+        val readingAloud = "Both voice options speak offline. If a voice can’t play, Pip shows text " +
+            "without switching voices."
+        val listening = "Speak in English and address him by name, like ‘Hey Pip, tell me a joke’ " +
+            "or ‘Good one, Pip.’ Listening runs on your phone, even after locking. It can use " +
+            "battery. To stop, tap Stop listening for Pip here or stop the assistant. " +
+            "Notifications are optional. Audio is not saved or sent; recognized chat uses your " +
+            "chat API. Phone actions require unlocking and tapping Send. Turn on Read Pip’s " +
+            "replies aloud to hear answers while locked."
+        val listenOnStart = "Starts the microphone when you tap Start assistant. If Start Pip when " +
+            "the phone starts is also on, listening can resume after a reboot. On Android 11 or " +
+            "newer, Pip starts listening when his app screen opens after unlocking. Turn on Open " +
+            "the Pip app after restart to try opening it automatically. Requires the offline " +
+            "model and microphone permission."
+        val driving = "Set up and test while parked. With Android Auto connected, use ‘Pip, " +
+            "navigate to [destination]’ or ‘Pip, pause Spotify.’ Google Maps must be installed; " +
+            "Spotify needs an active local session and Android Notification access for Pip. Say " +
+            "‘play Emo Route Mix’ for a named mix; this works only if Spotify exposes playlist " +
+            "search to Pip. Pip checks Spotify’s playback state before saying a command worked. " +
+            "Enable spoken replies to hear the result. Other phone actions still need review when " +
+            "parked."
+        val carNoName = "Only while a hands-free Bluetooth device is connected and driving " +
+            "commands are on. Exact commands like ‘pause Spotify’, ‘next song’, ‘take me home’, " +
+            "or ‘stop navigation’ are accepted; chat and phone tasks still need his name."
+        val carQuestions = "A read-only check of Google Maps, so it changes nothing. It also " +
+            "works by name at any time. Stopping navigation needs Notification access below, but " +
+            "never an unlock: Pip uses Maps’ own Exit button on the navigation notification."
+        val allowToys = "Turn off Allow toys for no toys at all, or leave it on and choose which " +
+            "toys Pip may bring out."
+        val spontaneous = "Turn this off to keep enabled toys available only when you ask. Pip " +
+            "can pick Doomscroll on his own only when your Home screen is clear. He skips the " +
+            "last toy when picking on his own and waits if there’s no other eligible toy; you " +
+            "can still ask for it yourself."
+        val toySounds = "Squeaks, pops, pours and whistles, made on the phone with no downloads. " +
+            "Every one is a little different each time. Pip stays quiet while he is talking, and " +
+            "silent mode still means silent."
+        val toySoundsVolume = "How loud the toys are. It is a multiplier on top of your phone’s " +
+            "media volume, so this is the whole range and the phone’s volume keys still work." +
+            "\n\nTry a toy sound plays a sample at the current volume without waiting for a " +
+            "bubble."
+        val messagePreviews = "Off by default. When you ask who texted you, Pip checks current " +
+            "message previews only while the phone is unlocked. Pip reads the preview with an " +
+            "offline voice. The message is never saved to chat history or sent to the API."
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,30 +116,27 @@ class PipSettingsActivity : Activity() {
 
         text("Pip settings", 30f, R.color.text)
         heading("Movement & startup")
-        option("Wander around the screen", Option.WANDER)
-        text("Pip can still move to clear his chat box or keyboard, or to use a toy.")
-        toggle(getString(R.string.start_at_boot), PipStartup.enabled(this)) {
+        option("Wander around the screen", Option.WANDER, Notes.wander)
+        toggleLive(getString(R.string.start_at_boot), PipStartup.enabled(this), ::bootNote) {
             PipStartup.setEnabled(this, it)
             refreshHints()
         }
-        bootHint = text("")
-        openAtBoot = toggle("Open the Pip app after restart", PipStartup.openAppAtBoot(this)) {
+        openAtBoot = toggle("Open the Pip app after restart", PipStartup.openAppAtBoot(this),
+            Notes.openAtBoot) {
             PipStartup.setOpenAppAtBoot(this, it)
         }
-        text("Opens Pip’s main screen once after your first unlock. Requires Start Pip when the phone starts. Some phones block apps from opening automatically.")
 
         heading("Phone access")
-        option(getString(R.string.permissions_access_switch), Option.ACCESSIBILITY)
-        accessHint = text("")
+        optionLive(getString(R.string.permissions_access_switch), Option.ACCESSIBILITY, ::accessNote)
 
         heading("Memory")
-        option("Learn from chat", Option.LEARN_FROM_CHAT)
-        text("Let Pip save useful details from your conversations. Turning this off leaves existing notes and direct requests to remember something unchanged.")
+        option("Learn from chat", Option.LEARN_FROM_CHAT, Notes.learnFromChat)
 
         heading("Voice")
-        toggle("Read Pip’s replies aloud", VoiceSettings.config(this).enabled) { VoiceSettings.setEnabled(this, it) }
+        toggle("Read Pip’s replies aloud", VoiceSettings.config(this).enabled, Notes.readingAloud) {
+            VoiceSettings.setEnabled(this, it)
+        }
         voiceSummary = text("")
-        text("Both voice options speak offline. If a voice can’t play, Pip shows text without switching voices.")
         button("Choose Pip’s voice") { configureVoice() }
         kokoroStatus = text("")
         kokoroAction = button("Download Kokoro") {
@@ -113,15 +165,13 @@ class PipSettingsActivity : Activity() {
                 "Start Pip and let him finish any current reply, then try again.", Toast.LENGTH_LONG).show()
         }
 
-        heading("Talk to Pip")
-        text("Speak in English and address him by name, like ‘Hey Pip, tell me a joke’ or ‘Good one, Pip.’ Listening runs on your phone, even after locking. It can use battery. To stop, tap Stop listening for Pip here or stop the assistant. Notifications are optional. Audio is not saved or sent; recognized chat uses your chat API. Phone actions require unlocking and tapping Send. Turn on Read Pip’s replies aloud to hear answers while locked.")
-        toggle("Start listening when Pip starts", PipStartup.listenOnStart(this)) { enabled ->
+        heading("Talk to Pip", Notes.listening)
+        toggle("Start listening when Pip starts", PipStartup.listenOnStart(this), Notes.listenOnStart) { enabled ->
             PipStartup.setListenOnStart(this, enabled)
             if (enabled) WakeListenService.startProblem(this)?.let {
                 Toast.makeText(this, it, Toast.LENGTH_LONG).show()
             }
         }.isEnabled = KokoroVoice.supported()
-        text("Starts the microphone when you tap Start assistant. If Start Pip when the phone starts is also on, listening can resume after a reboot. On Android 11 or newer, Pip starts listening when his app screen opens after unlocking. Turn on Open the Pip app after restart to try opening it automatically. Requires the offline model and microphone permission.")
         wakeAction = button("") { changeWakeListening() }
         wakeStatus = text("")
         wakeSpeak = button("Speak now (no wake word)") {
@@ -131,23 +181,17 @@ class PipSettingsActivity : Activity() {
         }
         refreshWakeAction()
 
-        heading("Hands-free driving")
-        text("Set up and test while parked. With Android Auto connected, use ‘Pip, navigate to [destination]’ or ‘Pip, pause Spotify.’ Google Maps must be installed; Spotify needs an active local session and Android Notification access for Pip. Say ‘play Emo Route Mix’ for a named mix; this works only if Spotify exposes playlist search to Pip. Pip now checks Spotify’s playback state before saying a command worked. Enable spoken replies to hear the result. Other phone actions still need review when parked.")
-        toggle("Allow hands-free driving commands", VoiceSettings.drivingEnabled(this)) {
+        heading("Hands-free driving", Notes.driving)
+        toggle("Allow hands-free driving commands", VoiceSettings.drivingEnabled(this), null) {
             VoiceSettings.setDrivingEnabled(this, it)
         }
-        toggle("Accept driving commands without saying “Pip”", VoiceSettings.carNoName(this)) {
+        toggle("Accept driving commands without saying “Pip”", VoiceSettings.carNoName(this), Notes.carNoName) {
             VoiceSettings.setCarNoName(this, it)
         }
-        text("Only while a hands-free Bluetooth device is connected and driving commands are on. " +
-            "Exact commands like “pause Spotify”, “next song”, “take me home”, or “stop navigation” " +
-            "are accepted; chat and phone tasks still need his name.")
-        toggle("Answer “are we still navigating?” without saying “Pip”", VoiceSettings.carQuestions(this)) {
+        toggle("Answer “are we still navigating?” without saying “Pip”", VoiceSettings.carQuestions(this),
+            Notes.carQuestions) {
             VoiceSettings.setCarQuestions(this, it)
         }
-        text("A read-only check of Google Maps, so it changes nothing. It also works by name at any " +
-            "time. Stopping navigation needs Notification access below, but never an unlock: Pip uses " +
-            "Maps’ own Exit button on the navigation notification.")
         button("Fix navigation access for Pip") {
             if (PipMediaAccess.enabled(this)) {
                 Toast.makeText(this, "Pip can already see Google Maps’ navigation notification.", Toast.LENGTH_LONG).show()
@@ -321,25 +365,21 @@ class PipSettingsActivity : Activity() {
 
     private fun addToySettings(): TextView {
         val toyHeading = heading("Toys")
-        option("Allow toys", Option.TOYS)
-        toySwitches += option("Bring out toys on his own", Option.SPONTANEOUS)
-        text("Turn this off to keep enabled toys available only when you ask.")
-        text("Pip can pick Doomscroll on his own only when your Home screen is clear.")
+        option("Allow toys", Option.TOYS, Notes.allowToys)
+        toySwitches += option("Bring out toys on his own", Option.SPONTANEOUS, Notes.spontaneous)
         for (toy in Toy.values()) {
-            toySwitches += toggle(toy.label, PipSettings.toySelected(this, toy)) {
+            toySwitches += toggle(toy.label, PipSettings.toySelected(this, toy),
+                ToyNotes.text(toy) { getString(it) }) {
                 PipSettings.setToy(this, toy, it)
                 OverlayService.behaviorSettingsChanged()
             }
         }
         button("Painting gallery") { startActivity(Intent(this, PaintingGalleryActivity::class.java)) }
-        toggle("Toy sound effects", ToyAudio.enabled(this)) {
+        toggle("Toy sound effects", ToyAudio.enabled(this), Notes.toySounds) {
             ToyAudio.setEnabled(this, it)
             if (it) ToyAudio.play(this, ToySounds.Sound.POP, 0.9f)
         }
-        text("Squeaks, pops, pours and whistles, made on the phone with no downloads. Every one is a " +
-            "little different each time. Pip stays quiet while he is talking, and silent mode still " +
-            "means silent.")
-        button("Toy sound volume: ${(ToyAudio.volume(this) * 100).toInt()}%") {
+        button("Toy sound volume: ${(ToyAudio.volume(this) * 100).toInt()}%", Notes.toySoundsVolume) {
             val values = arrayOf(30, 50, 70, 90, 100)
             AlertDialog.Builder(this).setTitle("Toy sound volume")
                 .setItems(values.map { "$it%" }.toTypedArray()) { _, which ->
@@ -371,8 +411,8 @@ class PipSettingsActivity : Activity() {
                 PipPermissions.manage(this, permission)
             }
             if (permission == Permission.NOTIFICATION_ACCESS) {
-                option(getString(R.string.permissions_message_previews), Option.MESSAGE_NOTIFICATIONS)
-                text(getString(R.string.permissions_message_previews_info))
+                option(getString(R.string.permissions_message_previews), Option.MESSAGE_NOTIFICATIONS,
+                    Notes.messagePreviews)
                 button(getString(R.string.read_message_with_pip)) { startActivity(Intent(this, ReadMessageActivity::class.java)) }
             }
         }
@@ -380,13 +420,20 @@ class PipSettingsActivity : Activity() {
 
     private fun permission(title: Int, allowed: () -> Boolean, detail: Int? = null,
                            action: Int = R.string.permissions_manage, click: () -> Unit) {
-        val label = text("", 15f, R.color.text).apply { setPadding(0, dp(10), 0, dp(3)) }
+        val label = TextView(this).apply {
+            textSize = 15f
+            setTextColor(getColor(R.color.text))
+        }
         permissionStatuses += {
             label.text = getString(R.string.permissions_status, getString(title),
                 getString(if (allowed()) R.string.permissions_on else R.string.permissions_off))
         }
-        if (detail != null) text(getString(detail))
-        button(getString(action), click).contentDescription =
+        // The explanation sits behind the information button on the status row, where the
+        // permission it describes is named.
+        withInfo(getString(title), { detail?.let { getString(it) } }, label, dp(6), 0)
+        // The permission's explanation sits behind the information button on its action row.
+        val actionButton = button(getString(action), detail?.let { getString(it) }, click)
+        actionButton.contentDescription =
             getString(R.string.permissions_action_description, getString(action), getString(title))
     }
 
@@ -449,22 +496,36 @@ class PipSettingsActivity : Activity() {
         refreshWakeAction()
     }
 
+    /** Automatic start says the same thing whether or not the permission is in place. */
+    private fun bootNote(): String = buildString {
+        append(getString(R.string.start_at_boot_hint))
+        if (PipStartup.enabled(this@PipSettingsActivity) && !Settings.canDrawOverlays(this@PipSettingsActivity)) {
+            append("\n\n").append(getString(R.string.start_at_boot_needs_overlay))
+        }
+    }
+
+    /** What the accessibility switch is doing right now, including the step still missing. */
+    private fun accessNote(): String = when {
+        !PipSettings.enabled(this, Option.ACCESSIBILITY) ->
+            "Pip won’t read other apps or use accessibility to keep clear of their keyboards. " +
+                "Android’s separate permission is unchanged."
+        !ImeWatch.enabled(this) -> "Turn on Phone Assistant in Android accessibility settings under Permissions below."
+        else -> "Lets Pip work other apps when you ask and stay clear of their keyboards."
+    }
+
     private fun refreshHints() {
         permissionStatuses.forEach { it() }
-        bootHint.setText(if (PipStartup.enabled(this) && !Settings.canDrawOverlays(this))
-            R.string.start_at_boot_needs_overlay else R.string.start_at_boot_hint)
         openAtBoot.isEnabled = PipStartup.enabled(this)
-        accessHint.text = when {
-            !PipSettings.enabled(this, Option.ACCESSIBILITY) ->
-                "Pip won't read other apps or use accessibility to keep clear of their keyboards. Android's separate permission is unchanged."
-            !ImeWatch.enabled(this) -> "Turn on Phone Assistant in Android accessibility settings under Permissions below."
-            else -> "Lets Pip work other apps when you ask and stay clear of their keyboards."
-        }
+        // Status lives behind the information buttons now, so it is worked out on demand.
         val toysAllowed = PipSettings.enabled(this, Option.TOYS)
         toySwitches.forEach { it.isEnabled = toysAllowed }
     }
 
-    private fun option(label: String, option: Option): Switch = toggle(label, PipSettings.enabled(this, option)) {
+    private fun option(label: String, option: Option, note: String? = null): Switch =
+        optionLive(label, option) { note }
+
+    private fun optionLive(label: String, option: Option, note: () -> String?): Switch =
+        toggleLive(label, PipSettings.enabled(this, option), note) {
         PipSettings.set(this, option, it)
         if (option == Option.ACCESSIBILITY) {
             if (!it) Agent.cancel()
@@ -474,18 +535,85 @@ class PipSettingsActivity : Activity() {
         refreshHints()
     }
 
-    private fun toggle(label: String, checked: Boolean, change: (Boolean) -> Unit): Switch = Switch(this).apply {
-        text = label
-        setTextColor(getColor(R.color.text))
-        minHeight = dp(48)
-        isChecked = checked
-        setOnCheckedChangeListener { _, enabled -> change(enabled) }
-        content.addView(this, -1, -2)
+    /**
+     * A control with an information button beside it. The explanation lives behind the button
+     * rather than under the row, so the screen reads as a list of controls and the long text
+     * arrives only when it is wanted.
+     */
+    private fun withInfo(label: String, note: () -> String?, control: View,
+                         padTop: Int = 0, padBottom: Int = 0): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, padTop, 0, padBottom)
+        }
+        row.addView(control, LinearLayout.LayoutParams(0, -2, 1f))
+        val info = infoButton(label, note)
+        if (info != null) row.addView(info, LinearLayout.LayoutParams(dp(40), dp(48)))
+        content.addView(row, -1, -2)
+        return control
     }
 
-    private fun heading(label: String) = text(label, 18f, R.color.text).apply {
-        setPadding(0, dp(20), 0, dp(4))
-        if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
+    /** A button that carries an explanation, for controls that are not switches. */
+    private fun button(label: String, note: String?, click: () -> Unit): Button =
+        withInfo(label, { note }, button(label, click)) as Button
+
+    private fun toggle(label: String, checked: Boolean, note: String?, change: (Boolean) -> Unit): Switch =
+        toggleLive(label, checked, { note }, change)
+
+    /**
+     * The same row, with the explanation worked out when the button is tapped — for the few
+     * notes that depend on permissions that can change while this screen is open.
+     */
+    private fun toggleLive(label: String, checked: Boolean, note: () -> String?, change: (Boolean) -> Unit): Switch =
+        withInfo(label, note, Switch(this).apply {
+            text = label
+            setTextColor(getColor(R.color.text))
+            minHeight = dp(48)
+            isChecked = checked
+            setOnCheckedChangeListener { _, enabled -> change(enabled) }
+        }) as Switch
+
+    /**
+     * The information button itself. A null note means the row has nothing more to say, and
+     * a button that opens an empty box would be worse than no button.
+     */
+    private fun infoButton(label: String, note: () -> String?): ImageButton? {
+        // A button that opens an empty box would be worse than no button, so a row with no
+        // note gets none. The note is only consulted once, to decide whether to show the icon.
+        if (note().isNullOrBlank()) return null
+        return ImageButton(this).apply {
+            setImageResource(R.drawable.ic_info)
+            background = null
+            imageTintList = null
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(10), dp(12), dp(10), dp(12))
+            contentDescription = getString(R.string.settings_about_option, label)
+            setOnClickListener { note()?.let { explain(label, it) } }
+        }
+    }
+
+    /** The pop-up behind an information button: the explanation, and nothing to decide. */
+    private fun explain(label: String, note: String) {
+        AlertDialog.Builder(this)
+            .setTitle(label)
+            .setMessage(note)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun toggle(label: String, checked: Boolean, change: (Boolean) -> Unit): Switch =
+        toggle(label, checked, null, change)
+
+    private fun heading(label: String, note: String? = null): TextView {
+        val title = TextView(this).apply {
+            text = label
+            textSize = 18f
+            setTextColor(getColor(R.color.text))
+            if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
+        }
+        content.addView(withInfo(label, { note }, title, dp(20), dp(4)), -1, -2)
+        return title
     }
 
     private fun text(label: String, size: Float = 14f, color: Int = R.color.textDim): TextView = TextView(this).apply {

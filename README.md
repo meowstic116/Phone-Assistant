@@ -476,6 +476,13 @@ APKs are historical builds signed with a public key, not tester releases.
 4. Press **Start assistant**. Open **Pip settings** below that button to change what Pip
    does. Changes are saved and apply without restarting the overlay.
 
+   Settings is a list of controls, not an essay. Each row that needs explaining has a small
+   ⓘ button on its right; tap it for that option’s description in a pop-up, and dismiss it
+   with **OK**. Rows that need no explanation have no button, and section headings carry the
+   longer explanation for the whole section. The permission rows put their explanation on the
+   row that names the permission, so it always describes the thing you are about to open in
+   Android.
+
    - **Movement & startup:** Turn off wandering to keep Pip in place between tasks.
      You can still drag him, and he can move for his chat box, keyboard, and toys.
      **Start Pip when the phone starts** is off by default. With **Display over other
@@ -485,7 +492,8 @@ APKs are historical builds signed with a public key, not tester releases.
    - **Toys:** Turn off **Allow toys** for no toys, or select individual toys. Turning off
      **Bring out toys on his own** leaves enabled toys available by request only. Pip skips the
      last toy when picking on his own, and waits if there’s no other eligible toy. You can
-     still request the same toy yourself. Open the **Painting gallery** below the toy switches,
+     still request the same toy yourself — each toy’s switch has an ⓘ button with that toy in
+     the same words the toy menu uses. Open the **Painting gallery** below the toy switches,
      and set **Toy sound effects** and **Toy sound volume** there too — **Try a toy sound** plays
      a sample at the current volume.
    - **Personality & data:** Edit Pip’s personality, review his memory, or open his login vault.
