@@ -119,6 +119,10 @@ class PipMediaAccess : NotificationListenerService() {
 
         private fun component(ctx: Context) = ComponentName(ctx, PipMediaAccess::class.java)
 
+        /** Current notifications, or null when Android has not granted Pip access. */
+        internal fun snapshot(): Array<StatusBarNotification>? = try { connected?.activeNotifications }
+        catch (_: RuntimeException) { null }
+
         fun enabled(ctx: Context): Boolean = if (android.os.Build.VERSION.SDK_INT >= 27) {
             ctx.getSystemService(android.app.NotificationManager::class.java)
                 ?.isNotificationListenerAccessGranted(component(ctx)) == true

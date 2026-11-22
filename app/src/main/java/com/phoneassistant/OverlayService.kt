@@ -2339,6 +2339,7 @@ class OverlayService : Service(), PropHost {
                 // Release the listener even if the overlay is gone: a held callback would leave
                 // the microphone marked busy and kill the session.
                 done(when {
+                    result.prompted -> WakeFeedback.CAR_PROMPT
                     result.verified -> WakeFeedback.CAR_VERIFIED
                     result.handedOff -> WakeFeedback.CAR_COMMAND
                     else -> WakeFeedback.CAR_NOT_RUN
@@ -2395,6 +2396,13 @@ class OverlayService : Service(), PropHost {
         }
         // Tapping Pip first opens an empty composer. It shouldn't swallow a spoken request.
         if (inputBar != null) closeChat()
+        // Navigation questions and stops are answered from Maps' notification, so they need no
+        // screen and no unlock whether or not a car is attached.
+        val navigation = CarCommand.parse(text)
+        if (navigation == CarCommand.StopNavigation || navigation == CarCommand.NavigationState) {
+            runNavigation(navigation, done, driving)
+            return
+        }
         val local = JobProgress.routePhoneLocally(text)
         if (!driving && (local || PhoneContext.asksForAppLabel(text) || NowPlaying.requested(text) ||
                 MessageNotifications.request(text) != null)) {
@@ -2454,6 +2462,38 @@ class OverlayService : Service(), PropHost {
                     }
                     result = if (ok) WakeFeedback.REPLIED else WakeFeedback.CHAT_FAILED
                 } finally { done(result) }
+            }
+        }
+    }
+
+    /**
+     * A navigation stop or question, answered without the screen. While driving the answer is
+     * spoken with the other hands-free replies; otherwise it goes through the normal bubble.
+     */
+    private fun runNavigation(command: CarCommand, done: (WakeFeedback) -> Unit, driving: Boolean) {
+        fun answer(result: DrivingVoice.Result) {
+            Diag.handsFreeCommand(result.message)
+            if (driving) {
+                done(if (result.verified) WakeFeedback.CAR_VERIFIED
+                    else if (result.handedOff) WakeFeedback.CAR_COMMAND
+                    else WakeFeedback.CAR_NOT_RUN)
+                if (instance !== this || ending) return
+                PipVoice.reply(this, result.message, allowLocked = true)
+            } else {
+                done(if (result.verified) WakeFeedback.CAR_VERIFIED else WakeFeedback.REPLIED)
+                modelSays(result.message)
+            }
+        }
+        if (command == CarCommand.NavigationState) {
+            CarNavigation.status(this) { navigation ->
+                val canInspect = PipMediaAccess.enabled(this)
+                answer(DrivingVoice.Result(
+                    NavVoice.message(NavVoice.Action.STATUS, navigation, canInspect)))
+            }
+        } else {
+            CarNavigation.stop(this) { action ->
+                answer(DrivingVoice.Result(NavVoice.message(action, null, canInspect = true),
+                    handedOff = true, verified = action == NavVoice.Action.STOPPED_AND_VERIFIED))
             }
         }
     }

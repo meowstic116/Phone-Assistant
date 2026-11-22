@@ -193,6 +193,10 @@ class DiagnosticsActivity : Activity() {
         line("listener", WakeListenService.feedback.message)
         line("driving commands", if (VoiceSettings.drivingEnabled(this)) "on" else "off")
         line("car audio", CarAudio.summary(this))
+        line("maps notification access", if (PipMediaAccess.enabled(this)) "on — navigation can be read and stopped"
+            else "off — navigation stops run blind")
+        line("location", if (CarNavigation.locationEnabled(this)) "on"
+            else "off — Maps can’t route until it’s turned on")
         fun voiceEvent(label: String, event: Diag.Event?) =
             line(label, event?.let { "${it.text} · ${Diag.ago(it.at)}" } ?: "none this run")
         voiceEvent("last mic event", Diag.lastWakeInput)

@@ -14,6 +14,14 @@ internal object VoiceSettings {
     fun setDrivingEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean("driving_commands", enabled).apply()
     }
+    /**
+     * "Are we still navigating?" is a read-only question, so it needs no opt-in to the command
+     * set — offering it costs nothing and answers what a driver actually asks.
+     */
+    fun carQuestions(context: Context) = prefs(context).getBoolean("car_questions", true)
+    fun setCarQuestions(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean("car_questions", enabled).apply()
+    }
     fun carNoName(context: Context) = prefs(context).getBoolean("car_no_name", false)
     fun setCarNoName(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean("car_no_name", enabled).apply()

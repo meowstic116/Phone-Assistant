@@ -11,4 +11,18 @@ internal object CarVoice {
         if (!enabled || !connected || text.length > 300) return null
         return CarCommand.parse(text)
     }
+
+    /**
+     * The same, plus the read-only navigation question. It is always answered when asked by
+     * name; this only decides whether it also works namelessly in the car, and a question that
+     * reports the truth cannot change anything.
+     */
+    fun unaddressedOrQuestion(enabled: Boolean, questions: Boolean, connected: Boolean,
+                             text: String): CarCommand? {
+        // No link, no nameless anything: the car opt-ins are about the car, not the phone.
+        if (!connected || text.length > 300) return null
+        unaddressedCommand(enabled, connected, text)?.let { return it }
+        if (!questions) return null
+        return CarCommand.parse(text)?.takeIf { it == CarCommand.NavigationState }
+    }
 }

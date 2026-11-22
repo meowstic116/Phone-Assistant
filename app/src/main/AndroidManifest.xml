@@ -16,6 +16,10 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Read-only: lets Pip tell you when Android is blocking Maps' location, and offer
+         the Settings toggle. Pip never requests the permission and never tracks you. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
     <!-- Lets Pip ask Android to use a connected car's microphone while listening.
          Requested at runtime on Android 12+; without it the phone mic is used. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />

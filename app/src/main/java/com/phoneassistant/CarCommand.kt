@@ -7,10 +7,21 @@ internal sealed interface CarCommand {
     data class SpotifyPlaylist(val title: String) : Media
     data class Navigate(val destination: String) : CarCommand
 
+    /** Every way of saying "I'm done with this route". */
+    data object StopNavigation : CarCommand
+
+    /** Read-only: asks Maps whether a route is still running; changes nothing. */
+    data object NavigationState : CarCommand
+
     companion object {
         private val route = Regex("^(?:please )?(?:navigate(?: me)? to|start (?:navigation|directions) to|give me directions to|take me to) (.+)$",
             RegexOption.IGNORE_CASE)
         private val home = Regex("^(?:please )?(?:navigate(?: me)?|take me|drive me) home$", RegexOption.IGNORE_CASE)
+        // Exact, so ordinary speech ("stop" on its own, "cancel my alarm") never reaches Maps.
+        private val stop = Regex("""^(?:please )?(?:(?:cancel|stop|end|exit|quit|close|kill|turn off|shut off) (?:the |my |this |this active |active |current )?(?:navigation|route|directions|guidance|trip|drive)|(?:cancel|stop|end|exit|quit|close) (?:navigating|driving)(?: for me)?)$""",
+            RegexOption.IGNORE_CASE)
+        private val navState = Regex("""^(?:please )?(?:are (?:we|you) (?:still )?navigat(?:ing|e)|(?:am i|are we) still (?:on route|on the route|headed (?:to|there))|is (?:the |my )?navigation still (?:on|running|active)|how (?:much )?(?:long|far)(?:er)?(?: do i have)?(?: left| until (?:i|we) (?:arrive|get there))?|(?:what(?:'s| is) my eta|how (?:long|far) to (?:go|the destination)))$""",
+            RegexOption.IGNORE_CASE)
         private val spotify = mapOf(
             "play spotify" to Spotify.PLAY, "resume spotify" to Spotify.PLAY, "pause spotify" to Spotify.PAUSE,
             "resume music" to Spotify.PLAY, "pause music" to Spotify.PAUSE,
@@ -20,7 +31,7 @@ internal sealed interface CarCommand {
         )
         private val barePlaylist = Regex("""^play (?:me )?(?:(?:the |my )?playlist (?:called |named )?(.+)|(.+ mix))$""",
             RegexOption.IGNORE_CASE)
-        private val taskStart = Regex("""^(?:play|resume|pause|skip|next song|next track|previous song|previous track|navigate|take me|drive me|start navigation|start directions|give me directions|open|send|text|message|call|dial|doomscroll)\b""",
+        private val taskStart = Regex("""^(?:play|resume|pause|skip|next song|next track|previous song|previous track|navigate|take me|drive me|start navigation|start directions|give me directions|are we still navigating|is navigation still|stop navigation|cancel navigation|open|send|text|message|call|dial|doomscroll)\b""",
             RegexOption.IGNORE_CASE)
         private val spotifySuffix = Regex(""" (?:on|in) spotify(?: please)?$""", RegexOption.IGNORE_CASE)
         private val otherMediaService = Regex("""\b(?:on|in|from) (?:spotify|youtube(?: music)?|apple music|amazon music|pandora|tidal|soundcloud|deezer)\b""",
@@ -55,9 +66,13 @@ internal sealed interface CarCommand {
             (spotify[media] ?: spotify[media.removeSuffix(" on spotify")])?.let { return it }
             playlist(spoken.replace(Regex("^please ", RegexOption.IGNORE_CASE), ""))?.let { return SpotifyPlaylist(it) }
             if (home.matches(spoken)) return Navigate("home")
+            if (stop.matches(spoken)) return StopNavigation
+            if (navState.matches(spoken)) return NavigationState
             val place = route.matchEntire(spoken)?.groupValues?.get(1)?.trim()?.takeIf {
+                // "Take me home" is its own command, and "where am I" is not a destination.
                 it.length in 2..180 && it.any(Char::isLetterOrDigit) && !chained.containsMatchIn(it) &&
-                    it.none { char -> char in "&=?#\\" } && !it.contains("://")
+                    it.none { char -> char in "&=?#\\" } && !it.contains("://") &&
+                    !home.containsMatchIn("take me $it") && !navState.containsMatchIn(it)
             } ?: return null
             return Navigate(place)
         }
