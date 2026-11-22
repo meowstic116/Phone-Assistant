@@ -2686,6 +2686,14 @@ class OverlayService : Service(), PropHost {
                     startJob(job, text, turn)
                     return@post
                 }
+                // A refusal to something that is plainly a job is a bug, not an answer: the
+                // character prompt says so, and a model can still produce one. Hand it to his
+                // hands rather than passing the excuse on to the person who asked.
+                if (ok && ClearRows.requested(text) && ClearRows.soundsLikeRefusal(reply)) {
+                    Diag.caught("housekeeping refusal", IllegalStateException("refusal sent to the hands"))
+                    startJob(text, text, turn)
+                    return@post
+                }
                 if (ok) ChatRecovery.attempt(Unit, { Diag.chatFailure("chat history", it) }) {
                     Memory.append(this, "assistant", reply)
                 }

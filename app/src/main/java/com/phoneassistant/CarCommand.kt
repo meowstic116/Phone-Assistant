@@ -31,7 +31,7 @@ internal sealed interface CarCommand {
         )
         private val barePlaylist = Regex("""^play (?:me )?(?:(?:the |my )?playlist (?:called |named )?(.+)|(.+ mix))$""",
             RegexOption.IGNORE_CASE)
-        private val taskStart = Regex("""^(?:play|resume|pause|skip|next song|next track|previous song|previous track|navigate|take me|drive me|start navigation|start directions|give me directions|are we still navigating|is navigation still|stop navigation|cancel navigation|open|send|text|message|call|dial|doomscroll)\b""",
+        private val taskStart = Regex("""^(?:play|resume|pause|skip|next song|next track|previous song|previous track|navigate|take me|drive me|start navigation|start directions|give me directions|are we still navigating|is navigation still|stop navigation|cancel navigation|open|send|text|message|call|dial|doomscroll|remove|delete|clear|dismiss|press|click|tap|hit)\b""",
             RegexOption.IGNORE_CASE)
         private val spotifySuffix = Regex(""" (?:on|in) spotify(?: please)?$""", RegexOption.IGNORE_CASE)
         private val otherMediaService = Regex("""\b(?:on|in|from) (?:spotify|youtube(?: music)?|apple music|amazon music|pandora|tidal|soundcloud|deezer)\b""",

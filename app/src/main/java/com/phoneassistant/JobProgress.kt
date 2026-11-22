@@ -403,7 +403,7 @@ internal object JobProgress {
 
     fun routePhoneLocally(message: String): Boolean =
         routesWithoutAccessibility(message) || routeFeedLocally(message) || communicationRequest(message) != null ||
-            SpotifyQuickPlan.playlistRequest(message) != null
+            SpotifyQuickPlan.playlistRequest(message) != null || ClearRows.requested(message)
 
     private val reelAdBadge = setOf("sponsored", "sponsored ad", "ad", "advertisement", "paid advertisement")
     private val adBadgeIds = setOf("ad_label", "ad_badge", "ad_disclosure", "sponsored_label", "sponsored_badge")

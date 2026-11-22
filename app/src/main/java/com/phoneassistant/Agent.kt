@@ -192,6 +192,16 @@ object Agent {
                 finish("", "automatic Reels skipped: no valid plan")
                 return
             }
+            // Housekeeping gets its own bounded runner rather than the step-by-step loop:
+            // the model does not need to name twelve identical buttons, and a sweep the model
+            // drives one request at a time is twelve chances to wander off the list.
+            if (ClearRows.requested(originalRequest)) {
+                val (line, reason) = ClearRowsRunner.run(ctx) { count ->
+                    if (count == 1) onSay("On it — clearing the screen.")
+                }
+                if (alive()) finish(line, reason)
+                return
+            }
             if (doomscroll || bulkKudos) {
                 val example = if (doomscroll) "Open Instagram and doomscroll for 1 minute."
                     else "Give kudos on any Strava activity I haven't yet."

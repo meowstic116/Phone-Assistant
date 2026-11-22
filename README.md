@@ -139,6 +139,18 @@ with you — a lemonade stand, a canvas, a soccer pitch, bubble wrap, a plant.
   overlapping window can't move aside, Diagnostics marks the attempted gesture **SKIP**.
   An action already dispatched can't be undone, but Stop or a newer message prevents later
   actions. Before touching a control Pip rechecks that its window and target are still current.
+
+  **Clearing a screenful of buttons** is its own bounded job, because asking for one press per
+  button defeats the point: **“press remove on all of these”, “clear every category”, “delete
+  all of these rows”**. Pip reads the screen, presses only controls whose own label is a bare
+  dismissal (**Remove**, **Delete**, the × on a row), re-reads the list after every press and
+  scrolls when the visible ones run out. He stops the moment the screen becomes something
+  else — a confirmation dialog, a settings page, a different app — and says how many he
+  pressed instead of claiming the list is now clean. Labels that are a specific action
+  (**Unsubscribe**, **Delete account**, **Remove ads**, anything with a price) are never
+  pressed in bulk, and a request that names content rather than the screen (**“remove every
+  photo of the dog”**, **“delete all of my messages”**) is treated as a normal job so it can be
+  asked about. Money still stops first.
 - Drag it anywhere. It lives in a foreground service with a persistent notification.
 
 ## Toys
