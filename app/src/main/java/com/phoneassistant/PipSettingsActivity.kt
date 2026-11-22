@@ -332,6 +332,27 @@ class PipSettingsActivity : Activity() {
             }
         }
         button("Painting gallery") { startActivity(Intent(this, PaintingGalleryActivity::class.java)) }
+        toggle("Toy sound effects", ToyAudio.enabled(this)) {
+            ToyAudio.setEnabled(this, it)
+            if (it) ToyAudio.play(this, ToySounds.Sound.POP, 0.9f)
+        }
+        text("Squeaks, pops, pours and whistles, made on the phone with no downloads. Every one is a " +
+            "little different each time. Pip stays quiet while he is talking, and silent mode still " +
+            "means silent.")
+        button("Toy sound volume: ${(ToyAudio.volume(this) * 100).toInt()}%") {
+            val values = arrayOf(30, 50, 70, 90, 100)
+            AlertDialog.Builder(this).setTitle("Toy sound volume")
+                .setItems(values.map { "$it%" }.toTypedArray()) { _, which ->
+                    ToyAudio.setVolume(this, values[which] / 100f)
+                    ToyAudio.play(this, ToySounds.Sound.SQUEAK, 0.9f)
+                    recreate()
+                }
+                .setNegativeButton("Cancel", null).show()
+        }
+        button("Try a toy sound") {
+            ToyAudio.play(this, ToySounds.Sound.SQUEAK, 1f)
+            ToyAudio.playPair(this, ToySounds.Sound.POP, ToySounds.Sound.GOAL, 1f)
+        }
         return toyHeading
     }
 

@@ -207,6 +207,10 @@ class LemonadeStand(host: PropHost) : Prop(host) {
         if (!glass.bring(x, y)) return false
 
         host.feel(PetView.Mood.HAPPY, 2200L)
+        // Squeeze, then liquid: the two halves of the same action, spaced so they read in
+        // order instead of piling onto one another.
+        host.sound(ToySounds.Sound.SQUEAK, 0.85f)
+        host.postDelayedSound(ToySounds.Sound.POUR, 130L, 0.8f)
         if (announce) host.say(Lines.pick(SERVE_LINES))
         return true
     }
@@ -316,8 +320,12 @@ class LemonadeGlass(host: PropHost) : Prop(host) {
             wobble = if (ValueAnimator.areAnimatorsEnabled()) 1f else 0f
             invalidate()
             host.feel(PetView.Mood.HAPPY, 1800L)
+            // Two swallows: the second one shortens, which is how a real glass ends.
+            host.sound(ToySounds.Sound.GLUG, 0.75f)
+            host.postDelayedSound(ToySounds.Sound.GLUG, 210L, 0.6f)
             host.say(Lines.pick(SIP_LINES))
         } else {
+            host.sound(ToySounds.Sound.TAP, 0.6f)
             host.dropProp(this)
             host.say(Lines.pick(CLEAR_LINES))
         }

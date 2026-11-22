@@ -98,6 +98,7 @@ class Plant(host: PropHost) : Prop(host) {
         hurried = 0
         if (growth.water(now, PlantGrowth.Waterer.USER)) {
             dropUntil = now + 460L
+            sound(ToySounds.Sound.POUR, 0.5f)
             invalidate()
         }
     }
@@ -126,6 +127,7 @@ class Plant(host: PropHost) : Prop(host) {
                     lastAutoAt = landed
                     nextPourAt = landed + PlantGrowth.PIP_POUR_PAUSE_MS
                     if (!leaving && growth.water(landed, PlantGrowth.Waterer.PIP)) {
+                        sound(ToySounds.Sound.POUR, 0.42f)
                         if (firstPour) {
                             firstPour = false
                             host.say("a little water from me. give the pot a tap to add yours.")
@@ -169,10 +171,12 @@ class Plant(host: PropHost) : Prop(host) {
             if (growth.blooming) {
                 discovery = PlantCollection.bloom(context, flower).first
                 host.feel(PetView.Mood.HAPPY, 3_000L)
+                host.sound(ToySounds.Sound.SPARKLE, 0.9f)
                 host.say(if (discovery) "${flower.display}! a new bloom for your collection."
                     else "*sets down the can* a ${flower.display}. look, the ladybug approves.")
             } else {
                 host.feel(PetView.Mood.HAPPY, 900L)
+                host.sound(ToySounds.Sound.GROW, 0.6f)
                 host.say(GROW_LINES[growth.stage - 1])
             }
         }

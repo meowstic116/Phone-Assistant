@@ -137,7 +137,12 @@ internal object PipVoice {
     fun reply(context: Context, text: String, captions: ((Int?) -> Unit)? = null, allowLocked: Boolean = false) {
         val config = VoiceSettings.config(context)
         val report = if (allowLocked) Diag::handsFreeAudio else null
-        if (config.enabled) speak(context.applicationContext, text, config, report, captions, allowLocked)
+        if (config.enabled) {
+            // A squeak over his own sentence is worse than no squeak, so the toys hush for
+            // roughly as long as a sentence takes. They pick up again on their own.
+            ToyAudio.duck(1_200L + text.length * 45L)
+            speak(context.applicationContext, text, config, report, captions, allowLocked)
+        }
         else {
             report?.invoke("Spoken replies are off in Pip settings.")
             captions?.invoke(null)

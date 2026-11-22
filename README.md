@@ -418,6 +418,29 @@ after the reply lands — those lines stay quiet, so his own answer always has t
 instead of the two talking over each other.
 Criticism and requests in chat go through the model with a note about what just happened,
 so his reply matches: tell him the lemonade was bad and he takes it in good humour.
+
+### Toy sounds
+
+Every toy is audible. Bubbles pop, the lemonade stand squeaks and pours, the glass glugs,
+the ball thumps and the goal nets a little fanfare and a referee's whistle, the brush
+scratches on the easel, the watering can pours and the plant swells as it grows, and
+picking a toy up or setting it down makes a small rubbery note. Nothing is downloaded or
+recorded: each sound is synthesised on the phone at 44.1 kHz when it is first needed, in
+about a millisecond, and then cached.
+
+No two pops are identical. Every sound is rendered at a random pitch between 0.94× and 1.06×
+of its written pitch — the same small band a human hand would vary by — and the noise
+component is seeded from that exact pitch, so the slightly higher pop is also slightly
+crisper. Cache keying follows the pitch, so a sound still repeats its earlier takes instead
+of drifting into sounding like a different sound.
+
+The toys hush while Pip is speaking. His own voice is the point of the conversation, so toy
+sounds are dropped rather than ducked for the length of a reply, and they resume on their own
+afterwards. They also respect the ringer: with the phone on silent or vibrate, the toys are
+silent too. **Toy sound effects** and **Toy sound volume** in Toy settings switch them off
+or take them down; **Try a toy sound** plays a sample so you can judge the volume without
+waiting for a bubble. **Diagnostics** shows whether sounds are on, off, or being held back by
+silent mode.
 Every reply also carries an exact list of what is on the screen, and he is told that the
 list is the only truth — if a toy is not on it, it is not there and he must not talk as if
 it were.
@@ -462,7 +485,9 @@ APKs are historical builds signed with a public key, not tester releases.
    - **Toys:** Turn off **Allow toys** for no toys, or select individual toys. Turning off
      **Bring out toys on his own** leaves enabled toys available by request only. Pip skips the
      last toy when picking on his own, and waits if there’s no other eligible toy. You can
-     still request the same toy yourself. Open the **Painting gallery** below the toy switches.
+     still request the same toy yourself. Open the **Painting gallery** below the toy switches,
+     and set **Toy sound effects** and **Toy sound volume** there too — **Try a toy sound** plays
+     a sample at the current volume.
    - **Personality & data:** Edit Pip’s personality, review his memory, or open his login vault.
    - **Permissions:** Manage notifications, Notification access, overlay, microphone, usage access, and accessibility.
      To turn off notifications while Pip keeps running, open **Manage notifications** and
@@ -563,6 +588,8 @@ limited to 4,096 characters.
   `Lemonade.kt`, `Painting.kt`, `Soccer.kt`, `BubbleWrap.kt`, `Plant.kt`. `Toys.kt` is the
   only way a toy arrives: it reads chat messages and buttons, spawns through one `summon`
   path, and returns a note so Pip's reply matches. `Quiet.kt` remembers how long he has
-  been told to stay out of the toy box.
+  been told to stay out of the toy box. `ToySounds.kt` synthesises every toy sound from
+  scratch and `ToyAudio.kt` plays them: pitch variation and cache, the silent-mode and
+  speaking checks, and the volume setting. There are no audio assets in the APK.
 
 The API key is stored only in this app's private preferences on the device.

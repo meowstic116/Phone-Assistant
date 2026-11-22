@@ -195,6 +195,7 @@ class DiagnosticsActivity : Activity() {
         line("car audio", CarAudio.summary(this))
         line("maps notification access", if (PipMediaAccess.enabled(this)) "on — navigation can be read and stopped"
             else "off — navigation stops run blind")
+        line("toy sounds", ToyAudio.summary(this))
         line("location", if (CarNavigation.locationEnabled(this)) "on"
             else "off — Maps can’t route until it’s turned on")
         fun voiceEvent(label: String, event: Diag.Event?) =

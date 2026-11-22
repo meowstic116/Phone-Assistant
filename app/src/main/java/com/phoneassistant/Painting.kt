@@ -32,6 +32,13 @@ internal class Painting(host: PropHost, val picture: PaintingGallery.Picture, pr
 
     /** 0 to 1, how much of the painting has been painted. */
     private var brush = 0f
+
+    /**
+     * When the brush last made a sound. The stroke advances every frame at sixty frames a
+     * second, and a chalk sound per frame is a buzz rather than a painting, so it is heard in
+     * strokes: one every few hundred milliseconds, which is also how a hand actually moves.
+     */
+    private var lastStrokeSound = 0L
     private var paintFromLeft: Boolean? = null
     private var walkingToSeat = false
     private var finishedAt = 0L
@@ -76,7 +83,14 @@ internal class Painting(host: PropHost, val picture: PaintingGallery.Picture, pr
     override fun onFrame() {
         if (brush < 1f) {
             trySit()
+            val before = brush
             brush = (brush + 0.008f).coerceAtMost(1f)
+            val now = SystemClock.uptimeMillis()
+            // Only once he is actually painting, and only every so often.
+            if (before > 0.02f && now - lastStrokeSound >= 340L) {
+                lastStrokeSound = now
+                sound(if (brush > 0.97f) ToySounds.Sound.SPLAT else ToySounds.Sound.CHALK, 0.55f)
+            }
             if (brush >= 1f) finishPainting()
             invalidate()
             return
@@ -93,6 +107,7 @@ internal class Painting(host: PropHost, val picture: PaintingGallery.Picture, pr
         host.cancelPetWalk(this)
         val canWalkAway = host.petLeaveSeat(this)
         host.feel(PetView.Mood.HAPPY, 3200L)
+        host.sound(ToySounds.Sound.SPARKLE, 0.8f)
         host.say("done. it's \"${picture.title}\". *holds it out* still wet, and I'm quietly pleased.")
         if (canWalkAway) host.petWalkTo(this,
             host.stageWidth() * (0.2f + Random.nextFloat() * 0.6f),
