@@ -10,6 +10,7 @@ internal enum class WakeFeedback(val message: String, val canSpeak: Boolean = fa
     SPEAK_NOW("Speak now. You don’t need to say Pip’s name."),
     NO_NAME("Speech didn’t sound addressed to Pip. Say his name or try Speak now.", true),
     NO_MESSAGE("No message heard. Try again or tap Speak now.", true),
+    CAR_MIC("Listening through the connected car microphone."),
     MIC_RESTARTING("Microphone capture was interrupted. Reopening it…"),
     MIC_MUTED("Android is silencing Pip’s microphone. Check microphone access or close the other app using it."),
     MIC_SILENT("No microphone signal. Check Android’s Mic access and close other apps using the mic."),
@@ -17,6 +18,7 @@ internal enum class WakeFeedback(val message: String, val canSpeak: Boolean = fa
     PLAYING("Microphone paused while Pip speaks."),
     REPLIED("Pip replied. Check the bubble or chat history.", true),
     CAR_COMMAND("Driving request handed off. Listen for Pip’s reply.", true),
+    CAR_VERIFIED("Driving request confirmed by the app. Listen for Pip’s reply.", true),
     CAR_NOT_RUN("Driving request not run. Listen for Pip’s reply; troubleshoot only when parked.", true),
     PURCHASE_REVIEW("Purchase heard. Pip never buys or pays; review it yourself.", true),
     DRAFT("Pip heard you. Send or close your unfinished text draft first.", true),
@@ -28,12 +30,12 @@ internal enum class WakeFeedback(val message: String, val canSpeak: Boolean = fa
     START_FAILED("Android didn’t start listening. Check microphone permission and try again with Pip settings open.");
 
     val isMicEvent: Boolean get() = when (this) {
-        NAME_HEARD, SPEAK_NOW, NO_NAME, NO_MESSAGE, MIC_RESTARTING, MIC_MUTED, MIC_SILENT, SENDING, ENGINE_FAILED, MIC_FAILED, START_FAILED -> true
+        NAME_HEARD, SPEAK_NOW, NO_NAME, NO_MESSAGE, CAR_MIC, MIC_RESTARTING, MIC_MUTED, MIC_SILENT, SENDING, ENGINE_FAILED, MIC_FAILED, START_FAILED -> true
         else -> false
     }
 
     val isOutcome: Boolean get() = when (this) {
-        REPLIED, CAR_COMMAND, CAR_NOT_RUN, PURCHASE_REVIEW, DRAFT, BUSY, CHAT_FAILED, CHAT_TIMED_OUT -> true
+        REPLIED, CAR_COMMAND, CAR_VERIFIED, CAR_NOT_RUN, PURCHASE_REVIEW, DRAFT, BUSY, CHAT_FAILED, CHAT_TIMED_OUT -> true
         else -> false
     }
 }

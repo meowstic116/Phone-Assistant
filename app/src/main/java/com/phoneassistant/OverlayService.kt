@@ -2333,22 +2333,33 @@ class OverlayService : Service(), PropHost {
         DrivingVoice.projected(this) { projected ->
             if (instance !== this || ending || !stillListening()) { done(WakeFeedback.BUSY); return@projected }
             val enabled = VoiceSettings.drivingEnabled(this)
-            val result = when (CarVoiceRoute.choose(enabled, projected, supported = command != null, task = task)) {
+            val route = CarVoiceRoute.choose(enabled, projected, supported = command != null, task = task)
+            Diag.carConnection(CarVoiceRoute.label(route, projected))
+            fun report(result: DrivingVoice.Result) {
+                // Release the listener even if the overlay is gone: a held callback would leave
+                // the microphone marked busy and kill the session.
+                done(when {
+                    result.verified -> WakeFeedback.CAR_VERIFIED
+                    result.handedOff -> WakeFeedback.CAR_COMMAND
+                    else -> WakeFeedback.CAR_NOT_RUN
+                })
+                if (instance !== this || ending) return
+                Diag.handsFreeCommand(result.message)
+                PipVoice.reply(this, result.message, allowLocked = true)
+            }
+            when (route) {
                 CarVoiceRoute.EXECUTE -> {
-                    if (Agent.running()) DrivingVoice.Result("I’m already working on another phone task. Try again in a moment.")
-                    else DrivingVoice.execute(this, checkNotNull(command))
+                    if (Agent.running()) report(DrivingVoice.Result("I’m already working on another phone task. Try again in a moment."))
+                    else DrivingVoice.execute(this, checkNotNull(command), ::report)
                 }
-                CarVoiceRoute.DISABLED -> DrivingVoice.Result("Hands-free driving commands are off in Pip settings. Change that only when parked.")
-                CarVoiceRoute.CONNECTION_UNVERIFIED -> DrivingVoice.Result("I couldn’t verify an Android Auto connection. Try again when parked.")
-                CarVoiceRoute.UNSUPPORTED -> DrivingVoice.Result("That’s not a hands-free driving command. Try a Spotify control or a Google Maps destination, or wait until parked.")
+                CarVoiceRoute.DISABLED -> report(DrivingVoice.Result("Hands-free driving commands are off in Pip settings. Change that only when parked."))
+                CarVoiceRoute.CONNECTION_UNVERIFIED -> report(DrivingVoice.Result("I couldn’t verify an Android Auto connection. Try again when parked."))
+                CarVoiceRoute.UNSUPPORTED -> report(DrivingVoice.Result("That’s not a hands-free driving command. Try a Spotify control or a Google Maps destination, or wait until parked."))
                 CarVoiceRoute.ORDINARY, CarVoiceRoute.REVIEW_WHEN_PARKED -> {
                     handleOrdinaryVoice(text, stillListening, done, driving = projected == true || projected == null && enabled)
                     return@projected
                 }
             }
-            Diag.handsFreeCommand(result.message)
-            PipVoice.reply(this, result.message, allowLocked = true)
-            done(if (result.handedOff) WakeFeedback.CAR_COMMAND else WakeFeedback.CAR_NOT_RUN)
         }
     }
 
@@ -2356,6 +2367,7 @@ class OverlayService : Service(), PropHost {
                                     driving: Boolean) {
         fun parkedOnly(): WakeFeedback {
             val reason = "That’s not a hands-free driving command. Try again when parked."
+            Diag.carConnection("Projection connected; not a driving command")
             Diag.handsFreeCommand(reason)
             PipVoice.reply(this, reason, allowLocked = true)
             return WakeFeedback.CAR_NOT_RUN

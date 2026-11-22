@@ -69,6 +69,17 @@ internal enum class CarVoiceRoute {
     ORDINARY, REVIEW_WHEN_PARKED, EXECUTE, DISABLED, CONNECTION_UNVERIFIED, UNSUPPORTED;
 
     companion object {
+        /** One fixed phrase for diagnostics; never the destination or the transcript. */
+        fun label(route: CarVoiceRoute, projected: Boolean?): String = when (route) {
+            EXECUTE -> "Android Auto projection verified; running the command"
+            DISABLED -> "Projection connected, driving commands off"
+            CONNECTION_UNVERIFIED -> if (projected == null) "Projection could not be read"
+                else "Projection not connected"
+            UNSUPPORTED -> "Projection connected; not a driving command"
+            ORDINARY -> "Ordinary speech"
+            REVIEW_WHEN_PARKED -> "No projection; driving command not run"
+        }
+
         fun choose(enabled: Boolean, projected: Boolean?, supported: Boolean, task: Boolean): CarVoiceRoute = when {
             enabled && supported -> if (projected == true) EXECUTE else CONNECTION_UNVERIFIED
             !task -> ORDINARY

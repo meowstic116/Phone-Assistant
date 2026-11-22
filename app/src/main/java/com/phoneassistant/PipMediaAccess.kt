@@ -10,6 +10,8 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.MediaStore
 import android.service.notification.NotificationListenerService
@@ -126,17 +128,35 @@ class PipMediaAccess : NotificationListenerService() {
                 .orEmpty().split(':').any { ComponentName.unflattenFromString(it) == component(ctx) }
         }
 
-        /** Bounded to an existing local Spotify session; never fall back to media keys or taps. */
-        internal fun controlSpotify(ctx: Context, action: CarCommand.Media): DrivingVoice.Result {
+        /**
+         * Bounded to an existing local Spotify session; never fall back to media keys or taps.
+         * A transport call is only reported as done once the session shows the new state, so
+         * "sent the playlist" is never said when nothing started playing.
+         */
+        internal fun controlSpotify(ctx: Context, action: CarCommand.Media,
+                                    done: (DrivingVoice.Result) -> Unit) {
+            val app = ctx.applicationContext
+            // Session lookups and the short verification wait must never run on the UI thread.
+            Thread {
+                val result = runCatching { sendSpotify(app, action) }.getOrElse {
+                    DrivingVoice.Result("I couldn’t reach Spotify’s playback controls.")
+                }
+                Handler(Looper.getMainLooper()).post { done(result) }
+            }.start()
+        }
+
+        private fun sendSpotify(ctx: Context, action: CarCommand.Media): DrivingVoice.Result {
             fun unavailable(message: String) = DrivingVoice.Result(message)
             return try {
                 if (!enabled(ctx)) return unavailable("Allow Pip’s Notification access when you're parked.")
                 val manager = ctx.getSystemService(MediaSessionManager::class.java)
                     ?: return unavailable("I couldn’t reach Android’s media controls.")
+                // During a call the car may be using the phone's audio path; an empty Spotify
+                // list is worth saying plainly instead of a generic failure.
                 val spotify = manager.getActiveSessions(component(ctx)).firstOrNull {
                     it.packageName == SpotifyQuickPlan.PACKAGE &&
                         it.playbackInfo?.playbackType == android.media.session.MediaController.PlaybackInfo.PLAYBACK_TYPE_LOCAL
-                } ?: return unavailable("There’s no local Spotify session yet. Start Spotify when parked.")
+                } ?: return unavailable("I can’t see a Spotify session. Open Spotify on the phone once when parked, then try again.")
                 val available = spotify.playbackState?.actions ?: 0L
                 val required = when (action) {
                     CarCommand.Spotify.PLAY -> PlaybackState.ACTION_PLAY
@@ -148,6 +168,8 @@ class PipMediaAccess : NotificationListenerService() {
                 if (available and required == 0L) return unavailable(if (action is CarCommand.SpotifyPlaylist) {
                     "Spotify isn’t offering playlist search to Pip. Use Android Auto’s voice assistant, or try again when parked."
                 } else "Spotify isn’t offering that control right now.")
+                val before = spotify.playbackState
+                val titleBefore = mediaTitle(spotify)
                 val controls = spotify.transportControls
                 when (action) {
                     CarCommand.Spotify.PLAY -> controls.play()
@@ -159,9 +181,59 @@ class PipMediaAccess : NotificationListenerService() {
                         putString(MediaStore.EXTRA_MEDIA_PLAYLIST, action.title)
                     })
                 }
-                DrivingVoice.Result(if (action is CarCommand.SpotifyPlaylist) "I sent the playlist request to Spotify."
-                    else "I sent that to Spotify.", handedOff = true)
+                val confirmed = awaitChange(spotify, before, action, titleBefore)
+                when {
+                    confirmed -> DrivingVoice.Result(when {
+                        action is CarCommand.SpotifyPlaylist -> "Spotify is playing ${action.title}."
+                        action == CarCommand.Spotify.PLAY -> "Spotify is playing."
+                        action == CarCommand.Spotify.PAUSE -> "Spotify is paused."
+                        else -> "Spotify changed track."
+                    }, handedOff = true, verified = true)
+                    action is CarCommand.SpotifyPlaylist -> DrivingVoice.Result(
+                        "I asked Spotify for ${action.title}, but it isn’t playing that. Spotify may not offer this playlist to Pip, or the car blocked it.",
+                        handedOff = true)
+                    else -> DrivingVoice.Result("I sent that to Spotify, but its playback didn’t change.", handedOff = true)
+                }
             } catch (_: RuntimeException) { unavailable("I couldn’t reach Spotify’s playback controls.") }
+        }
+        private fun mediaTitle(session: android.media.session.MediaController): String? = runCatching {
+            session.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim()?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+
+        /**
+         * Wait briefly for the session to report the effect of a transport call. A playlist
+         * request also has to change the title: Spotify can already be playing something else,
+         * and "playing" alone would wrongly confirm the wrong track.
+         */
+        private fun awaitChange(session: android.media.session.MediaController, before: PlaybackState?,
+                                action: CarCommand.Media, titleBefore: String?): Boolean {
+            val deadline = android.os.SystemClock.elapsedRealtime() + 4_000L
+            while (android.os.SystemClock.elapsedRealtime() < deadline) {
+                val now = runCatching { session.playbackState }.getOrNull()
+                if (now != null) {
+                    val playing = now.state == PlaybackState.STATE_PLAYING
+                    val titleNow = mediaTitle(session)
+                    val changed = when (action) {
+                        CarCommand.Spotify.PLAY ->
+                            // Already playing the same thing is a success, not a no-op.
+                            playing || now.state == PlaybackState.STATE_BUFFERING
+                        is CarCommand.SpotifyPlaylist ->
+                            playing && titleNow != null && (titleBefore == null || titleNow != titleBefore ||
+                                titleNow.contains(action.title, ignoreCase = true) ||
+                                action.title.contains(titleNow, ignoreCase = true))
+                        CarCommand.Spotify.PAUSE -> now.state == PlaybackState.STATE_PAUSED
+                        CarCommand.Spotify.NEXT, CarCommand.Spotify.PREVIOUS ->
+                            // A changed title is the clearest evidence; a skip state is the fallback.
+                            playing && titleNow != null && titleNow != titleBefore ||
+                                now.state == PlaybackState.STATE_SKIPPING_TO_NEXT ||
+                                now.state == PlaybackState.STATE_SKIPPING_TO_PREVIOUS
+                    }
+                    if (changed) return true
+                    if (now.state == PlaybackState.STATE_ERROR) return false
+                }
+                android.os.SystemClock.sleep(150L)
+            }
+            return false
         }
 
         fun answer(ctx: Context): String {

@@ -181,6 +181,8 @@ internal class WakeListenService : Service() {
                         }
                     }
                     var mic = openRecorder()
+                    // Held for this capture session only; released in the finally below.
+                    var sco: CarAudio.Sco? = null
                     try {
                         val samples = ShortArray(640)
                         val floats = FloatArray(samples.size)
@@ -195,6 +197,20 @@ internal class WakeListenService : Service() {
                         var nextInputCheck = 0L
                         var showedName = false
                         var inputProblem: WakeFeedback? = null
+                        // Checked once per segment: the car link changes slowly, and this must
+                        // never run a Bluetooth binder call on the audio path.
+                        var carCommandReady = false
+                        // Car microphone: requested once, off the audio thread, and abandoned
+                        // for the phone mic if the car route never supplies audio.
+                        var triedCarMic = false
+                        var carMicPending = false
+                        // True once capture has been restarted onto the car route, and true
+                        // again only when real audio has arrived from it.
+                        var carMicLive = false
+                        var carMicHeard = false
+                        fun locked() = runCatching {
+                            getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
+                        }.getOrDefault(false)
                         fun androidMuted() = Build.VERSION.SDK_INT >= 29 &&
                             runCatching { mic.activeRecordingConfiguration?.isClientSilenced == true }.getOrDefault(false)
                         fun restartCapture() {
@@ -246,9 +262,31 @@ internal class WakeListenService : Service() {
                                 phrase.arm(now)
                                 showedName = true
                             }
+                            // The car route just came up: restart capture onto it, discarding
+                            // whatever the phone microphone had buffered before the switch.
+                            if (sco != null && !carMicLive) {
+                                carMicLive = true
+                                carMicHeard = false
+                                if (recording) mic.stop()
+                                recording = false
+                                filled = 0
+                                phrase.reset()
+                                showedName = false
+                                recognizer.reset(stream)
+                                Diag.wakeInput(WakeFeedback.CAR_MIC)
+                                update(WakeFeedback.CAR_MIC)
+                                continue
+                            }
                             if (!recording) {
-                                mic.startRecording()
-                                check(mic.recordingState == AudioRecord.RECORDSTATE_RECORDING)
+                                // A route change can take a moment to settle; retry instead of
+                                // failing the whole session on the first attempt.
+                                if (!runCatching {
+                                        mic.startRecording()
+                                        mic.recordingState == AudioRecord.RECORDSTATE_RECORDING
+                                    }.getOrDefault(false)) {
+                                    Thread.sleep(40L)
+                                    continue
+                                }
                                 recording = true
                                 inputProblem = null
                                 lastSignal = now
@@ -257,6 +295,23 @@ internal class WakeListenService : Service() {
                                 nextInputCheck = now
                                 main.removeCallbacks(startupDeadline)
                                 update(if (phrase.awaiting) WakeFeedback.SPEAK_NOW else WakeFeedback.LISTENING)
+                                // Only when the user opted into driving commands, and only
+                                // when a hands-free device is actually present.
+                                // Only on a locked phone: an unlocked listening session is the
+                                // user at the phone, where taking over call audio would not help.
+                                if (!triedCarMic && !carMicPending && VoiceSettings.drivingEnabled(this) &&
+                                    CarAudio.connected(this) && CarAudio.canUseHeadset(this) && locked()) {
+                                    triedCarMic = true
+                                    carMicPending = true
+                                    val session = CarAudio.Sco(this)
+                                    Thread({
+                                        val connected = session.start()
+                                        main.post {
+                                            carMicPending = false
+                                            if (connected && active) sco = session else session.stop()
+                                        }
+                                    }, "PipCarMic").start()
+                                }
                             }
                             if (phrase.expire(now)) {
                                 recognizer.reset(stream)
@@ -266,6 +321,7 @@ internal class WakeListenService : Service() {
                             val n = mic.read(samples, filled, samples.size - filled, AudioRecord.READ_NON_BLOCKING)
                             if (n == AudioRecord.ERROR_DEAD_OBJECT && recovery.tryRestart(now)) {
                                 restartCapture()
+                                carCommandReady = false
                                 continue
                             }
                             check(n >= 0)
@@ -294,6 +350,7 @@ internal class WakeListenService : Service() {
                             }
                             if (hasSignal) {
                                 lastSignal = now
+                                if (carMicLive) carMicHeard = true
                                 if (inputProblem != null) {
                                     inputProblem = null
                                     update(if (phrase.awaiting) WakeFeedback.SPEAK_NOW else WakeFeedback.LISTENING)
@@ -301,6 +358,15 @@ internal class WakeListenService : Service() {
                             } else if (recovery.stalled(now, lastSignal)) {
                                 if (now >= nextInputCheck) {
                                     nextInputCheck = now + 1_000L
+                                    // A car route that reports connected but carries silence is
+                                    // worse than the phone mic, so leave it and keep listening.
+                                    if (sco != null && carMicLive && !carMicHeard) {
+                                        sco?.stop()
+                                        sco = null
+                                        carMicLive = false
+                                        restartCapture()
+                                        continue
+                                    }
                                     markNoSignal(androidMuted())
                                 }
                                 continue
@@ -317,9 +383,23 @@ internal class WakeListenService : Service() {
                                 recognizer.reset(stream)
                                 val message = phrase.accept(heard, now)
                                 showedName = phrase.awaiting
-                                if (message != null) dispatch(message)
-                                else if (phrase.awaiting && heard.isNotBlank()) update(WakeFeedback.NAME_HEARD)
-                                else if (heard.isNotBlank()) update(WakeFeedback.NO_NAME)
+                                if (message != null) {
+                                    dispatch(message)
+                                } else {
+                                    // In a car, his name is not required for an exact driving
+                                    // command when the user opted in and a hands-free link exists.
+                                    if (!carCommandReady) carCommandReady = CarAudio.connected(this)
+                                    val unaddressed = CarVoice.unaddressedCommand(
+                                        VoiceSettings.drivingEnabled(this) && VoiceSettings.carNoName(this),
+                                        carCommandReady, heard)
+                                    // Clear any half-heard name so it cannot leak into a later
+                                    // utterance, then run only the bounded command set.
+                                    if (unaddressed != null) phrase.reset()
+                                    val carCommand = if (unaddressed != null) phrase.acceptUnaddressed(heard) else null
+                                    if (carCommand != null) dispatch(carCommand)
+                                    else if (phrase.awaiting && heard.isNotBlank()) update(WakeFeedback.NAME_HEARD)
+                                    else if (heard.isNotBlank()) update(WakeFeedback.NO_NAME)
+                                }
                             } else if (decoded && now >= nextHypothesis) {
                                 nextHypothesis = now + 180L
                                 val addressed = phrase.observePartial(recognizer.getResult(stream).text)
@@ -329,7 +409,10 @@ internal class WakeListenService : Service() {
                                 }
                             }
                         }
-                    } finally { mic.release() }
+                    } finally {
+                        sco?.stop()
+                        mic.release()
+                    }
                 } finally { stream.release() }
             } finally { recognizer.release() }
         } catch (_: Exception) {

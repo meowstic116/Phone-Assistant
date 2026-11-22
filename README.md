@@ -324,9 +324,18 @@ Connect Android Auto and try:
   track on Spotify.”** Start Spotify while parked and grant **Notification access** so
   Pip can control the existing local session. You can also say **“Pip, play Emo Route Mix”**
   or **“Pip, play the Emo Route Mix playlist on Spotify.”** For named playlists, Spotify’s
-  session must offer playback search. Pip reports when it can only hand off the request or
-  when search is unavailable. If it’s unavailable, use Android Auto’s own voice assistant
-  instead. Pip doesn’t use accessibility or send the playlist request to its chat API.
+  session must offer playback search. After sending a command Pip watches the session for up
+  to four seconds and only says it is playing when the state (and, for a named playlist, the
+  title) actually changed; otherwise it says the request did not take effect. For a playlist
+  the title has to change or match, so a song already playing isn’t mistaken for the playlist.
+  If search is unavailable, use Android Auto’s own voice assistant instead. Pip doesn’t use
+  accessibility or send the playlist request to its chat API.
+
+If you don’t want to say his name while driving, turn on **Accept driving commands without
+saying “Pip”**. With a hands-free Bluetooth link connected and driving commands enabled, an
+exact command like **“pause Spotify”**, **“next song”**, or **“take me home”** runs on its own.
+Chat, phone tasks, and purchases still need his name, so ordinary conversation in the car is
+never mistaken for a command.
 
 Pip checks the Android Auto projection connection and handles only these commands on the
 phone, without the chat model or accessibility automation. Google Maps and Android decide
@@ -339,6 +348,21 @@ whether Pip heard the wake phrase, handed off the request, and got audio playbac
 status lines stay available for the current app session and contain no transcript or destination.
 If Android reports that speech completed but you heard nothing, check where the phone routed
 media audio while parked. Use **Preview Pip’s voice** to test the selected voice first.
+
+Android offers no public way to simply “pick the car’s microphone”. Pip asks for the Bluetooth
+communication route when a hands-free device is connected, driving commands are enabled, and
+the phone is locked: on Android 12+ that is `setCommunicationDevice`, and on older versions it
+is Bluetooth SCO. If Android confirms the route, the car supplies the microphone and the
+notification says **Listening through the connected car microphone**. If it does not confirm
+within a couple of seconds, or the route carries silence, Pip goes back to the phone
+microphone and keeps listening — a failed handover never leaves the session deaf. Android 12+
+may ask for the **Nearby devices / Bluetooth** permission when you start listening; it is only
+used for this route.
+
+**Diagnostics → Hands-free voice → car audio** shows the connected Bluetooth device and whether
+it has a hands-free link (`media only, no mic` means only music audio is connected). **last car
+connection** shows what Android reported about Android Auto for the last spoken request, which
+separates “never heard you” from “heard you and declined to run it”.
 
 ## Personality
 
