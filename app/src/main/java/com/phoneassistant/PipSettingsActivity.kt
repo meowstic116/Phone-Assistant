@@ -132,10 +132,16 @@ class PipSettingsActivity : Activity() {
         refreshWakeAction()
 
         heading("Hands-free driving")
-        text("Set up and test while parked. With Android Auto connected, use ‘Pip, navigate to [destination]’ or ‘Pip, pause Spotify.’ Google Maps must be installed; Spotify needs an active local session and Android Notification access for Pip. Say ‘play Emo Route Mix’ for a named mix; this works only if Spotify exposes playlist search to Pip. Enable spoken replies to hear the result. Other phone actions still need review when parked.")
+        text("Set up and test while parked. With Android Auto connected, use ‘Pip, navigate to [destination]’ or ‘Pip, pause Spotify.’ Google Maps must be installed; Spotify needs an active local session and Android Notification access for Pip. Say ‘play Emo Route Mix’ for a named mix; this works only if Spotify exposes playlist search to Pip. Pip now checks Spotify’s playback state before saying a command worked. Enable spoken replies to hear the result. Other phone actions still need review when parked.")
         toggle("Allow hands-free driving commands", VoiceSettings.drivingEnabled(this)) {
             VoiceSettings.setDrivingEnabled(this, it)
         }
+        toggle("Accept driving commands without saying “Pip”", VoiceSettings.carNoName(this)) {
+            VoiceSettings.setCarNoName(this, it)
+        }
+        text("Only while a hands-free Bluetooth device is connected and driving commands are on. " +
+            "Exact commands like “pause Spotify”, “next song”, or “take me home” are accepted; " +
+            "chat and phone tasks still need his name.")
         button("Set or clear driving home destination") {
             val destination = EditText(this).apply {
                 hint = "Street address or destination"
@@ -193,10 +199,24 @@ class PipSettingsActivity : Activity() {
             Toast.makeText(this, "Start the assistant before turning on listening.", Toast.LENGTH_LONG).show()
             return
         }
+        val bluetooth = if (Build.VERSION.SDK_INT >= 31) {
+            arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.BLUETOOTH_CONNECT)
+                .filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+                .toTypedArray()
+        } else {
+            arrayOf(Manifest.permission.RECORD_AUDIO)
+                .filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+                .toTypedArray()
+        }
+        // The Bluetooth grant is optional: without it Pip simply keeps the phone mic, so
+        // only the microphone itself may block starting a session.
         if (!WakeListenService.hasMicPermission(this)) {
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 702)
+            requestPermissions(bluetooth, 702)
             return
         }
+        // Ask for the optional Bluetooth route without holding up listening. The listener
+        // falls back to the phone mic when the grant is missing.
+        if (Manifest.permission.BLUETOOTH_CONNECT in bluetooth) requestPermissions(bluetooth, 703)
         WakeListenService.startProblem(this)?.let {
             Toast.makeText(this, it, Toast.LENGTH_LONG).show()
             return

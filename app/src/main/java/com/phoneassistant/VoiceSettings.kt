@@ -14,6 +14,10 @@ internal object VoiceSettings {
     fun setDrivingEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean("driving_commands", enabled).apply()
     }
+    fun carNoName(context: Context) = prefs(context).getBoolean("car_no_name", false)
+    fun setCarNoName(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean("car_no_name", enabled).apply()
+    }
     fun drivingHome(context: Context) = prefs(context).getString("driving_home", "").orEmpty()
     fun setDrivingHome(context: Context, address: String) {
         prefs(context).edit().putString("driving_home", address.trim().take(180)).apply()

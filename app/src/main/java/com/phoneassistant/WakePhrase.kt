@@ -138,6 +138,17 @@ internal class WakePhrase {
         return message.take(600).trimEnd { it.isHighSurrogate() }.takeIf { it.any(Char::isLetterOrDigit) }
     }
 
+    /**
+     * In a car a hands-free command can arrive without his name. [CarVoice.unaddressedCommand]
+     * decides which ones; this only makes the message presentable.
+     */
+    fun acceptUnaddressed(transcript: String): String? {
+        val text = cleaned(transcript)
+        if (text.isEmpty()) return null
+        reset()
+        return text.take(300).trimEnd { it.isHighSurrogate() }.takeIf { it.any(Char::isLetterOrDigit) }
+    }
+
     fun reset() {
         clearPartial()
         until = 0L

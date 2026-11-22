@@ -192,10 +192,12 @@ class DiagnosticsActivity : Activity() {
         section("HANDS-FREE VOICE")
         line("listener", WakeListenService.feedback.message)
         line("driving commands", if (VoiceSettings.drivingEnabled(this)) "on" else "off")
+        line("car audio", CarAudio.summary(this))
         fun voiceEvent(label: String, event: Diag.Event?) =
             line(label, event?.let { "${it.text} · ${Diag.ago(it.at)}" } ?: "none this run")
         voiceEvent("last mic event", Diag.lastWakeInput)
         voiceEvent("last voice result", Diag.lastWakeOutcome)
+        voiceEvent("last car connection", Diag.lastCarConnection)
         voiceEvent("last car request", Diag.lastHandsFreeCommand)
         voiceEvent("last voice audio", Diag.lastHandsFreeAudio)
 

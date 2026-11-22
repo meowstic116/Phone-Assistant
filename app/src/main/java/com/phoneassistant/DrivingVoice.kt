@@ -16,7 +16,11 @@ internal object DrivingVoice {
     private const val TYPE_NOT_CONNECTED = 0
     private const val TYPE_NATIVE = 1
     private const val TYPE_PROJECTION = 2
-    data class Result(val message: String, val handedOff: Boolean = false)
+    /**
+     * [handedOff] means Android accepted the action. [verified] means the media session then
+     * reported it happened — without that, "I sent it" is a guess, not a result.
+     */
+    data class Result(val message: String, val handedOff: Boolean = false, val verified: Boolean = false)
     private val projectionUri = Uri.parse("content://$AUTHORITY")
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
@@ -57,21 +61,21 @@ internal object DrivingVoice {
         }
     }
 
-    fun execute(ctx: Context, command: CarCommand): Result = when (command) {
-        is CarCommand.Media -> PipMediaAccess.controlSpotify(ctx, command)
-        is CarCommand.Navigate -> {
-            val destination = if (command.destination.equals("home", ignoreCase = true)) {
-                VoiceSettings.drivingHome(ctx)
-            } else command.destination
-            if (destination.isBlank()) Result("Set a home destination in Pip settings when you're parked.")
-            else {
-                // Mobile Maps intent; the OS and Maps decide whether to accept it and project the route.
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=${Uri.encode(destination)}&mode=d"))
-                    .setPackage("com.google.android.apps.maps").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                if (runCatching { ctx.startActivity(intent) }.isSuccess) {
-                    Result("I sent the destination to Google Maps.", handedOff = true)
-                } else Result("I couldn’t hand off those directions. Try again when parked.")
-            }
-        }
+    fun execute(ctx: Context, command: CarCommand, done: (Result) -> Unit) = when (command) {
+        is CarCommand.Media -> PipMediaAccess.controlSpotify(ctx, command, done)
+        is CarCommand.Navigate -> done(navigate(ctx, command))
+    }
+
+    private fun navigate(ctx: Context, command: CarCommand.Navigate): Result {
+        val destination = if (command.destination.equals("home", ignoreCase = true)) {
+            VoiceSettings.drivingHome(ctx)
+        } else command.destination
+        if (destination.isBlank()) return Result("Set a home destination in Pip settings when you're parked.")
+        // Mobile Maps intent; the OS and Maps decide whether to accept it and project the route.
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=${Uri.encode(destination)}&mode=d"))
+            .setPackage("com.google.android.apps.maps").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return if (runCatching { ctx.startActivity(intent) }.isSuccess) {
+            Result("I sent the destination to Google Maps.", handedOff = true)
+        } else Result("I couldn’t hand off those directions. Try again when parked.")
     }
 }
