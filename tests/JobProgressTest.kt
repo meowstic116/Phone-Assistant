@@ -1058,6 +1058,76 @@ fun main() {
     check(CarVoice.unaddressedCommand(true, true, "tell me a joke") == null)
     check(CarVoice.unaddressedCommand(true, true, "buy me a coffee") == null)
     check(CarVoice.unaddressedCommand(true, true, "open Instagram") == null)
+    // Housekeeping: a scope word plus a dismissal is a bulk request, even said loosely.
+    check(ClearRows.requested("Please press remove on all categories listed on screen"))
+    check(ClearRows.requested("Just click every remove button on those screen I'm on right now"))
+    check(ClearRows.requested("remove all of them"))
+    check(ClearRows.requested("delete every row"))
+    check(ClearRows.requested("clear all"))
+    check(ClearRows.requested("dismiss all of those"))
+    // One named thing is a selection, not housekeeping.
+    check(!ClearRows.requested("remove the milk from my shopping list"))
+    check(!ClearRows.requested("remove every photo of the dog"))
+    check(!ClearRows.requested("delete the photo of the dog"))
+    check(!ClearRows.requested("remove my subscription"))
+    // Money is never swept up in a bulk job.
+    check(!ClearRows.requested("remove all items from my cart"))
+    check(!ClearRows.requested("buy all of them"))
+    check(!ClearRows.requested("check out all of the items"))
+    // Only a bare dismissal on the row is pressed.
+    check(ClearRows.isDismissal("Remove"))
+    check(ClearRows.isDismissal("delete"))
+    check(ClearRows.isDismissal("remove item"))
+    check(ClearRows.isDismissal("✕"))
+    check(!ClearRows.isDismissal("Unsubscribe"))
+    check(!ClearRows.isDismissal("Delete account"))
+    check(!ClearRows.isDismissal("Cancel order"))
+    check(!ClearRows.isDismissal("Remove ads"))
+    check(!ClearRows.isDismissal("Remove $4.99"))
+    check(!ClearRows.isDismissal("Remove member"))
+    // A sweep treats a changed screen as the end, not as more to press.
+    check(ClearRows.sameList(setOf("remove", "delete"), setOf("remove")))
+    check(!ClearRows.sameList(setOf("remove"), setOf("remove", "delete account")))
+    // The exact refusals from a real transcript, so they are caught and handed to the hands.
+    check(ClearRows.soundsLikeRefusal("deleting things without a name makes me nervous, sticky sticky Ricky. tell me the exact category to drop and i'll get the scissors."))
+    check(ClearRows.soundsLikeRefusal("that sounds like a job for a human hand, sticky sticky Ricky. my tiny legs only do walking."))
+    check(ClearRows.soundsLikeRefusal("my little legs can’t reach those buttons, sticky sticky Ricky. you’ll have to do the honors."))
+    check(!ClearRows.soundsLikeRefusal("Done — pressed twelve remove buttons."))
+    check(!ClearRows.soundsLikeRefusal("I couldn’t see the screen, so I stopped."))
+    check(ClearRows.report(0, false).startsWith("I didn’t find"))
+    check(ClearRows.report(12, false).contains("12"))
+
+    // Every toy sound must actually make noise, be a sensible length, and be quiet enough at
+    // the ends that it does not click. A silent "sound" is the failure this catches.
+    for (sound in ToySounds.Sound.entries) {
+        val voice = ToySounds.voice(sound, 1f)
+        val clip = ToySounds.render(voice)
+        check(ToySounds.audible(clip)) { "$sound rendered silence" }
+        val length = ToySounds.length(sound)
+        check(length in 0.03f..0.6f) { "$sound is $length s" }
+        // The first and last sample are faded, so a track never starts or stops mid-waveform.
+        check(kotlin.math.abs(clip.samples.first().toInt()) < 1_200) { "$sound starts loud" }
+        check(kotlin.math.abs(clip.samples.last().toInt()) < 1_200) { "$sound ends loud" }
+    }
+    // Variation is real: the same sound at two pitches is two different renders.
+    val low = ToySounds.render(ToySounds.voice(ToySounds.Sound.POP, 0.8f))
+    val high = ToySounds.render(ToySounds.voice(ToySounds.Sound.POP, 1.2f))
+    check(!low.samples.contentEquals(high.samples))
+    // Pitch is clamped to the small range that keeps a family recognisable.
+    check(ToySounds.voice(ToySounds.Sound.POP, 5f).pitch == ToySounds.MAX_PITCH)
+    check(ToySounds.voice(ToySounds.Sound.POP, 0.1f).pitch == ToySounds.MIN_PITCH)
+    // The same voice renders identical bytes, which is what makes the cache safe.
+    check(ToySounds.render(ToySounds.voice(ToySounds.Sound.SQUEAK, 1.03f)).samples
+        .contentEquals(ToySounds.render(ToySounds.voice(ToySounds.Sound.SQUEAK, 1.03f)).samples))
+    // A pop decays: most of its energy is at the front, and it is nearly gone by the end.
+    val pop = ToySounds.render(ToySounds.voice(ToySounds.Sound.POP, 1f))
+    check(ToySounds.rms(pop, 0f, 0.2f) > ToySounds.rms(pop, 0.8f, 1f) * 4)
+    val pour = ToySounds.render(ToySounds.voice(ToySounds.Sound.POUR, 1f))
+    check(ToySounds.rms(pour, 0.3f, 0.7f) > 100.0) { "pour is silent in its middle" }
+    // Two joined clips are longer than either, and still end quietly.
+    val joined = ToySounds.join(pop, pour)
+    check(joined.samples.size > pop.samples.size + pour.samples.size - 4)
+    check(kotlin.math.abs(joined.samples.last().toInt()) < 1_200)
     // Stopping a route is a bounded car command, and must never need the screen.
     check(CarCommand.parse("stop navigation") == CarCommand.StopNavigation)
     check(CarCommand.parse("Cancel navigation.") == CarCommand.StopNavigation)
@@ -1349,5 +1419,41 @@ fun main() {
     check(KokoroPcm.parse(kokoroWav.copyOf().apply { this[40] = 0 }) == null) // invalid length
     check(KokoroPcm.parse(kokoroWav.copyOf().apply { this[36] = 'l'.code.toByte() }) == null)
     check(pcmWav(floatArrayOf(), 24_000) == null)
+    // Locking the screen is recognised on the phone, before the model is asked, so this matcher
+    // is the whole safety story: a miss means the phone stays awake and the model is consulted
+    // about something the phone already does; a false positive means the screen goes dark
+    // during an unrelated request.
+    val lockRequests = listOf(
+        "lock my screen", "lock the screen", "Lock my phone", "lock my phone please",
+        "can you lock the screen", "could you lock my screen?", "please lock the screen",
+        "turn off the screen", "turn my screen off", "switch the screen off",
+        "put my screen to sleep", "sleep the screen", "screen off",
+        "Hey Pip, lock my screen", "lock my display", "lock this phone",
+        "shut the screen off", "lock up my screen", "ok now lock my screen"
+    )
+    for (message in lockRequests) {
+        check(ScreenLock.requested(message) == ScreenLock.Match.NAMED) { "lock request missed: $message" }
+    }
+    val notLockRequests = listOf(
+        "lock the door", "lock my keys in the car", "unlock the screen", "block the screen",
+        "how do I lock my screen", "what button locks the screen",
+        "remind me to lock the screen", "don't lock the screen", "never lock the phone",
+        "stop locking my screen", "lock it", "lock the car", "lock the folder",
+        "the screen is locked", "my phone locked itself", "play locked",
+        "how long until the screen locks", "tell me a joke", "lock",
+        "lock screen wallpaper", "what's my lock screen", "lock the door and tell me",
+        "how long until my screen locks", "lock my car", "is my screen locked",
+        "can I lock my screen", "does my screen lock automatically",
+        "lock screen settings", "turn on the screen"
+    )
+    for (message in notLockRequests) {
+        check(ScreenLock.requested(message) == null) { "false lock request: $message" }
+    }
+    // A pronoun only means the phone when the conversation has just been about locking it.
+    check(ScreenLock.requested("lock it") == null)
+    check(ScreenLock.requested("lock it", afterLockRequest = true) == ScreenLock.Match.REFERRED)
+    check(ScreenLock.requested("lock it up", afterLockRequest = true) == ScreenLock.Match.REFERRED)
+    // Neither label ever quotes the user back into diagnostics.
+    check(ScreenLock.label(ScreenLock.Match.NAMED) == "lock the screen")
     println("Job progress tests passed.")
 }

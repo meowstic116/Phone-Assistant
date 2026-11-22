@@ -186,9 +186,13 @@ class BubbleWrap(host: PropHost) : Prop(host) {
         val milestone = game.pop(index, byPip) ?: return
         burstAt[index] = now
         invalidate()
+        // The whole toy is this one sound, so it is the loudest thing in the box: a pop with
+        // a little more body under it when Pip lands on one, since his weight is the joke.
+        sound(ToySounds.Sound.POP, if (byPip) 1f else 0.85f)
 
         if (milestone == Milestone.COMPLETE) {
             host.feel(PetView.Mood.HAPPY, 3500L)
+            host.sound(ToySounds.Sound.SPARKLE, 0.9f)
             host.say(Lines.pick(if (byPip) PIP_FINISH_LINES else ALL_POPPED_LINES))
             removeAt = now + CLEAR_DELAY_MS
             return

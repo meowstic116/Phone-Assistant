@@ -467,6 +467,7 @@ class OverlayService : Service(), PropHost {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        ScreenLocker.attach(this)
         running = true
         windowManager = getSystemService(WindowManager::class.java)
         speechBubble = SpeechBubble(this, limits = {
@@ -961,6 +962,20 @@ class OverlayService : Service(), PropHost {
         sayAloud(text, finalReply = true)
     }
 
+    /**
+     * A toy's sound. Routed through here rather than each prop holding the player, so one
+     * switch covers every toy and his own voice can hush them. A toy sound never competes with
+     * a spoken line: while the reply has the floor the effects wait for the next interaction.
+     */
+    override fun sound(effect: ToySounds.Sound, gain: Float) {
+        if (replyHasFloor()) return
+        ToyAudio.play(this, effect, gain)
+    }
+
+    override fun postDelayedSound(effect: ToySounds.Sound, delayMs: Long, gain: Float) {
+        handler.postDelayed({ sound(effect, gain) }, delayMs.coerceIn(0L, 2_000L))
+    }
+
     override fun feel(mood: PetView.Mood, ms: Long) {
         val view = pet ?: return
         view.mood = mood
@@ -1194,6 +1209,9 @@ class OverlayService : Service(), PropHost {
     private fun finishToyHop(landed: Boolean) {
         val hop = toyHop ?: return
         toyHop = null
+        // Feet on the sheet: the softest sound in the box, because it is the landing and not
+        // the event. Only on a real landing — a cancelled hop went nowhere.
+        if (landed) sound(ToySounds.Sound.TAP, 0.45f)
         pet?.apply { scaleX = 1f; scaleY = 1f }
         if (!landed) {
             // A moved sheet invalidates this target. Settle at the current horizontal spot
@@ -2403,6 +2421,23 @@ class OverlayService : Service(), PropHost {
             runNavigation(navigation, done, driving)
             return
         }
+        // A spoken lock request is answered by the phone itself. It needs no screen and no
+        // model, and it must happen before the phone goes dark rather than after a round trip.
+        ScreenLock.requested(text)?.let { match ->
+            if (driving) {
+                // Darting at the lock during a drive is never what the driver wants, and the
+                // lock is not a hands-free command either. Say so and leave the screen alone.
+                val line = "I’ll leave the screen on while you’re driving. Ask me to lock it when you park."
+                Diag.screenLock("not locked · driving")
+                Diag.handsFreeCommand(line)
+                PipVoice.reply(this, line, allowLocked = true)
+                done(WakeFeedback.CAR_NOT_RUN)
+                return
+            }
+            runScreenLock(match, ChatTurns.begin())
+            done(WakeFeedback.REPLIED)
+            return
+        }
         val local = JobProgress.routePhoneLocally(text)
         if (!driving && (local || PhoneContext.asksForAppLabel(text) || NowPlaying.requested(text) ||
                 MessageNotifications.request(text) != null)) {
@@ -2673,6 +2708,12 @@ class OverlayService : Service(), PropHost {
             startJob(text, text, turn)
             return
         }
+        // Locking the screen is the one phone action that must not wait on a model: the screen
+        // it is about goes dark, so there is no second chance to get the wording right.
+        ScreenLock.requested(text)?.let { match ->
+            runScreenLock(match, turn)
+            return
+        }
         val event = ChatRecovery.attempt<String?>(null, { Diag.chatFailure("chat toy reaction", it) }) {
             Toys.reactTo(this, text)
         }
@@ -2686,6 +2727,14 @@ class OverlayService : Service(), PropHost {
                     startJob(job, text, turn)
                     return@post
                 }
+                // A refusal to something that is plainly a job is a bug, not an answer: the
+                // character prompt says so, and a model can still produce one. Hand it to his
+                // hands rather than passing the excuse on to the person who asked.
+                if (ok && ClearRows.requested(text) && ClearRows.soundsLikeRefusal(reply)) {
+                    Diag.caught("housekeeping refusal", IllegalStateException("refusal sent to the hands"))
+                    startJob(text, text, turn)
+                    return@post
+                }
                 if (ok) ChatRecovery.attempt(Unit, { Diag.chatFailure("chat history", it) }) {
                     Memory.append(this, "assistant", reply)
                 }
@@ -2695,6 +2744,38 @@ class OverlayService : Service(), PropHost {
                 }, 4000L)
             }
         }
+    }
+
+    /**
+     * Locks the screen on request.
+     *
+     * The line is said first, while the screen is still lit: once the lock lands there is
+     * nothing left to show a bubble on. The lock itself runs off the main thread because the
+     * Android 8 fallback dispatches a gesture and waits for it, and Android refuses gestures
+     * from the thread that owns the view tree.
+     */
+    private fun runScreenLock(match: ScreenLock.Match, turn: Long) {
+        Diag.screenLock(ScreenLock.label(match))
+        val outcome = if (!ScreenLocker.available()) ScreenLocker.Result.NO_ACCESS
+            else if (!ScreenLocker.supported()) ScreenLocker.Result.NEEDS_UNLOCK_TO_LOCK
+            else null
+        if (outcome != null) {
+            Diag.screenLock("cannot lock · ${outcome.name.lowercase()}")
+            modelSays(ScreenLocker.message(outcome))
+            return
+        }
+        modelSays("Locking up.")
+        Thread({
+            val result = ScreenLocker.lock()
+            handler.post {
+                if (instance !== this || ending) return@post
+                // Only a problem is worth saying after the fact. On success the phone is on its
+                // way to sleep, and a second bubble would arrive on the lock screen.
+                if (result == ScreenLocker.Result.NEEDS_UNLOCK_TO_LOCK || result == ScreenLocker.Result.NO_ACCESS) {
+                    modelSays(ScreenLocker.message(result))
+                }
+            }
+        }, "PipScreenLock").start()
     }
 
     // ------------------------------------------------------------------ phone jobs

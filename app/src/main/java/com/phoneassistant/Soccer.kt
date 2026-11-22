@@ -185,6 +185,7 @@ class SoccerGame(private val host: PropHost) {
             else -> SoccerBallTuning.PIP_KICK
         }
         ball.kick(up = !behindGoal, aim = aim, power = host.px(power))
+        host.sound(ToySounds.Sound.KICK, if (save) 0.95f else 0.75f)
         if (clock.elapsed - lastQuip >= 3_600L) {
             lastQuip = clock.elapsed
             host.feel(PetView.Mood.SMUG, 1200L)
@@ -214,6 +215,9 @@ class SoccerGame(private val host: PropHost) {
         board.invalidate()
 
         host.feel(if (pipPoint) PetView.Mood.SMUG else PetView.Mood.ANNOYED, 1800L)
+        // It is a goal either way. His goal is slightly louder, because he would insist.
+        host.sound(ToySounds.Sound.GOAL, if (pipPoint) 1f else 0.8f)
+        host.postDelayedSound(ToySounds.Sound.WHISTLE, 620L, 0.55f)
         host.say(
             Lines.pick(if (pipPoint) PIP_GOAL_LINES else YOUR_GOAL_LINES)
         )
@@ -225,6 +229,7 @@ class SoccerGame(private val host: PropHost) {
         if (over) return
         cheats++
         host.feel(PetView.Mood.ANNOYED, 2800L)
+        host.sound(ToySounds.Sound.BOING, 0.7f)
         if (cheats >= 3) {
             endRound(after = 3_400L)
             host.say("three goal moves. that's the limit. *flops* rematch later.")
