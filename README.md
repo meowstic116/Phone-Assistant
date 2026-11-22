@@ -267,9 +267,11 @@ Start the assistant, then open **Pip settings → Talk to Pip**. Download offlin
 (about 57 MB), grant microphone permission, and tap **Start listening for Pip**. You can
 leave Pip’s Android notifications off.
 Address him in English: **“Hey Pip, tell me a joke”**, **“Good one, Pip”**, or
-**“Can you, Pip, tell me another?”** The name can come first, last, or as a direct address
-set off in the middle. You can also say his name, pause briefly, then speak. Turn on **Read Pip’s replies aloud** if you want to hear answers
-with the screen locked.
+**“Could you Pip turn the music down?”** Any mention of his name while you are speaking makes
+the rest of that sentence his message, with or without “hey” or commas. You can also say his
+name, pause briefly, then speak. If the recognizer hears the name in a live transcript but
+drops it from the final one, he still answers that same sentence. Turn on **Read Pip’s replies
+aloud** if you want to hear answers with the screen locked.
 
 If he doesn't respond, check the live status under **Talk to Pip** or, if enabled, in the
 listening notification. **Speak now (no wake word)** opens a short window to say one message without
