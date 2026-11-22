@@ -35,3 +35,4 @@ jobs:
           test -n "$ant_jar"
           tests/run-kokoro-files.sh "$ant_jar"
           tests/run-signing.sh
+          tests/run-settings-layout.sh

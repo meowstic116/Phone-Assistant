@@ -202,7 +202,7 @@ class PipSettingsActivity : Activity() {
             VoiceSettings.setEnabled(this, it)
         }
         voiceSummary = text("")
-        button("Choose Pip’s voice") { configureVoice() }
+        plainButton("Choose Pip’s voice") { configureVoice() }
         kokoroStatus = text("")
         kokoroAction = button("Download Kokoro") {
             if (KokoroVoice.hasDownload(this)) {
@@ -216,7 +216,7 @@ class PipSettingsActivity : Activity() {
             }
         }
         refreshVoiceSummary()
-        button("Preview Pip’s voice") {
+        plainButton("Preview Pip’s voice") {
             PipVoice.preview(this) { result ->
                 if (!isFinishing && !isDestroyed) {
                     refreshVoiceSummary()
@@ -225,7 +225,7 @@ class PipSettingsActivity : Activity() {
             }
         }
 
-        button("Preview reply bubble") {
+        plainButton("Preview reply bubble") {
             if (!OverlayService.previewBubble()) Toast.makeText(this,
                 "Start Pip and let him finish any current reply, then try again.", Toast.LENGTH_LONG).show()
         }
@@ -259,7 +259,7 @@ class PipSettingsActivity : Activity() {
             Notes.carQuestions) {
             VoiceSettings.setCarQuestions(this, it)
         }
-        button("Fix navigation access for Pip") {
+        plainButton("Fix navigation access for Pip") {
             if (PipMediaAccess.enabled(this)) {
                 Toast.makeText(this, "Pip can already see Google Maps’ navigation notification.", Toast.LENGTH_LONG).show()
             } else {
@@ -272,7 +272,7 @@ class PipSettingsActivity : Activity() {
                 }
             }
         }
-        button("Set or clear driving home destination") {
+        plainButton("Set or clear driving home destination") {
             val destination = EditText(this).apply {
                 hint = "Street address or destination"
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS
@@ -296,8 +296,10 @@ class PipSettingsActivity : Activity() {
         addPermissions()
         step("API & model")
         addApiSettings()
-        button(getString(R.string.debug_options)) { startActivity(Intent(this, DebugOptionsActivity::class.java)) }
-        button("Done") { finish() }
+        plainButton(getString(R.string.debug_options)) {
+            startActivity(Intent(this, DebugOptionsActivity::class.java))
+        }
+        plainButton("Done") { finish() }
         if (savedInstanceState == null && intent.getBooleanExtra(EXTRA_SHOW_TOYS, false)) {
             scroll.post { scroll.scrollTo(0, toyHeading.top) }
         }
@@ -447,7 +449,7 @@ class PipSettingsActivity : Activity() {
                 OverlayService.behaviorSettingsChanged()
             }
         }
-        button("Painting gallery") { startActivity(Intent(this, PaintingGalleryActivity::class.java)) }
+        plainButton("Painting gallery") { startActivity(Intent(this, PaintingGalleryActivity::class.java)) }
         toggle("Toy sound effects", ToyAudio.enabled(this), Notes.toySounds) {
             ToyAudio.setEnabled(this, it)
             if (it) ToyAudio.play(this, ToySounds.Sound.POP, 0.9f)
@@ -462,7 +464,7 @@ class PipSettingsActivity : Activity() {
                 }
                 .setNegativeButton("Cancel", null).show()
         }
-        button("Try a toy sound") {
+        plainButton("Try a toy sound") {
             ToyAudio.play(this, ToySounds.Sound.SQUEAK, 1f)
             ToyAudio.playPair(this, ToySounds.Sound.POP, ToySounds.Sound.GOAL, 1f)
         }
@@ -471,9 +473,15 @@ class PipSettingsActivity : Activity() {
 
     private fun addPersonalityAndData() {
         heading(getString(R.string.settings_personal_heading))
-        button(getString(R.string.settings_personality)) { startActivity(Intent(this, PersonaActivity::class.java)) }
-        button(getString(R.string.settings_memory)) { startActivity(Intent(this, MemoryActivity::class.java)) }
-        button(getString(R.string.settings_logins)) { startActivity(Intent(this, VaultActivity::class.java)) }
+        plainButton(getString(R.string.settings_personality)) {
+            startActivity(Intent(this, PersonaActivity::class.java))
+        }
+        plainButton(getString(R.string.settings_memory)) {
+            startActivity(Intent(this, MemoryActivity::class.java))
+        }
+        plainButton(getString(R.string.settings_logins)) {
+            startActivity(Intent(this, VaultActivity::class.java))
+        }
     }
 
     private fun addPermissions() {
@@ -486,7 +494,9 @@ class PipSettingsActivity : Activity() {
             if (permission == Permission.NOTIFICATION_ACCESS) {
                 option(getString(R.string.permissions_message_previews), Option.MESSAGE_NOTIFICATIONS,
                     Notes.messagePreviews)
-                button(getString(R.string.read_message_with_pip)) { startActivity(Intent(this, ReadMessageActivity::class.java)) }
+                plainButton(getString(R.string.read_message_with_pip)) {
+                    startActivity(Intent(this, ReadMessageActivity::class.java))
+                }
             }
         }
     }
@@ -756,14 +766,25 @@ class PipSettingsActivity : Activity() {
         content.addView(this, -1, -2)
     }
 
-    private fun button(label: String, click: () -> Unit) = Button(this).apply {
+    /**
+     * Builds a button without adding it anywhere, so it can be put in an information row.
+     *
+     * Adding it here as well is exactly what broke this screen: the caller then handed an
+     * already-parented view to [infoRow], and Android refused it with "The specified child
+     * already has a parent". Only [infoRow] may add a row; nothing else attaches a control.
+     */
+    private fun button(label: String, click: () -> Unit): Button = Button(this).apply {
         text = label
         isAllCaps = false
         minHeight = dp(48)
         backgroundTintList = getColorStateList(R.color.surfaceAlt)
         setTextColor(getColor(R.color.text))
         setOnClickListener { click() }
-        content.addView(this, -1, -2)
+    }
+
+    /** A button with no information button, added straight to the screen. */
+    private fun plainButton(label: String, click: () -> Unit) {
+        content.addView(button(label, click), -1, -2)
     }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
