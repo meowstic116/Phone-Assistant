@@ -36,6 +36,12 @@ object ScreenLocker {
         /** No screen to lock: the phone is already locked or asleep. */
         ALREADY_LOCKED,
 
+        /**
+         * Android 8 and below: the screen is lit but no lock control could be read or it did
+         * nothing. Distinct from [NEEDS_UNLOCK_TO_LOCK] so a failed tap is not reported as a lock.
+         */
+        TILE_NOT_FOUND,
+
         /** The accessibility switch is off, or Android never connected the service. */
         NO_ACCESS
     }
@@ -45,7 +51,7 @@ object ScreenLocker {
      * Android 8 sentence is left out on newer phones rather than describing something that
      * cannot happen to them.
      */
-    fun explanation(ctx: Context): String {
+    fun explanation(): String {
         val base = "Locking uses the accessibility service Pip already needs to work other apps. "
         if (!directLockSupported()) {
             return base + "This version of Android has no direct lock, so the phone is locked " +
@@ -71,14 +77,24 @@ object ScreenLocker {
      */
     fun supported(): Boolean = directLockSupported()
 
-    fun canLockNow(ctx: Context): Boolean = available() && supported() && !isLocked(ctx)
+    /**
+     * Whether a lock would do anything right now, as a result rather than a boolean: "already
+     * locked" and "can't lock on this phone" are different answers and must not be conflated.
+     */
+    fun readiness(ctx: Context): Result? = when {
+        !available() -> Result.NO_ACCESS
+        isLocked(ctx) -> Result.ALREADY_LOCKED
+        else -> null
+    }
 
     /**
      * Locks the screen. Must be called off the main thread: the fallback dispatches a gesture
      * and waits for it, and Android refuses gestures from the thread that owns the view tree.
      */
     fun lock(): Result {
-        val ctx = appContext ?: return Result.NO_ACCESS
+        // Settings can offer the button before the overlay has ever run, which is the one case
+        // where nothing has attached a context yet.
+        val ctx = appContext ?: return fail(Result.NO_ACCESS, "no context: the overlay has not run")
         if (!available()) return fail(Result.NO_ACCESS, "accessibility service not connected")
         if (isLocked(ctx)) return report(Result.ALREADY_LOCKED, "screen was already locked")
         if (directLockSupported()) {
@@ -88,8 +104,8 @@ object ScreenLocker {
         return when (quickSettingsLock()) {
             true -> confirm(ctx, Result.LOCKED)
             // A tap landed but nothing locked: the control was not a lock after all.
-            false -> fail(Result.NEEDS_UNLOCK_TO_LOCK, "tapped a lock control that did nothing")
-            null -> fail(Result.NEEDS_UNLOCK_TO_LOCK, "no lock control on the screen")
+            false -> fail(Result.TILE_NOT_FOUND, "tapped a lock control that did nothing")
+            null -> fail(Result.TILE_NOT_FOUND, "no lock control on the screen")
         }
     }
 
@@ -105,6 +121,8 @@ object ScreenLocker {
             "I can lock it once the screen is awake — this phone locks through Quick Settings, and I can't pull it down from here."
         Result.NO_ACCESS ->
             "I need the accessibility switch on before I can lock your screen. It's in Pip settings."
+        Result.TILE_NOT_FOUND ->
+            "I couldn’t find a lock button on this phone’s Quick Settings, so I didn’t tap anything."
     }
 
     // ------------------------------------------------------------------ Android 8 fallback
@@ -130,9 +148,13 @@ object ScreenLocker {
 
     // ------------------------------------------------------------------ shared
 
+    /**
+     * The application context, held so the keyguard can be read. Application context, never the
+     * service: a static holding a Service outlives it and leaks everything the service owns.
+     */
+    @Volatile
     private var appContext: Context? = null
 
-    /** Called once from the overlay so this object can read the keyguard without a parameter. */
     fun attach(ctx: Context) {
         appContext = ctx.applicationContext
     }

@@ -32,7 +32,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
-import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -2434,7 +2433,7 @@ class OverlayService : Service(), PropHost {
                 done(WakeFeedback.CAR_NOT_RUN)
                 return
             }
-            runScreenLock(match, ChatTurns.begin())
+            runScreenLock(match)
             done(WakeFeedback.REPLIED)
             return
         }
@@ -2520,7 +2519,7 @@ class OverlayService : Service(), PropHost {
             }
         }
         if (command == CarCommand.NavigationState) {
-            CarNavigation.status(this) { navigation ->
+            CarNavigation.status { navigation ->
                 val canInspect = PipMediaAccess.enabled(this)
                 answer(DrivingVoice.Result(
                     NavVoice.message(NavVoice.Action.STATUS, navigation, canInspect)))
@@ -2628,7 +2627,13 @@ class OverlayService : Service(), PropHost {
                         return@post
                     }
                     if (startJob(task, text, turn)) {
-                        voiceExchange.remember(text, "On it.", SystemClock.elapsedRealtime())
+                        // Same guard as an ordinary reply: a turn that began before the phone
+                        // was locked and unlocked again is not context for the next one, since
+                        // the screen it referred to is gone. Without this, a stale "on it" from
+                        // before a lock was offered back as if it described the current screen.
+                        if (unlocked && screenOffGeneration == screenGeneration && bubbleScreenUsable()) {
+                            voiceExchange.remember(text, "On it.", SystemClock.elapsedRealtime())
+                        }
                         done(WakeFeedback.REPLIED)
                     } else {
                         leaveAttention()
@@ -2711,7 +2716,7 @@ class OverlayService : Service(), PropHost {
         // Locking the screen is the one phone action that must not wait on a model: the screen
         // it is about goes dark, so there is no second chance to get the wording right.
         ScreenLock.requested(text)?.let { match ->
-            runScreenLock(match, turn)
+            runScreenLock(match)
             return
         }
         val event = ChatRecovery.attempt<String?>(null, { Diag.chatFailure("chat toy reaction", it) }) {
@@ -2754,24 +2759,30 @@ class OverlayService : Service(), PropHost {
      * Android 8 fallback dispatches a gesture and waits for it, and Android refuses gestures
      * from the thread that owns the view tree.
      */
-    private fun runScreenLock(match: ScreenLock.Match, turn: Long) {
+    private fun runScreenLock(match: ScreenLock.Match) {
         Diag.screenLock(ScreenLock.label(match))
-        val outcome = if (!ScreenLocker.available()) ScreenLocker.Result.NO_ACCESS
-            else if (!ScreenLocker.supported()) ScreenLocker.Result.NEEDS_UNLOCK_TO_LOCK
-            else null
-        if (outcome != null) {
-            Diag.screenLock("cannot lock · ${outcome.name.lowercase()}")
-            modelSays(ScreenLocker.message(outcome))
+        if (!ScreenLocker.available()) {
+            Diag.screenLock("cannot lock · no accessibility")
+            modelSays(ScreenLocker.message(ScreenLocker.Result.NO_ACCESS))
             return
         }
+        // Everything below runs on a worker: the accessibility reads and the Android 8 gesture
+        // are framework calls, and Android refuses gestures from the thread that owns the view
+        // tree. Doing the availability probe here too keeps the main thread out of it.
         modelSays("Locking up.")
         Thread({
-            val result = ScreenLocker.lock()
+            val result = try {
+                ScreenLocker.lock()
+            } catch (t: Throwable) {
+                Diag.caught("lock screen", t)
+                ScreenLocker.Result.NO_ACCESS
+            }
             handler.post {
                 if (instance !== this || ending) return@post
                 // Only a problem is worth saying after the fact. On success the phone is on its
                 // way to sleep, and a second bubble would arrive on the lock screen.
-                if (result == ScreenLocker.Result.NEEDS_UNLOCK_TO_LOCK || result == ScreenLocker.Result.NO_ACCESS) {
+                if (result !in setOf(ScreenLocker.Result.LOCKED, ScreenLocker.Result.ACCEPTED,
+                        ScreenLocker.Result.ALREADY_LOCKED)) {
                     modelSays(ScreenLocker.message(result))
                 }
             }

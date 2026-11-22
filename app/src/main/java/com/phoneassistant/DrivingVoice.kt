@@ -70,7 +70,7 @@ internal object DrivingVoice {
             done(Result(NavVoice.message(action, null, canInspect = true),
                 handedOff = true, verified = action == NavVoice.Action.STOPPED_AND_VERIFIED))
         }
-        CarCommand.NavigationState -> CarNavigation.status(ctx) { navigation ->
+        CarCommand.NavigationState -> CarNavigation.status { navigation ->
             val canInspect = PipMediaAccess.enabled(ctx)
             done(Result(NavVoice.message(NavVoice.Action.STATUS, navigation, canInspect)))
         }

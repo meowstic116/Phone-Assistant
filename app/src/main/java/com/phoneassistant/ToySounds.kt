@@ -112,7 +112,6 @@ object ToySounds {
         // Seeded from the voice so a cached render is reproducible, and so two different
         // variations do not share their noise.
         val noise = Noise(voice.sound.ordinal * 7919 + (voice.pitch * 1000f).toInt())
-        val duration = samples.toFloat() / SAMPLE_RATE
         var phase = 0f
         var lowpass = 0f
         for (i in 0 until samples) {
@@ -254,9 +253,6 @@ object ToySounds {
     }
 
     /** A short hush, used when a toy needs a gap between two sounds. */
-    fun silence(ms: Int): Clip =
-        Clip(ShortArray(SAMPLE_RATE * ms / 1000), ms / 1000f)
-
     /**
      * Concatenates clips, so one toy event can be a squeak then a pour without two players.
      * The fade at each join keeps the seam from clicking.
@@ -273,10 +269,6 @@ object ToySounds {
         return Clip(out, total.toFloat() / SAMPLE_RATE)
     }
 
-    /** How loud, given a toy's own sense of itself, clamped to something a phone can play. */
-    fun gain(base: Float, jitter: Float): Float = (base * (1f - jitter) + base * jitter * 1.0f).let { it }
-        .coerceIn(0.05f, 1f)
-
     /** The RMS of a window, used by tests to check an envelope actually decays. */
     fun rms(clip: Clip, from: Float, to: Float): Double {
         val start = max(0, (clip.samples.size * from).toInt())
@@ -286,7 +278,4 @@ object ToySounds {
         for (i in start until end) sum += clip.samples[i].toDouble() * clip.samples[i]
         return sqrt(sum / (end - start))
     }
-
-    /** The first index above [threshold], or -1: lets a test prove a clip is not silent late. */
-    fun firstAbove(clip: Clip, threshold: Int): Int = clip.samples.indexOfFirst { abs(it.toInt()) > threshold }
 }

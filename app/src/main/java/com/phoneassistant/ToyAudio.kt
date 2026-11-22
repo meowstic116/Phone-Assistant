@@ -5,7 +5,6 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -43,6 +42,11 @@ internal object ToyAudio {
     /** Cache limit, in clips. Thirteen sounds times eight pitches is 104; this holds a dozen. */
     private const val CACHE_LIMIT = 48
 
+    /**
+     * Rendered takes, least recently used first. Touched only by the single renderer thread —
+     * a LinkedHashMap in access order mutates on every read, so it is a data race the moment a
+     * second thread looks at it. If a reader is ever added elsewhere, this needs a lock.
+     */
     private val cache = object : LinkedHashMap<String, ToySounds.Clip>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ToySounds.Clip>?): Boolean =
             size > CACHE_LIMIT
@@ -109,7 +113,6 @@ internal object ToyAudio {
         val voice = ToySounds.voice(sound, random.nextFloat().let {
             ToySounds.MIN_PITCH + it * (ToySounds.MAX_PITCH - ToySounds.MIN_PITCH)
         })
-        val app = ctx.applicationContext
         renderer.execute {
             val clip = cache[voice.key] ?: runCatching { ToySounds.render(voice) }.getOrNull()
                 ?.also { cache[voice.key] = it } ?: return@execute
@@ -154,9 +157,10 @@ internal object ToyAudio {
                 .setBufferSizeInBytes(size)
                 .build()
             if (track.state != AudioTrack.STATE_INITIALIZED) return
-            val pcm = ShortArray(clip.samples.size) { i ->
-                (clip.samples[i] * level).toInt().coerceIn(-32_768, 32_767).toShort()
-            }
+            // Volume is applied by the track, not by rebuilding the clip: volume and gain are
+            // fixed points, and the multiplier is a per-sample loop over the whole buffer.
+            track.setVolume(level)
+            val pcm = clip.samples
             track.play()
             var written = 0
             var stalled = 0
@@ -173,9 +177,11 @@ internal object ToyAudio {
                 written += n
             }
             // Let the tail reach the speaker before the track is released, or the last few
-            // milliseconds of a pop are cut off and it clicks.
-            val tail = (clip.seconds * 1_000f).toInt().coerceIn(20, 250)
-            SystemClock.sleep(tail.toLong())
+            // milliseconds of a pop are cut off and it clicks. The track buffers `size` bytes,
+            // so what is still in flight is the whole queued buffer, not just the buffer
+            // minimum — a clip shorter than the queue would otherwise be cut off mid-pop.
+            val queuedMs = (size / 2L) * 1_000L / ToySounds.SAMPLE_RATE
+            SystemClock.sleep(queuedMs.coerceIn(20L, 400L))
         } catch (_: Throwable) {
             // A toy sound is never worth crashing a toy for.
         } finally {
