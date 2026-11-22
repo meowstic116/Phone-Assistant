@@ -140,8 +140,27 @@ class PipSettingsActivity : Activity() {
             VoiceSettings.setCarNoName(this, it)
         }
         text("Only while a hands-free Bluetooth device is connected and driving commands are on. " +
-            "Exact commands like “pause Spotify”, “next song”, or “take me home” are accepted; " +
-            "chat and phone tasks still need his name.")
+            "Exact commands like “pause Spotify”, “next song”, “take me home”, or “stop navigation” " +
+            "are accepted; chat and phone tasks still need his name.")
+        toggle("Answer “are we still navigating?” without saying “Pip”", VoiceSettings.carQuestions(this)) {
+            VoiceSettings.setCarQuestions(this, it)
+        }
+        text("A read-only check of Google Maps, so it changes nothing. It also works by name at any " +
+            "time. Stopping navigation needs Notification access below, but never an unlock: Pip uses " +
+            "Maps’ own Exit button on the navigation notification.")
+        button("Fix navigation access for Pip") {
+            if (PipMediaAccess.enabled(this)) {
+                Toast.makeText(this, "Pip can already see Google Maps’ navigation notification.", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(this, "Turn on Pip under Notification access, then try “Pip, stop navigation.”",
+                    Toast.LENGTH_LONG).show()
+                runCatching {
+                    startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                }.onFailure {
+                    startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
+                }
+            }
+        }
         button("Set or clear driving home destination") {
             val destination = EditText(this).apply {
                 hint = "Street address or destination"

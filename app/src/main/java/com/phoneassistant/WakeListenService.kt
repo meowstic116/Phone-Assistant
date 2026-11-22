@@ -389,8 +389,9 @@ internal class WakeListenService : Service() {
                                     // In a car, his name is not required for an exact driving
                                     // command when the user opted in and a hands-free link exists.
                                     if (!carCommandReady) carCommandReady = CarAudio.connected(this)
-                                    val unaddressed = CarVoice.unaddressedCommand(
+                                    val unaddressed = CarVoice.unaddressedOrQuestion(
                                         VoiceSettings.drivingEnabled(this) && VoiceSettings.carNoName(this),
+                                        VoiceSettings.carQuestions(this),
                                         carCommandReady, heard)
                                     // Clear any half-heard name so it cannot leak into a later
                                     // utterance, then run only the bounded command set.
