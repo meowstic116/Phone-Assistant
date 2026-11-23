@@ -30,6 +30,10 @@ internal object PipPermissions {
             R.string.permissions_microphone_manage)
         Permission.USAGE -> Row(R.string.permissions_usage, R.string.permissions_usage_info)
         Permission.ACCESSIBILITY -> Row(R.string.permissions_access_android, R.string.setup_access_optional)
+        Permission.NEARBY_DEVICES -> Row(R.string.permissions_nearby, R.string.permissions_nearby_info,
+            R.string.permissions_nearby_manage)
+        Permission.LOCATION -> Row(R.string.permissions_location, R.string.permissions_location_info,
+            R.string.permissions_location_manage)
     }
 
     fun granted(ctx: Context, permission: Permission): Boolean = when (permission) {
@@ -39,6 +43,11 @@ internal object PipPermissions {
         Permission.MICROPHONE -> WakeListenService.hasMicPermission(ctx)
         Permission.USAGE -> AppWatcher.hasPermission(ctx)
         Permission.ACCESSIBILITY -> ImeWatch.enabled(ctx)
+        // Below Android 12 the Bluetooth grant is install-time, so the row is always on.
+        Permission.NEARBY_DEVICES -> Build.VERSION.SDK_INT < 31 ||
+            ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        Permission.LOCATION ->
+            ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     }
 
     fun manage(ctx: Context, permission: Permission) {
@@ -49,6 +58,8 @@ internal object PipPermissions {
             Permission.MICROPHONE -> openAppSettings(ctx)
             Permission.USAGE -> openUsage(ctx)
             Permission.ACCESSIBILITY -> openAccessibility(ctx)
+            Permission.NEARBY_DEVICES -> openAppSettings(ctx)
+            Permission.LOCATION -> openAppSettings(ctx)
         }
     }
 
@@ -56,6 +67,11 @@ internal object PipPermissions {
         val runtime = when (permission) {
             Permission.NOTIFICATIONS -> if (Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null
             Permission.MICROPHONE -> Manifest.permission.RECORD_AUDIO
+            // Requested at runtime on Android 12+ only; older versions grant it at install.
+            Permission.NEARBY_DEVICES -> if (Build.VERSION.SDK_INT >= 31) Manifest.permission.BLUETOOTH_CONNECT else null
+            // Never requested on Pip's side: this row is a status and a door to Android's
+            // settings, keeping the manifest's "Pip never requests the permission" promise.
+            Permission.LOCATION -> null
             else -> null
         }
         if (runtime == null || activity.checkSelfPermission(runtime) == PackageManager.PERMISSION_GRANTED) {

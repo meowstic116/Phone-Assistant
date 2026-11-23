@@ -642,7 +642,8 @@ fun main() {
     }
 
     check(SetupPolicy.Permission.entries.map { it.name } == listOf(
-        "NOTIFICATIONS", "NOTIFICATION_ACCESS", "OVERLAY", "MICROPHONE", "USAGE", "ACCESSIBILITY"))
+        "NOTIFICATIONS", "NOTIFICATION_ACCESS", "OVERLAY", "MICROPHONE", "USAGE", "ACCESSIBILITY",
+        "NEARBY_DEVICES", "LOCATION"))
     val setup = SetupPolicy
     val welcomeStep = SetupPolicy.Step.WELCOME
     val apiStep = SetupPolicy.Step.API

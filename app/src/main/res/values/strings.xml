@@ -42,6 +42,12 @@
     <string name="permissions_microphone_info">Needed for voice requests and listening for Pip’s name. Granting it doesn’t start listening. To set up listening, go to Pip settings → Talk to Pip.</string>
     <string name="permissions_microphone_manage">Manage microphone permission</string>
     <string name="permissions_notifications_manage">Manage notifications</string>
+    <string name="permissions_nearby">Detect nearby devices · optional</string>
+    <string name="permissions_nearby_info">Lets Pip notice a connected car, Bluetooth headset or Android Auto, so hands-free driving can use the car’s microphone. Without it, Pip keeps listening on the phone’s microphone.</string>
+    <string name="permissions_nearby_manage">Manage nearby devices</string>
+    <string name="permissions_location">Location · optional</string>
+    <string name="permissions_location_info">Lets Pip see whether Android is allowing location, so he can tell you whether he can navigate you somewhere. Pip never asks for location himself and never tracks you.</string>
+    <string name="permissions_location_manage">Manage location permission</string>
     <string name="settings_about_option">About %1$s</string>
     <string name="permissions_manage">Open Android settings</string>
     <string name="permissions_status">%1$s · %2$s</string>

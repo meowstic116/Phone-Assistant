@@ -22,7 +22,9 @@ import java.util.concurrent.TimeUnit
  *   and [duck] can hush the whole set when Pip is talking, because a squeak over his own
  *   sentence is worse than no squeak.
  * - **Off is one switch.** [enabled] is read per play, so turning toy sounds off stops the next
- *   one rather than after a restart. Silence is the default for someone who has not chosen.
+ *   one rather than after a restart. The switch starts on — a toy box that is silent until
+ *   someone finds the setting is a toy box that seems broken — and a silent ringer stays
+ *   silent because [play] asks [ringerMuted] before rendering anything.
  * - **Nothing is loaded from disk.** A clip is rendered once and kept — thirteen families with
  *   a hundred possible pitches each would be a lot of buffers, so the cache is bounded and
  *   evicts oldest-first. Rendering is ~3 ms; playback never blocks the caller.
@@ -106,6 +108,9 @@ internal object ToyAudio {
     /** Books a fresh variation. Cheap: the waveform is rendered on the worker. */
     fun play(ctx: Context, sound: ToySounds.Sound, gain: Float = 1f) {
         if (!enabled(ctx)) return
+        // The switch above is the user's choice; this one is the phone's. Vibrate still plays
+        // (the sounds ride the media stream), silent stays silent.
+        if (ringerMuted(ctx)) return
         val level = (BASE_GAIN * gain * volume(ctx)).coerceIn(0f, 1f)
         if (level <= 0.001f) return
         val voice = ToySounds.voice(sound, random.nextFloat().let {
@@ -154,7 +159,10 @@ internal object ToyAudio {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .setBufferSizeInBytes(size)
                 .build()
-            if (track.state != AudioTrack.STATE_INITIALIZED) return
+            if (track.state != AudioTrack.STATE_INITIALIZED) {
+                Diag.caught("toy audio · track", IllegalStateException("AudioTrack failed to initialise"))
+                return
+            }
             // Volume is applied by the track, not by rebuilding the clip: volume and gain are
             // fixed points, and the multiplier is a per-sample loop over the whole buffer.
             track.setVolume(level)
@@ -180,8 +188,11 @@ internal object ToyAudio {
             // minimum — a clip shorter than the queue would otherwise be cut off mid-pop.
             val queuedMs = (size / 2L) * 1_000L / ToySounds.SAMPLE_RATE
             SystemClock.sleep(queuedMs.coerceIn(20L, 400L))
-        } catch (_: Throwable) {
-            // A toy sound is never worth crashing a toy for.
+        } catch (t: Throwable) {
+            // A toy sound is never worth crashing a toy for — but the failure still goes to
+            // Diagnostics, because a broken audio path must not be indistinguishable from
+            // silence when someone is asking why the toys are quiet.
+            Diag.caught("toy audio · emit", t)
         } finally {
             runCatching {
                 track?.stop()
@@ -191,9 +202,11 @@ internal object ToyAudio {
     }
 
     private fun attributes(): AudioAttributes = AudioAttributes.Builder()
-        // SONIFICATION, not media: this is a sound effect, so it follows the notification
-        // stream and is silenced by a silent ringer rather than talking over a muted phone.
-        .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+        // GAME, riding the media stream, because the ringer mutes the system and notification
+        // streams in vibrate mode too — which is where phones spend most of their day. The
+        // silent-ringer rule is enforced in play() instead, where it is visible and tested:
+        // a silent phone is a choice and gets silence, vibrate is not and gets squeaks.
+        .setUsage(AudioAttributes.USAGE_GAME)
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
 
