@@ -62,6 +62,8 @@ internal class WakeListenService : Service() {
     @Volatile private var active = false
     @Volatile private var commandPending = false
     @Volatile private var manualRequest = 0
+    // Bumped when Pip has just replied: the next thing said is to him, no name needed.
+    @Volatile private var followUpRequest = 0
     private var outcomeUntil = 0L
     private var keepFailure = false
     private val startupDeadline = Runnable { if (active) failed(
@@ -152,6 +154,8 @@ internal class WakeListenService : Service() {
             publish(WakeFeedback.SENDING)
             val done: (WakeFeedback) -> Unit = { outcome ->
                 commandPending = false
+                // A real reply earns one name-free follow-up, like the Speak now tap.
+                if (outcome == WakeFeedback.REPLIED) followUpRequest += 1
                 if (active) publish(outcome)
             }
             ChatRecovery.attempt(Unit, { done(WakeFeedback.CHAT_FAILED) }) {
@@ -190,6 +194,7 @@ internal class WakeListenService : Service() {
                         var recording = false
                         var filled = 0
                         var handledManual = 0
+                        var handledFollowUp = 0
                         var lastSignal = 0L
                         var lastPcmAt = 0L
                         val recovery = WakeCaptureRecovery()
@@ -259,6 +264,12 @@ internal class WakeListenService : Service() {
                                 recording = false
                                 filled = 0
                                 recognizer.reset(stream)
+                                phrase.arm(now)
+                                showedName = true
+                            }
+                            val followUp = followUpRequest
+                            if (handledFollowUp != followUp) {
+                                handledFollowUp = followUp
                                 phrase.arm(now)
                                 showedName = true
                             }

@@ -1196,23 +1196,23 @@ fun main() {
     check(!WakeFeedback.LISTENING.isMicEvent && !WakeFeedback.PLAYING.isMicEvent)
 
     val wakePhrase = WakePhrase()
-    check(wakePhrase.accept("Ask Pip what he thinks", 1) == null && !wakePhrase.awaiting)
+    check(wakePhrase.accept("Ask Pip what he thinks", 1) == "Ask what he thinks" && !wakePhrase.awaiting)
     check(wakePhrase.accept("Piper, how are you?", 2) == null && !wakePhrase.awaiting)
     check(wakePhrase.accept("Hey, PIP, tell me a joke!", 3) == "tell me a joke!")
     check(wakePhrase.accept("Pip.", 100) == null && wakePhrase.awaiting)
     check(wakePhrase.accept("How are you?", 5_000) == "How are you?" && !wakePhrase.awaiting)
     check(wakePhrase.accept("Pip", 10_000) == null && wakePhrase.awaiting)
-    check(wakePhrase.expire(20_001) && !wakePhrase.awaiting)
-    check(wakePhrase.accept("This must not send after expiry", 21_000) == null)
+    check(wakePhrase.expire(30_001) && !wakePhrase.awaiting)
+    check(wakePhrase.accept("This must not send after expiry", 31_000) == null)
     check(wakePhrase.hasAddress("“HEY — P. I. P, tell me a joke”"))
     check(wakePhrase.accept("Hey Peep — what time is it?", 23_000) == "what time is it?")
     check(wakePhrase.accept("Peep the window", 24_000) == null)
     check(!wakePhrase.hasAddress("I said Hey Pip yesterday"))
-    wakePhrase.arm(25_000) // The explicit Speak now tap only arms one message.
+    wakePhrase.arm(25_000) // A Speak now tap or a fresh reply arms only one message.
     check(wakePhrase.accept("Tell me a joke", 26_000) == "Tell me a joke")
     check(wakePhrase.accept("Not part of the same request", 26_500) == null)
     wakePhrase.arm(27_000)
-    check(wakePhrase.accept("Too late", 38_000) == null)
+    check(wakePhrase.accept("Too late", 48_000) == null) // The window is generous, not endless.
 
     check(wakePhrase.accept("Good one, Pip!", 40_000) == "Good one!")
     check(wakePhrase.accept("good one pip", 41_000) == "good one") // The recognizer may omit punctuation.
@@ -1263,6 +1263,14 @@ fun main() {
     check(wakePhrase.accept("Pip is on my phone", 76_500) == "is on my phone") // He still answers.
     check(wakePhrase.accept("Could you Pip turn it down?", 77_000) == "Could you turn it down?")
     check(wakePhrase.accept("pass me the pip", 74_000) == null) // "the pip" is an object, not his name.
+    // A request with his name in it counts however the name is spelled; talk about him does not.
+    check(wakePhrase.accept("we asked Pip what he thinks", 80_000) == null)
+    check(wakePhrase.accept("please tell Pip a joke", 80_100) == "please tell a joke")
+    check(wakePhrase.accept("can you ask Pip what he thinks", 80_200) == "can you ask what he thinks")
+    check(wakePhrase.accept("Hey pipe what time is it?", 80_300) == "what time is it?")
+    check(wakePhrase.accept("could you pep turn the music down", 80_400) == "could you turn the music down")
+    check(wakePhrase.accept("some pep in my step", 80_500) == null) // A real word, not his name.
+    check(wakePhrase.accept("P-I-P, pause Spotify", 80_600) == "pause Spotify")
     val captureRecovery = WakeCaptureRecovery()
     check(!captureRecovery.stalled(3999, lastPcmAt = 0) && captureRecovery.stalled(4000, lastPcmAt = 0))
     check(captureRecovery.tryRestart(4000) && captureRecovery.tryRestart(8000))
