@@ -9,6 +9,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
@@ -317,7 +318,10 @@ internal object PipVoice {
                     }
                 }
             })
-            if (tts.speak(line.text, TextToSpeech.QUEUE_FLUSH, null, id.toString()) == TextToSpeech.SUCCESS) {
+            if (tts.speak(line.text, TextToSpeech.QUEUE_FLUSH, Bundle().apply {
+                    putString(TextToSpeech.Engine.KEY_PARAM_VOLUME,
+                        VoiceSettings.volume(ctx).coerceIn(0f, 1f).toString())
+                }, id.toString()) == TextToSpeech.SUCCESS) {
                 report?.invoke(success)
             } else {
                 releaseAudio()
@@ -370,7 +374,7 @@ internal object PipVoice {
                 if (!mayPlay(ctx, id)) { stop(); return@post }
                 if (pcm == null) { failed(KokoroFailure.CLIP); return@post }
                 if (!takeFocus(ctx, id)) { failed(KokoroFailure.FOCUS); return@post }
-                val playback = KokoroPlayback.create(pcm, main, attrs) { ok ->
+                val playback = KokoroPlayback.create(pcm, main, attrs, VoiceSettings.volume(ctx)) { ok ->
                     if (id != sequence) return@create
                     if (ok) {
                         KokoroIpc.playbackResult(null)

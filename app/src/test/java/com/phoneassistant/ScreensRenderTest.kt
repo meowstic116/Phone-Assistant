@@ -4,6 +4,8 @@ import android.app.Activity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.SeekBar
+import android.widget.TextView
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -51,6 +53,20 @@ class ScreensRenderTest {
         return into
     }
 
+    /** Every text label on the screen, depth-first. */
+    private fun allTexts(root: View, into: MutableList<String> = mutableListOf()): MutableList<String> {
+        if (root is TextView) into.add(root.text?.toString().orEmpty())
+        if (root is ViewGroup) for (i in 0 until root.childCount) allTexts(root.getChildAt(i), into)
+        return into
+    }
+
+    /** How many views match [match], actually attached, depth-first. */
+    private fun countViews(root: View, match: (View) -> Boolean): Int {
+        var count = if (match(root)) 1 else 0
+        if (root is ViewGroup) for (i in 0 until root.childCount) count += countViews(root.getChildAt(i), match)
+        return count
+    }
+
     @Test
     fun settingsScreenBuildsWithoutCrashing() {
         val activity = build(PipSettingsActivity::class.java)
@@ -79,6 +95,11 @@ class ScreensRenderTest {
             "Remove offline recognition download button is missing from settings",
             "Remove offline recognition download" in labels
         )
+        // Volume controls: both sliders must be real rows, not just remembered handles.
+        val texts = allTexts(activity.window.decorView)
+        assertTrue("toy volume slider is missing", texts.any { it.startsWith("Toy sound volume: ") })
+        assertTrue("voice volume slider is missing", texts.any { it.startsWith("Pip’s voice volume: ") })
+        assertTrue("expected two volume sliders", countViews(activity.window.decorView) { it is SeekBar } >= 2)
     }
 
     @Test

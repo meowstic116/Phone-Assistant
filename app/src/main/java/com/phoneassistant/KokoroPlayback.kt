@@ -57,15 +57,20 @@ internal class KokoroPlayback private constructor(
     }
 
     companion object {
-        fun create(pcm: KokoroPcm, main: Handler, attributes: AudioAttributes, done: (Boolean) -> Unit): KokoroPlayback? = runCatching {
+        fun create(pcm: KokoroPcm, main: Handler, attributes: AudioAttributes, volume: Float,
+                   done: (Boolean) -> Unit): KokoroPlayback? = runCatching {
             val format = AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                 .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setSampleRate(pcm.sampleRate).build()
             val min = AudioTrack.getMinBufferSize(pcm.sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             check(min > 0)
             val track = AudioTrack.Builder().setAudioAttributes(attributes).setAudioFormat(format)
                 .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(maxOf(min, (pcm.sampleRate / 4) * 2)).build()
-            if (track.state == AudioTrack.STATE_INITIALIZED) KokoroPlayback(pcm, main, track, done)
-            else { track.release(); null }
+            if (track.state == AudioTrack.STATE_INITIALIZED) {
+                // Pip's voice volume rides on the track, so the phone's media volume still
+                // applies on top of it exactly as before.
+                track.setVolume(volume.coerceIn(0f, 1f))
+                KokoroPlayback(pcm, main, track, done)
+            } else { track.release(); null }
         }.getOrNull()
     }
 }
