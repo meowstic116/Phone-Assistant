@@ -35,7 +35,7 @@ jobs:
             echo '```' >> "$GITHUB_STEP_SUMMARY"
             tail -60 "$RUNNER_TEMP/step.log" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            echo "::error title=$1::$(grep -F -A6 'What went wrong' "$RUNNER_TEMP/step.log" | tail -8 | tr '\n' '|' | cut -c1-2000)"
+            echo "::error title=$1::$(grep -E '^e: |error: |What went wrong' -A2 "$RUNNER_TEMP/step.log" | grep -E '^e: |error: ' | head -8 | tr '\n' '|' | cut -c1-2000)"
             exit 1
           }
           ./gradlew --version 2>&1 | tee "$RUNNER_TEMP/step.log" || fail "Gradle wrapper"
@@ -44,12 +44,12 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew :app:lint --no-daemon 2>&1 | tee "$RUNNER_TEMP/step.log" \
-            || { echo "::error title=Lint::$(grep -F -A6 'What went wrong' "$RUNNER_TEMP/step.log" | tail -8 | tr '\n' '|' | cut -c1-2000)"; exit 1; }
+            || { echo "::error title=Lint::$(grep -E '^e: |error: ' "$RUNNER_TEMP/step.log" | head -8 | tr '\n' '|' | cut -c1-2000)"; exit 1; }
       - name: Unit tests (screen builds under Robolectric)
         run: |
           set -euo pipefail
           ./gradlew :app:testDebugUnitTest --no-daemon 2>&1 | tee "$RUNNER_TEMP/step.log" \
-            || { echo "::error title=Unit tests::$(grep -F -A6 'What went wrong' "$RUNNER_TEMP/step.log" | tail -8 | tr '\n' '|' | cut -c1-2000)"; echo "## Unit tests failed" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; tail -80 "$RUNNER_TEMP/step.log" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+            || { echo "::error title=Unit tests::$(grep -E '^e: |error: |FAILED' "$RUNNER_TEMP/step.log" | head -8 | tr '\n' '|' | cut -c1-2000)"; echo "## Unit tests failed" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; tail -80 "$RUNNER_TEMP/step.log" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; exit 1; }
       - name: Run host regression checks
         run: |
           set -euo pipefail
