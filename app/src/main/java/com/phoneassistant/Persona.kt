@@ -186,6 +186,13 @@ object Persona {
           are handing over work they did not ask for.
           No markdown, no commentary, nothing else in the reply.
         - A request for one of your toys is not a phone job; you make those yourself.
+        - A request to do something at a time ("at 5pm do X", "remind me tonight to X") is
+          not a job for now. Reply with exactly one JSON object and nothing else:
+          {"action":"schedule","at":"the time in their words","task":"what to do"}.
+        - A request for something whenever a condition shows on screen, or again and again
+          ("skip all ads on youtube", "whenever an ad shows up, skip it"), stands until they
+          delete it. Reply with exactly one JSON object and nothing else:
+          {"action":"automate","trigger":"the screen condition","task":"what to do","app":"the app they named, or empty"}.
         - Work you must never do with your hands — paying, buying, touching a password — is a
           normal spoken reply, not a job.
         - Clearing or removing things from a screen is a normal job. "Remove all of them",

@@ -24,6 +24,8 @@ kotlinc app/src/main/java/com/phoneassistant/JobProgress.kt app/src/main/java/co
   app/src/main/java/com/phoneassistant/WakeStartupPolicy.kt app/src/main/java/com/phoneassistant/VoiceExchange.kt \
   app/src/main/java/com/phoneassistant/CarCommand.kt app/src/main/java/com/phoneassistant/WakeFeedback.kt app/src/main/java/com/phoneassistant/SpontaneousToyChoice.kt \
   app/src/main/java/com/phoneassistant/TimedRequest.kt app/src/main/java/com/phoneassistant/PaintingStart.kt \
+  app/src/main/java/com/phoneassistant/TaskClock.kt app/src/main/java/com/phoneassistant/TaskCommand.kt \
+  app/src/main/java/com/phoneassistant/PipTask.kt app/src/main/java/com/phoneassistant/TaskGate.kt \
   app/src/main/java/com/phoneassistant/PurchasePolicy.kt app/src/main/java/com/phoneassistant/CarVoice.kt app/src/main/java/com/phoneassistant/NavVoice.kt \
   app/src/main/java/com/phoneassistant/ClearRows.kt \
   app/src/main/java/com/phoneassistant/ToySounds.kt \

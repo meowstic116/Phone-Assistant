@@ -1271,6 +1271,72 @@ fun main() {
     check(wakePhrase.accept("could you pep turn the music down", 80_400) == "could you turn the music down")
     check(wakePhrase.accept("some pep in my step", 80_500) == null) // A real word, not his name.
     check(wakePhrase.accept("P-I-P, pause Spotify", 80_600) == "pause Spotify")
+
+    // ---- automatic and scheduled tasks ----
+    fun atLocal(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =
+        java.util.Calendar.getInstance().apply {
+            set(year, month - 1, day, hour, minute, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    val now = atLocal(2026, 11, 23, 10, 0) // A Monday, ten in the morning.
+    check(TaskClock.parse("at 5pm", now) == atLocal(2026, 11, 23, 17, 0))
+    check(TaskClock.parse("at 5", now) == atLocal(2026, 11, 23, 17, 0))
+    check(TaskClock.parse("at 9am", now) == atLocal(2026, 11, 24, 9, 0)) // Gone today means tomorrow.
+    check(TaskClock.parse("at 17:30", now) == atLocal(2026, 11, 23, 17, 30))
+    check(TaskClock.parse("at noon", now) == atLocal(2026, 11, 23, 12, 0))
+    check(TaskClock.parse("at midnight", now) == atLocal(2026, 11, 24, 0, 0))
+    check(TaskClock.parse("5pm", now) == atLocal(2026, 11, 23, 17, 0)) // The brain's bare clock words.
+    check(TaskClock.parse("tomorrow at 9am", now) == atLocal(2026, 11, 24, 9, 0))
+    check(TaskClock.parse("tonight at 8", now) == atLocal(2026, 11, 23, 20, 0))
+    check(TaskClock.parse("in 20 minutes", now) == now + 20 * 60 * 1000)
+    check(TaskClock.parse("on friday at 8pm", now) == atLocal(2026, 11, 27, 20, 0))
+    check(TaskClock.parse("at 8pm", atLocal(2026, 11, 23, 21, 0)) == atLocal(2026, 11, 24, 20, 0))
+    check(TaskClock.parse("no time in these words", now) == null)
+    check(TaskClock.parse("buy 3 apples now", now) == null) // A number alone is not a time.
+
+    check(TaskCommand.localRequest("Hey Pip, remind me at 5pm to stretch my back") ==
+        TaskCommand.Request.Schedule("at 5pm", "stretch my back"))
+    check(TaskCommand.localRequest("at 5pm check the oven") ==
+        TaskCommand.Request.Schedule("at 5pm", "check the oven"))
+    check(TaskCommand.localRequest("check the oven at 5pm") ==
+        TaskCommand.Request.Schedule("at 5pm", "check the oven"))
+    check(TaskCommand.localRequest("remind me in 20 minutes to take out the cake") ==
+        TaskCommand.Request.Schedule("in 20 minutes", "take out the cake"))
+    check(TaskCommand.localRequest("whenever an ad shows up, skip it") ==
+        TaskCommand.Request.Automate("an ad shows up", "skip it", ""))
+    check(TaskCommand.localRequest("when the kettle boils, do turn it off") ==
+        TaskCommand.Request.Automate("the kettle boils", "turn it off", ""))
+    check(TaskCommand.localRequest("every time an ad plays, click the skip button") ==
+        TaskCommand.Request.Automate("an ad plays", "click the skip button", ""))
+    check(TaskCommand.localRequest("skip all ads on youtube") == null) // The brain's shape to fill in.
+    check(TaskCommand.localRequest("tell me a joke") == null)
+
+    check(TaskCommand.fromReply("""{"action":"schedule","at":"5pm","task":"stretch my back"}""") ==
+        TaskCommand.Request.Schedule("5pm", "stretch my back"))
+    check(TaskCommand.fromReply("""{"action":"automate","trigger":"an ad is showing","task":"click the skip button","app":"youtube"}""") ==
+        TaskCommand.Request.Automate("an ad is showing", "click the skip button", "youtube"))
+    check(TaskCommand.fromReply("""{"action":"delegate","task":"open Spotify"}""") == null)
+    check(TaskCommand.fromReply("sounds good") == null)
+
+    val one = PipTask("t1", PipTask.Kind.SCHEDULED, "stretch", "", "", now + 1000, now)
+    check(PipTask.decode(one.encode()) == one)
+    check(PipTask.decode("junk line without tabs") == null)
+    val scheduled = PipTask.from(TaskCommand.Request.Schedule("in 10 minutes", "stretch"), now, 3)
+    check(scheduled != null && scheduled.kind == PipTask.Kind.SCHEDULED &&
+        scheduled.fireAt == now + 10 * 60 * 1000 && !scheduled.announced)
+    check(PipTask.from(TaskCommand.Request.Schedule("at 5pm", ""), now, 3) == null)
+    val automatic = PipTask.from(TaskCommand.Request.Automate("an ad shows", "skip it", "youtube"), now, 4)
+    check(automatic != null && automatic.kind == PipTask.Kind.AUTOMATIC &&
+        automatic.trigger == "an ad shows" && automatic.fireAt == 0L)
+    check(PipTask.from(TaskCommand.Request.Automate("", "skip it", ""), now, 4) == null)
+
+    check(TaskGate.mayRunScheduled(interactive = true, unlocked = true, atHome = true, agentBusy = false))
+    check(!TaskGate.mayRunScheduled(interactive = true, unlocked = true, atHome = false, agentBusy = false))
+    check(!TaskGate.mayRunScheduled(interactive = true, unlocked = false, atHome = true, agentBusy = false))
+    check(!TaskGate.mayRunScheduled(interactive = true, unlocked = true, atHome = true, agentBusy = true))
+    check(TaskGate.mayRunAutomatic(interactive = true, unlocked = true, agentBusy = false))
+    check(!TaskGate.mayRunAutomatic(interactive = true, unlocked = true, agentBusy = true))
+
     val captureRecovery = WakeCaptureRecovery()
     check(!captureRecovery.stalled(3999, lastPcmAt = 0) && captureRecovery.stalled(4000, lastPcmAt = 0))
     check(captureRecovery.tryRestart(4000) && captureRecovery.tryRestart(8000))

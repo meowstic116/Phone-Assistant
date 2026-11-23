@@ -62,6 +62,15 @@
             android:text="Chat history"
             android:textColor="@color/text" />
 
+        <Button
+            android:id="@+id/tasksButton"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/surfaceAlt"
+            android:text="@string/tasks_menu"
+            android:textColor="@color/text" />
+
         <TextView
             android:id="@+id/crashPanel"
             android:layout_width="match_parent"
