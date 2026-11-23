@@ -618,7 +618,7 @@ class OverlayService : Service(), PropHost {
     )
 
     /** The floating diagnostics panel repaints from here; its windows live in OverlayServiceHud.kt. */
-    private val hudTicker = object : Runnable {
+    internal val hudTicker = object : Runnable {
         override fun run() {
             if (hud == null) return
             renderHud()
