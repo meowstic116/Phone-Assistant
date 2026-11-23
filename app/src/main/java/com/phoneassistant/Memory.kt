@@ -4,28 +4,27 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Conversation history, kept on the device and trimmed to a rolling window. */
+/**
+ * Conversation history, kept on the device and trimmed to a rolling window. The window
+ * rules live in [ChatWindow], where the host tests can compile them.
+ */
 object Memory {
-
-    data class Msg(val role: String, val content: String)
 
     private const val PREFS = "memory"
     private const val KEY = "history"
-    private const val MAX_MESSAGES = 24
-    internal const val MAX_MESSAGE_CHARS = 4096
 
-    private fun bounded(content: String) =
-        if (content.length <= MAX_MESSAGE_CHARS) content else content.take(MAX_MESSAGE_CHARS).trimEnd { it.isHighSurrogate() }
+    /** Kept here so existing callers keep their single source for the limit. */
+    internal const val MAX_MESSAGE_CHARS = ChatWindow.MAX_MESSAGE_CHARS
 
     fun history(ctx: Context): List<Msg> {
         val raw = prefs(ctx).getString(KEY, "[]") ?: "[]"
         return try {
             val array = JSONArray(raw)
-            (maxOf(0, array.length() - MAX_MESSAGES) until array.length()).mapNotNull { index ->
+            (maxOf(0, array.length() - ChatWindow.MAX_MESSAGES) until array.length()).mapNotNull { index ->
                 val item = array.optJSONObject(index) ?: return@mapNotNull null
                 val role = item.opt("role") as? String ?: return@mapNotNull null
                 val content = item.opt("content") as? String ?: return@mapNotNull null
-                if (role == "user" || role == "assistant") Msg(role, bounded(content)) else null
+                if (role == "user" || role == "assistant") Msg(role, ChatWindow.bounded(content)) else null
             }
         } catch (_: org.json.JSONException) {
             emptyList()
@@ -33,16 +32,14 @@ object Memory {
     }
 
     /** Sending the current text must not depend on a successful local history write. */
-    internal fun forReply(history: List<Msg>, current: String): List<Msg> {
-        val latest = Msg("user", bounded(current))
-        return if (history.lastOrNull() == latest) history else history.takeLast(MAX_MESSAGES - 1) + latest
-    }
+    internal fun forReply(history: List<Msg>, current: String): List<Msg> =
+        ChatWindow.forReply(history, current)
 
     @Synchronized
     fun append(ctx: Context, role: String, content: String) {
         val messages = history(ctx).toMutableList()
-        messages.add(Msg(role, bounded(content)))
-        while (messages.size > MAX_MESSAGES) messages.removeAt(0)
+        messages.add(Msg(role, ChatWindow.bounded(content)))
+        while (messages.size > ChatWindow.MAX_MESSAGES) messages.removeAt(0)
 
         val array = JSONArray()
         messages.forEach {

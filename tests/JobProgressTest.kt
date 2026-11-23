@@ -1455,5 +1455,37 @@ fun main() {
     check(ScreenLock.requested("lock it up", afterLockRequest = true) == ScreenLock.Match.REFERRED)
     // Neither label ever quotes the user back into diagnostics.
     check(ScreenLock.label(ScreenLock.Match.NAMED) == "lock the screen")
+
+    // The rolling chat window: how long a message may be and which turns are sent. The
+    // rules live in ChatWindow so this harness can compile them without Android.
+    check(ChatWindow.bounded("hello") == "hello")
+    check(ChatWindow.bounded("a".repeat(ChatWindow.MAX_MESSAGE_CHARS)).length == ChatWindow.MAX_MESSAGE_CHARS)
+    val over = "a".repeat(ChatWindow.MAX_MESSAGE_CHARS + 5)
+    check(ChatWindow.bounded(over).length == ChatWindow.MAX_MESSAGE_CHARS)
+    // A message cut through a surrogate pair must not end in a lone high surrogate.
+    val cut = "a".repeat(ChatWindow.MAX_MESSAGE_CHARS - 1) + "\uD83D\uDE00"
+    val trimmed = ChatWindow.bounded(cut)
+    check(trimmed.length == ChatWindow.MAX_MESSAGE_CHARS - 1 && !trimmed.last().isHighSurrogate())
+    val userTurn = Msg("user", "hi")
+    val window = listOf(Msg("user", "a"), Msg("assistant", "b"), userTurn)
+    check(ChatWindow.forReply(window, "hi") == window) // asking twice must not duplicate the turn
+    check(ChatWindow.forReply(window.take(2), "hi") == window)
+    check(ChatWindow.forReply(window, "next").takeLast(2) == listOf(userTurn, Msg("user", "next")))
+    check(ChatWindow.forReply(emptyList(), "next") == listOf(Msg("user", "next")))
+    val long = List(ChatWindow.MAX_MESSAGES + 3) { Msg("user", "$it") }
+    check(ChatWindow.forReply(long, "end").size == ChatWindow.MAX_MESSAGES)
+    check(ChatWindow.forReply(emptyList(), over).single().content.length == ChatWindow.MAX_MESSAGE_CHARS)
+
+    // Saved logins match by host, however the site was entered (Vault.host delegates here).
+    check(siteHost("https://www.Example.com:8080/login?x=1#frag") == "example.com")
+    check(siteHost("example.com") == "example.com")
+    check(siteHost("example.com.") == "example.com")
+    check(siteHost("  WWW.Example.co.uk  ") == "example.co.uk")
+    check(siteHost("www.example.com") == "example.com")
+    check(siteHost("sub.example.com") == "sub.example.com")
+    check(siteHost("example.com/path") == "example.com")
+    check(siteHost("http://example.com?query=1") == "example.com")
+    check(siteHost("HTTPS://WWW.Example.com") == "example.com")
+    check(siteHost("") == "")
     println("Job progress tests passed.")
 }

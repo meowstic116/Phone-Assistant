@@ -56,20 +56,8 @@ object Vault {
         return write(ctx, current.filterNot { host(it.site) == host(site) })
     }
 
-    /**
-     * The site as a host: lower case, no scheme, no "www.", no port, no path. It is only used
-     * to match one entry with another, so a login saved from a link the user pasted still
-     * answers when the model names the bare domain.
-     */
-    fun host(raw: String): String {
-        var text = raw.trim().lowercase()
-        text = text.substringAfter("://", text)
-        text = text.substringBefore('/')
-        text = text.substringBefore('?')
-        text = text.substringBefore('#')
-        text = text.substringBefore(':')
-        return text.removePrefix("www.").trim('.')
-    }
+    /** The matching form of a site; see [siteHost] for the exact rules. */
+    fun host(raw: String): String = siteHost(raw)
 
     // ------------------------------------------------------------------- storage
 
