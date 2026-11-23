@@ -212,7 +212,7 @@ class OverlayService : Service(), PropHost {
         }
 
         /** How often the floating readout repaints. Fast enough to watch a keyboard arrive. */
-        private const val HUD_REFRESH_MS = 250L
+        internal const val HUD_REFRESH_MS = 250L
 
         /** How often the cancel chip checks that there is still a job to cancel. */
         private const val JOB_REFRESH_MS = 300L
@@ -296,7 +296,7 @@ class OverlayService : Service(), PropHost {
         val drawsPerSecond: Int
     )
 
-    private lateinit var windowManager: WindowManager
+    internal lateinit var windowManager: WindowManager
     private lateinit var petParams: WindowManager.LayoutParams
     private var pet: PetView? = null
     private var petHost: PetView? = null
@@ -317,8 +317,8 @@ class OverlayService : Service(), PropHost {
     private var inputParams: WindowManager.LayoutParams? = null
 
     /** The floating diagnostics readout, while it has been asked for. */
-    private var hud: DiagHud? = null
-    private var hudParams: WindowManager.LayoutParams? = null
+    internal var hud: DiagHud? = null
+    internal var hudParams: WindowManager.LayoutParams? = null
 
     /** The cancel chip, while a phone job is running. */
     private var jobBar: JobBar? = null
@@ -339,12 +339,12 @@ class OverlayService : Service(), PropHost {
     /** The same for Pip himself: he is a touchable window too, and stands in a corner. */
 
     /** True for the moment a step is pressing, so anything created meanwhile starts aside. */
-    private var overlayDucked = false
+    internal var overlayDucked = false
 
     /** The same for the floating diagnostics panel and for the toys. */
 
     /** True while the diagnostics panel is being dragged: it keeps its touch then. */
-    private var hudHeld = false
+    internal var hudHeld = false
 
     /** True while a finger is on the chip, so the ticker does not drag it back mid-drag. */
     private var chipDragging = false
@@ -355,10 +355,10 @@ class OverlayService : Service(), PropHost {
     private var chipTop = 0
 
     /** Where the panel was when the finger went down, so a drag follows it exactly. */
-    private var hudDownX = 0f
-    private var hudDownY = 0f
-    private var hudLeft = 0
-    private var hudTop = 0
+    internal var hudDownX = 0f
+    internal var hudDownY = 0f
+    internal var hudLeft = 0
+    internal var hudTop = 0
 
     /** Measured height of the keyboard in pixels, 0 until it has been seen. */
     private var keyboardHeightPx = 0
@@ -377,7 +377,7 @@ class OverlayService : Service(), PropHost {
     /** Bumped by every mood, so only the newest one's timer puts his face back to neutral. */
     private var moodSeq = 0
 
-    private val handler = Handler(Looper.getMainLooper())
+    internal val handler = Handler(Looper.getMainLooper())
     private val rnd = Random(System.currentTimeMillis())
 
     /**
@@ -428,10 +428,10 @@ class OverlayService : Service(), PropHost {
 
 
 
-    private var screenW = 1
-    private var screenH = 1
-    private var topInset = 0
-    private var bottomInset = 0
+    internal var screenW = 1
+    internal var screenH = 1
+    internal var topInset = 0
+    internal var bottomInset = 0
     private var petW = 1
     private var petH = 1
     private var speed = 55f
@@ -592,7 +592,7 @@ class OverlayService : Service(), PropHost {
     private fun imeHeight(): Int = ImeWatch.heightPx
 
     /** Read by the diagnostics screen; every number here is one the app actually uses. */
-    private fun status(): Status = Status(
+    internal fun status(): Status = Status(
         imeReportedPx = imeHeight(),
         keyboardUp = keyboardUp,
         rememberedPx = keyboardHeightPx,
@@ -617,104 +617,12 @@ class OverlayService : Service(), PropHost {
         drawsPerSecond = pet?.drawsPerSecond ?: 0
     )
 
-    // ------------------------------------------------------- floating diagnostics
-
-    /**
-     * Small, live, and over everything. The Diagnostics screen is an activity, so it can only
-     * be read while it is in front — and the keyboard it is describing closes as soon as you
-     * leave the app that owns it. This panel is a window of the overlay itself, so it keeps
-     * reading while you type somewhere else.
-     */
-    private fun showHud() {
-        if (hud != null) return
-        val view = DiagHud(this).apply { onClose = { hideHud() } }
-        val width = dpInt(190f)
-        val params = WindowManager.LayoutParams(
-            width,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            // Touchable so it can be dragged, but never focusable: it must not take the
-            // keyboard away from the app whose keyboard it is measuring. A panel opened
-            // while a step is pressing starts out of the way like everything else.
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                (if (overlayDucked) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0),
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            // Top right, where it covers the least of a keyboard in progress.
-            x = (screenW - width - dpInt(10f)).coerceAtLeast(0)
-            y = topInset + dpInt(10f)
-        }
-        view.setOnTouchListener(hudTouch)
-        if (!runCatching { windowManager.addView(view, params) }.isSuccess) return
-        hud = view
-        hudParams = params
-        if (overlayDucked) setHudDucked(true)
-        hudHeld = false
-        // Painted straight away, so it never appears hollow for a quarter of a second.
-        renderHud()
-        handler.postDelayed(hudTicker, HUD_REFRESH_MS)
-    }
-
-    private fun hideHud() {
-        handler.removeCallbacks(hudTicker)
-        hud?.let { view -> runCatching { windowManager.removeView(view) } }
-        hud = null
-        hudParams = null
-        // The next panel is a new window with new params, so it starts unducked.
-        hudHeld = false
-    }
-
-    private val hudTicker = object : Runnable {
+    /** The floating diagnostics panel repaints from here; its windows live in OverlayServiceHud.kt. */
+    internal val hudTicker = object : Runnable {
         override fun run() {
             if (hud == null) return
             renderHud()
             handler.postDelayed(this, HUD_REFRESH_MS)
-        }
-    }
-
-    private fun renderHud() {
-        hud?.render(status(), ImeWatch.enabled(this), ImeWatch.lastSeenPx, ImeWatch.lastSeenAt)
-    }
-
-    /**
-     * Dragging is measured from where the finger went down rather than by adding each move, so
-     * a dropped frame cannot make the panel drift away from the finger that is holding it. A
-     * tap that goes nowhere is not a click: the only clickable part is the × in the header.
-     */
-    private val hudTouch = View.OnTouchListener { _, event ->
-        val params = hudParams ?: return@OnTouchListener false
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                hudDownX = event.rawX
-                hudDownY = event.rawY
-                hudLeft = params.x
-                hudTop = params.y
-                hudHeld = true
-                true
-            }
-
-            MotionEvent.ACTION_MOVE -> {
-                if (overlayDucked) return@OnTouchListener true
-                // The window has no height until it is laid out; its real one is only known
-                // after the first frame.
-                val height = hud?.height?.takeIf { it > 0 } ?: params.height
-                params.x = (hudLeft + (event.rawX - hudDownX)).toInt()
-                    .coerceIn(0, (screenW - params.width).coerceAtLeast(0))
-                params.y = (hudTop + (event.rawY - hudDownY)).toInt()
-                    .coerceIn(topInset, (screenH - height - bottomInset).coerceAtLeast(topInset))
-                hud?.let { view -> runCatching { windowManager.updateViewLayout(view, params) } }
-                true
-            }
-
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                hudHeld = false
-                true
-            }
-
-            else -> false
         }
     }
 
@@ -1742,7 +1650,7 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun dp(value: Float) = value * resources.displayMetrics.density
-    private fun dpInt(value: Float) = dp(value).toInt()
+    internal fun dpInt(value: Float) = dp(value).toInt()
 
     // -------------------------------------------------------------------- touch
 
@@ -2976,7 +2884,7 @@ class OverlayService : Service(), PropHost {
         return true
     }
 
-    private fun setHudDucked(ducked: Boolean): Boolean {
+    internal fun setHudDucked(ducked: Boolean): Boolean {
         val view = hud ?: return true
         val params = hudParams ?: return false
         if (ducked && hudHeld) return false

@@ -75,8 +75,8 @@ android {
         applicationId = "com.phoneassistant.pip"
         minSdk = 26
         targetSdk = 34
-        versionCode = 204
-        versionName = "0.204"
+        versionCode = 205
+        versionName = "0.205"
     }
 
     buildTypes {
@@ -86,7 +86,10 @@ android {
             if (pipDevUnsigned) signingConfig = null
         }
         release {
-            isMinifyEnabled = false
+            // Shrink the tester APK, but keep every class and method name: stack traces in
+            // Diagnostics crash notes must stay readable, and the JNI bindings resolve
+            // their methods by name (see proguard-rules.pro).
+            isMinifyEnabled = true
             // Assemble unsigned. Sign locally with the owner's private key (see DISTRIBUTION.md).
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -103,8 +106,16 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
     implementation("org.apache.ant:ant:1.10.15") { isTransitive = false }
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.11.1")
 }

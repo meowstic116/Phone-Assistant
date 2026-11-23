@@ -1,6 +1,7 @@
 package com.phoneassistant
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
@@ -23,6 +24,9 @@ import android.os.SystemClock
 internal object CarAudio {
     data class Status(val bluetooth: Boolean, val connected: Boolean, val sco: Boolean, val device: String?)
 
+    /** Bluetooth reads are wrapped in runCatching: SecurityException and the API 30+ getAlias
+     *  NoSuchMethodError are handled fall-back by design, which lint cannot see. */
+    @SuppressLint("MissingPermission", "NewApi")
     fun status(ctx: Context): Status {
         if (!ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)) {
             return Status(false, false, false, null)

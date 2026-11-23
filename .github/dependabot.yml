@@ -1,0 +1,13 @@
+# Keep the build's dependencies and actions from silently rotting. The host-test Kotlin
+# compiler pin in checks.yml is covered by tests/check-tool-versions.sh instead, because it
+# is installed by npm inside a workflow step where Dependabot cannot see it.
+version: 2
+updates:
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

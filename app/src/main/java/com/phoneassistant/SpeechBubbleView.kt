@@ -1,6 +1,7 @@
 package com.phoneassistant
 
 import android.content.Context
+import android.annotation.SuppressLint
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -92,6 +93,8 @@ internal class SpeechBubbleView(context: Context) : View(context) {
         invalidate()
     }
 
+    /** Layout.BREAK_STRATEGY_SIMPLE is the same constant value as LineBreaker's. */
+    @SuppressLint("WrongConstant")
     private fun layout(value: CharSequence) = StaticLayout.Builder.obtain(value, 0, value.length, pen, bodyWidth)
         .setLineSpacing(dp(2f).toFloat(), 1f).setMaxLines(lines).setEllipsize(TextUtils.TruncateAt.END)
         .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE).build()

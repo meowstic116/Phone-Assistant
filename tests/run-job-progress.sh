@@ -28,6 +28,8 @@ kotlinc app/src/main/java/com/phoneassistant/JobProgress.kt app/src/main/java/co
   app/src/main/java/com/phoneassistant/ClearRows.kt \
   app/src/main/java/com/phoneassistant/ToySounds.kt \
   app/src/main/java/com/phoneassistant/ScreenLock.kt \
+  app/src/main/java/com/phoneassistant/ChatWindow.kt \
+  app/src/main/java/com/phoneassistant/SiteHost.kt \
   tests/JobProgressTest.kt \
   -include-runtime -d "$tmp/job-progress.jar"
 java -jar "$tmp/job-progress.jar"

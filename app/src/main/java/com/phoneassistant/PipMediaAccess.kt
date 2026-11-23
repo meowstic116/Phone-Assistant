@@ -3,6 +3,7 @@ package com.phoneassistant
 import android.app.KeyguardManager
 import android.app.Notification
 import android.app.Person
+import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
 import android.media.MediaMetadata
@@ -77,6 +78,8 @@ class PipMediaAccess : NotificationListenerService() {
         }
 
         @Suppress("DEPRECATION") // Legacy MessagingStyle uses sender name instead of Person.
+        /** ownPerson is only non-null on API 28+, so Person#getName is never reached below it. */
+        @SuppressLint("NewApi")
         private fun previews(entry: StatusBarNotification): List<MessageNotifications.Preview> {
             val notification = entry.notification
             if (notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return emptyList()

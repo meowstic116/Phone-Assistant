@@ -17,8 +17,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Read-only: lets Pip tell you when Android is blocking Maps' location, and offer
-         the Settings toggle. Pip never requests the permission and never tracks you. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+         the Settings toggle. Pip never requests the permission and never tracks you,
+         so the Android 12 dual-request rule for apps that DO request it doesn't apply. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        tools:ignore="CoarseFineLocation" />
 
     <!-- Lets Pip ask Android to use a connected car's microphone while listening.
          Requested at runtime on Android 12+; without it the phone mic is used. -->
