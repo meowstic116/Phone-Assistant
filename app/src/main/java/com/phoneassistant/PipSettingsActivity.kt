@@ -203,7 +203,7 @@ class PipSettingsActivity : Activity() {
         voiceSummary = text("")
         plainButton("Choose Pip’s voice") { configureVoice() }
         kokoroStatus = text("")
-        kokoroAction = button("Download Kokoro") {
+        kokoroAction = plainButton("Download Kokoro") {
             if (KokoroVoice.hasDownload(this)) {
                 AlertDialog.Builder(this).setTitle("Remove Kokoro?")
                     .setMessage("You can download it again later to hear Pip offline.")
@@ -237,9 +237,9 @@ class PipSettingsActivity : Activity() {
                 Toast.makeText(this, it, Toast.LENGTH_LONG).show()
             }
         }.isEnabled = true
-        wakeAction = button("") { changeWakeListening() }
+        wakeAction = plainButton("") { changeWakeListening() }
         wakeStatus = text("")
-        wakeSpeak = button("Speak now (no wake word)") {
+        wakeSpeak = plainButton("Speak now (no wake word)") {
             if (!WakeListenService.speakNow()) {
                 Toast.makeText(this, "Wait until Pip is ready to listen.", Toast.LENGTH_SHORT).show()
             }
@@ -777,9 +777,11 @@ class PipSettingsActivity : Activity() {
         setOnClickListener { click() }
     }
 
-    /** A button with no information button, added straight to the screen. */
-    private fun plainButton(label: String, click: () -> Unit) {
-        content.addView(button(label, click), -1, -2)
+    /** Attaches a button with no explanation, and returns it so callers can update its label. */
+    private fun plainButton(label: String, click: () -> Unit): Button {
+        val built = button(label, click)
+        content.addView(built, -1, -2)
+        return built
     }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
