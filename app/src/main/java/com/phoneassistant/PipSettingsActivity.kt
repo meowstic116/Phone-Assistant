@@ -39,6 +39,7 @@ class PipSettingsActivity : Activity() {
     private lateinit var wakeAction: Button
     private lateinit var wakeStatus: TextView
     private lateinit var wakeSpeak: Button
+    private lateinit var wakeRemoveAction: Button
     private val kokoroChanged: () -> Unit = { refreshVoiceSummary() }
     private val wakeModelChanged: () -> Unit = { refreshWakeAction() }
     private var refreshApiIfChanged: () -> Unit = {}
@@ -244,6 +245,7 @@ class PipSettingsActivity : Activity() {
                 Toast.makeText(this, "Wait until Pip is ready to listen.", Toast.LENGTH_SHORT).show()
             }
         }
+        wakeRemoveAction = plainButton("Remove offline recognition download") { confirmRemoveWakeModel() }
         refreshWakeAction()
 
         step("Hands-free driving")
@@ -318,6 +320,9 @@ class PipSettingsActivity : Activity() {
             !WakeModel.ready(this) -> "Download offline recognition (57 MB)"
             else -> "Start listening for Pip"
         }
+        // The download can be undone the same way Kokoro's can; the button exists only
+        // while there is something to remove.
+        wakeRemoveAction.visibility = if (WakeModel.ready(this) && !WakeModel.busy) View.VISIBLE else View.GONE
     }
 
     private fun changeWakeListening() {
@@ -357,6 +362,21 @@ class PipSettingsActivity : Activity() {
             return
         }
         if (!WakeListenService.start(this)) Toast.makeText(this, "Android couldn’t start listening. Try again with settings open.", Toast.LENGTH_LONG).show()
+    }
+
+    /** Removes the 57 MB recognition download after a confirmation, the way Kokoro's does. */
+    private fun confirmRemoveWakeModel() {
+        AlertDialog.Builder(this).setTitle("Remove offline recognition?")
+            .setMessage("Listening stops and the 57 MB download is deleted from this phone. " +
+                "You can download it again later.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Remove") { _, _ ->
+                WakeModel.remove(this) { success ->
+                    if (isFinishing || isDestroyed) return@remove
+                    Toast.makeText(this, if (success) "Offline recognition removed."
+                        else "Couldn’t remove every file. Try again.", Toast.LENGTH_LONG).show()
+                }
+            }.show()
     }
 
     private fun refreshVoiceSummary() {

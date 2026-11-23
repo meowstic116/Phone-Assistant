@@ -74,6 +74,11 @@ class ScreensRenderTest {
                     "Offline listening unavailable on this device")
             }
         )
+        // Built even when hidden (nothing to remove yet) — attached, so it cannot vanish.
+        assertTrue(
+            "Remove offline recognition download button is missing from settings",
+            "Remove offline recognition download" in labels
+        )
     }
 
     @Test
