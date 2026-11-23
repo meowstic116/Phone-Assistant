@@ -7,10 +7,14 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      PR_NUM: ${{ github.event.pull_request.number || 0 }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -44,12 +48,12 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew :app:lint --no-daemon 2>&1 | tee "$RUNNER_TEMP/step.log" \
-            || { echo "::error title=Lint::$(grep -E 'Error: |error: |^e: |Lint found' "$RUNNER_TEMP/step.log" | head -8 | tr '\n' '|' | cut -c1-2000)"; exit 1; }
+            || { echo "## Lint failed" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; tail -50 "$RUNNER_TEMP/step.log" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; echo "::error title=Lint::$(grep -E 'Error: |error: |^e: |Lint found|Exception|FAILED' "$RUNNER_TEMP/step.log" | head -6 | tr '\n' '|' | cut -c1-1800)"; { echo "### Lint failure log (auto)"; echo '```'; tail -45 "$RUNNER_TEMP/step.log"; echo '```'; } > "$RUNNER_TEMP/comment.md"; gh pr comment "$PR_NUM" --body-file "$RUNNER_TEMP/comment.md" || true; exit 1; }
       - name: Unit tests (screen builds under Robolectric)
         run: |
           set -euo pipefail
           ./gradlew :app:testDebugUnitTest --no-daemon 2>&1 | tee "$RUNNER_TEMP/step.log" \
-            || { echo "::error title=Unit tests::$(grep -E '^e: |error: |FAILED' "$RUNNER_TEMP/step.log" | head -8 | tr '\n' '|' | cut -c1-2000)"; echo "## Unit tests failed" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; tail -80 "$RUNNER_TEMP/step.log" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+            || { echo "## Unit tests failed" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; tail -80 "$RUNNER_TEMP/step.log" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; echo "::error title=Unit tests::$(grep -E '^e: |error: |FAILED|Exception' "$RUNNER_TEMP/step.log" | head -6 | tr '\n' '|' | cut -c1-1800)"; { echo "### Unit test failure log (auto)"; echo '```'; tail -45 "$RUNNER_TEMP/step.log"; echo '```'; } > "$RUNNER_TEMP/comment.md"; gh pr comment "$PR_NUM" --body-file "$RUNNER_TEMP/comment.md" || true; exit 1; }
       - name: Run host regression checks
         run: |
           set -euo pipefail
