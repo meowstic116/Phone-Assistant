@@ -32,9 +32,17 @@ internal object TaskClock {
     /** The words that make a time recurring, and which days it lands on. */
     private val repeatWord = Regex(
         """\b(every\s+day|daily|nightly|every\s+(?:morning|afternoon|evening|night)|""" +
-            """weekdays?|every\s+weekday|weekends?|every\s+weekend|""" +
+            """weekdays?|every\s+weekday|weekends?|every\s+weekend|every\s+week|""" +
             """every\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?|""" +
             """(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)s)\b""",
+        RegexOption.IGNORE_CASE)
+
+    /** A part of a day said around the time ("at 7 every friday morning"). */
+    private val partOfDay = Regex("""\b(?:morning|afternoon|evening|night)\b""", RegexOption.IGNORE_CASE)
+
+    /** The words that may sit between a time's own parts without being task words. */
+    private val bridge = Regex(
+        """\s*(?:on|every|each|morning|afternoon|evening|night)(?:\s+(?:on|every|each|morning|afternoon|evening|night))*\s*""",
         RegexOption.IGNORE_CASE)
 
     private val timeOfDay = Regex(
@@ -61,20 +69,32 @@ internal object TaskClock {
         if (inSpan != null && inSpan.range.first < time.range.first) return inSpan.range
         // A day or repeat word belongs to the time when it is up against it, in front
         // ("tomorrow at 9", "every day at 8") or behind ("at 8pm tomorrow", "at 8pm every
-        // day"). When both say something ("every friday"), the repeat word speaks for both.
-        val around = listOfNotNull(repeatWord.find(text), dayWord.find(text))
-            .filter { against(text, it.range, time.range) }
-            .minByOrNull { minOf(abs(it.range.first - time.range.first), abs(it.range.last - time.range.last)) }
-        return if (around == null) time.range
-        else minOf(around.range.first, time.range.first)..maxOf(around.range.last, time.range.last)
+        // day"), with only connective words between. When both say something ("every
+        // friday"), the repeat word speaks for both.
+        val repeat = repeatWord.find(text)?.takeIf { against(text, it.range, time.range) }
+        val day = dayWord.find(text)?.takeIf { against(text, it.range, time.range) }
+        val around = repeat ?: day
+        val first = minOf(around?.range?.first ?: time.range.first, time.range.first)
+        var last = maxOf(around?.range?.last ?: time.range.last, time.range.last)
+        // A part of the day just past the words ("at 7 every friday morning") says which
+        // seven o'clock; it belongs to the hour even when it trails.
+        while (true) {
+            val tail = partOfDay.find(text, last + 1) ?: break
+            if (!text.substring(last + 1, tail.range.first).isBlank()) break
+            last = tail.range.last
+        }
+        return first..last
     }
 
-    private fun abs(value: Int) = if (value < 0) -value else value
+    /** The repeat words of a sentence, wherever they sit. */
+    fun pattern(text: String): MatchResult? = repeatWord.find(text)
 
-    private fun against(text: String, a: IntRange, b: IntRange): Boolean =
-        if (a.last < b.first) text.substring(a.last + 1, b.first).isBlank()
-        else if (b.last < a.first) text.substring(b.last + 1, a.first).isBlank()
-        else false
+    private fun against(text: String, a: IntRange, b: IntRange): Boolean {
+        val mid = if (a.last < b.first) text.substring(a.last + 1, b.first)
+        else if (b.last < a.first) text.substring(b.last + 1, a.first)
+        else return false
+        return mid.isBlank() || bridge.matches(mid)
+    }
 
     /** The first wall-clock deadline and its pattern, or null for words with no usable time. */
     fun parse(text: String, now: Long): PipTask.When? = parseWords(text, now) ?:
@@ -116,11 +136,13 @@ internal object TaskClock {
         val repeat = repeatOf(span)
         if (repeat != null) {
             // A recurring time lands on its weekday when it names one, then repeats from
-            // the first occurrence that is still ahead.
+            // the first occurrence that is still ahead. "Every week" names none and takes
+            // whatever day the clock words sit on.
             if (repeat == PipTask.Repeat.WEEKLY) {
                 val target = weekdayTarget(span)
-                if (target < 0) return null
-                at.add(Calendar.DAY_OF_MONTH, -((at.get(Calendar.DAY_OF_WEEK) - target + 7) % 7))
+                if (target >= 0) {
+                    at.add(Calendar.DAY_OF_MONTH, -((at.get(Calendar.DAY_OF_WEEK) - target + 7) % 7))
+                }
             }
             return PipTask.When(next(at.timeInMillis, repeat, now), repeat)
         }
@@ -146,32 +168,22 @@ internal object TaskClock {
         return PipTask.When(at.timeInMillis, PipTask.Repeat.NONE)
     }
 
-    /** The next occurrence of a recurring time, strictly after [now]. */
+    /** The next occurrence of a recurring time: strictly after [now], and on its days. */
     fun next(fireAt: Long, repeat: PipTask.Repeat, now: Long): Long {
         if (repeat == PipTask.Repeat.NONE) return fireAt
         var at = fireAt
         val cal = Calendar.getInstance()
         // Steps are whole days or weeks, so wall-clock times survive daylight saving.
-        while (at <= now) {
+        while (true) {
             cal.timeInMillis = at
-            if (repeat == PipTask.Repeat.WEEKLY) {
-                cal.add(Calendar.DAY_OF_MONTH, 7)
-            } else {
-                cal.add(Calendar.DAY_OF_MONTH, 1)
-                if (repeat == PipTask.Repeat.WEEKDAYS) while (true) {
-                    val day = cal.get(Calendar.DAY_OF_WEEK)
-                    if (day != Calendar.SATURDAY && day != Calendar.SUNDAY) break
-                    cal.add(Calendar.DAY_OF_MONTH, 1)
-                }
-                if (repeat == PipTask.Repeat.WEEKENDS) while (true) {
-                    val day = cal.get(Calendar.DAY_OF_WEEK)
-                    if (day == Calendar.SATURDAY || day == Calendar.SUNDAY) break
-                    cal.add(Calendar.DAY_OF_MONTH, 1)
-                }
-            }
+            val day = cal.get(Calendar.DAY_OF_WEEK)
+            val offDay =
+                (repeat == PipTask.Repeat.WEEKDAYS && (day == Calendar.SATURDAY || day == Calendar.SUNDAY)) ||
+                (repeat == PipTask.Repeat.WEEKENDS && day != Calendar.SATURDAY && day != Calendar.SUNDAY)
+            if (at > now && !offDay) return at
+            cal.add(Calendar.DAY_OF_MONTH, if (repeat == PipTask.Repeat.WEEKLY) 7 else 1)
             at = cal.timeInMillis
         }
-        return at
     }
 
     private fun repeatOf(span: String): PipTask.Repeat? {
@@ -182,8 +194,8 @@ internal object TaskClock {
                 word.startsWith("every morning") || word.startsWith("every afternoon") ||
                 word.startsWith("every evening") || word.startsWith("every night") ->
                 PipTask.Repeat.DAILY
-            word.startsWith("weekday") -> PipTask.Repeat.WEEKDAYS
-            word.startsWith("weekend") -> PipTask.Repeat.WEEKENDS
+            word.startsWith("weekday") || word.endsWith("weekday") -> PipTask.Repeat.WEEKDAYS
+            word.startsWith("weekend") || word.endsWith("weekend") -> PipTask.Repeat.WEEKENDS
             else -> PipTask.Repeat.WEEKLY
         }
     }

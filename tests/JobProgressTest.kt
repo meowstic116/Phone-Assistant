@@ -1316,6 +1316,35 @@ fun main() {
         nightly.fireAt == atLocal(2026, 11, 23, 21, 0))
     check(TaskClock.parse("every day", now) == null) // A pattern with no clock time is nothing.
     check(TaskClock.parse("on friday at 8pm", now)?.repeat == PipTask.Repeat.NONE) // One Friday only.
+    // "Every weekday", "every weekend", and "every week" say their days differently.
+    val everyWeekday = TaskClock.parse("every weekday at 7am", now)
+    check(everyWeekday != null && everyWeekday.repeat == PipTask.Repeat.WEEKDAYS &&
+        everyWeekday.fireAt == atLocal(2026, 11, 24, 7, 0))
+    val everyWeekend = TaskClock.parse("every weekend at 10am", now)
+    check(everyWeekend != null && everyWeekend.repeat == PipTask.Repeat.WEEKENDS &&
+        everyWeekend.fireAt == atLocal(2026, 11, 28, 10, 0)) // The next Saturday.
+    val weeklyPlain = TaskClock.parse("every week at 8am", now)
+    check(weeklyPlain != null && weeklyPlain.repeat == PipTask.Repeat.WEEKLY &&
+        weeklyPlain.fireAt == atLocal(2026, 11, 30, 8, 0)) // Today's eight is gone; a week from it.
+    val weeklyLater = TaskClock.parse("every week at 8pm", now)
+    check(weeklyLater != null && weeklyLater.repeat == PipTask.Repeat.WEEKLY &&
+        weeklyLater.fireAt == atLocal(2026, 11, 23, 20, 0)) // Tonight is the first one.
+    // Part-of-day words steer the hour from either side of the clock words.
+    val fridayMorning = TaskClock.parse("every friday morning at 7", now)
+    check(fridayMorning != null && fridayMorning.repeat == PipTask.Repeat.WEEKLY &&
+        fridayMorning.fireAt == atLocal(2026, 11, 27, 7, 0)) // Morning means seven in the morning.
+    val trailingMorning = TaskClock.parse("at 7 every friday morning", now)
+    check(trailingMorning != null && trailingMorning.repeat == PipTask.Repeat.WEEKLY &&
+        trailingMorning.fireAt == atLocal(2026, 11, 27, 7, 0))
+    val tomorrowMorning = TaskClock.parse("tomorrow morning at 7", now)
+    check(tomorrowMorning != null && tomorrowMorning.repeat == PipTask.Repeat.NONE &&
+        tomorrowMorning.fireAt == atLocal(2026, 11, 24, 7, 0))
+    val onFridays = TaskClock.parse("at 8pm on fridays", now)
+    check(onFridays != null && onFridays.repeat == PipTask.Repeat.WEEKLY &&
+        onFridays.fireAt == atLocal(2026, 11, 27, 20, 0))
+    // A pattern's day off never fires on the wrong kind of day, even ahead of time.
+    check(TaskClock.next(atLocal(2026, 11, 28, 7, 0), PipTask.Repeat.WEEKDAYS, atLocal(2026, 11, 28, 6, 0)) ==
+        atLocal(2026, 11, 30, 7, 0)) // A Saturday seed walks to Monday.
     // The next occurrence after a run, whatever days were missed.
     check(TaskClock.next(atLocal(2026, 11, 24, 8, 0), PipTask.Repeat.DAILY, atLocal(2026, 11, 24, 8, 5)) ==
         atLocal(2026, 11, 25, 8, 0))
@@ -1342,6 +1371,12 @@ fun main() {
         TaskCommand.Request.Schedule("every day at 8am", "check the oven"))
     check(TaskCommand.localRequest("weekdays at 7am remind me to stretch") ==
         TaskCommand.Request.Schedule("weekdays at 7am", "stretch"))
+    check(TaskCommand.localRequest("every weekday at 7am remind me to stretch") ==
+        TaskCommand.Request.Schedule("every weekday at 7am", "stretch"))
+    check(TaskCommand.localRequest("every day check the oven at 8am") ==
+        TaskCommand.Request.Schedule("every day at 8am", "check the oven"))
+    check(TaskCommand.localRequest("every day, check the oven at 8am") ==
+        TaskCommand.Request.Schedule("every day at 8am", "check the oven"))
     check(TaskCommand.localRequest("remind me in 20 minutes to take out the cake") ==
         TaskCommand.Request.Schedule("in 20 minutes", "take out the cake"))
     check(TaskCommand.localRequest("whenever an ad shows up, skip it") ==

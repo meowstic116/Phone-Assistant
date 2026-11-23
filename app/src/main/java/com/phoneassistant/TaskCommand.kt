@@ -49,14 +49,24 @@ internal object TaskCommand {
 
     private fun schedule(said: String): Request? {
         val range = TaskClock.expression(said) ?: return null
+        val pattern = TaskClock.pattern(said)
+        val patternIn = pattern != null &&
+            pattern.range.first >= range.first && pattern.range.last <= range.last
         val before = said.substring(0, range.first).trim().trimEnd(',', ';')
         val after = said.substring(range.last + 1).trim().trimStart(',', ';').trim()
         // "at 5pm stretch" and "check the oven at 5pm" are both the whole request;
-        // "remind me at 5pm to stretch" puts the task after the time.
+        // "remind me at 5pm to stretch" puts the task after the time. A pattern with
+        // the task between it and the clock ("every day check the oven at 8am") is
+        // still part of the time's words, not of the task.
         var detail = if (after.isNotEmpty()) after else before
+        if (pattern != null && !patternIn) {
+            detail = detail.replaceFirst(pattern.value, "").trim().trimStart(',', ';').trim()
+        }
         detail = connectors.replace(detail, "").trim().trimEnd('.', '!', '?', ',')
         if (detail.isEmpty()) return null
-        return Request.Schedule(said.substring(range).trim(), detail)
+        val whenText = if (pattern == null || patternIn) said.substring(range).trim()
+        else "${pattern.value} ${said.substring(range).trim()}"
+        return Request.Schedule(whenText, detail)
     }
 
     private fun field(json: String, key: String): String? =
