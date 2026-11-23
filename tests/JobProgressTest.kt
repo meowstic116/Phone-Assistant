@@ -1279,20 +1279,56 @@ fun main() {
             set(java.util.Calendar.MILLISECOND, 0)
         }.timeInMillis
     val now = atLocal(2026, 11, 23, 10, 0) // A Monday, ten in the morning.
-    check(TaskClock.parse("at 5pm", now) == atLocal(2026, 11, 23, 17, 0))
-    check(TaskClock.parse("at 5", now) == atLocal(2026, 11, 23, 17, 0))
-    check(TaskClock.parse("at 9am", now) == atLocal(2026, 11, 24, 9, 0)) // Gone today means tomorrow.
-    check(TaskClock.parse("at 17:30", now) == atLocal(2026, 11, 23, 17, 30))
-    check(TaskClock.parse("at noon", now) == atLocal(2026, 11, 23, 12, 0))
-    check(TaskClock.parse("at midnight", now) == atLocal(2026, 11, 24, 0, 0))
-    check(TaskClock.parse("5pm", now) == atLocal(2026, 11, 23, 17, 0)) // The brain's bare clock words.
-    check(TaskClock.parse("tomorrow at 9am", now) == atLocal(2026, 11, 24, 9, 0))
-    check(TaskClock.parse("tonight at 8", now) == atLocal(2026, 11, 23, 20, 0))
-    check(TaskClock.parse("in 20 minutes", now) == now + 20 * 60 * 1000)
-    check(TaskClock.parse("on friday at 8pm", now) == atLocal(2026, 11, 27, 20, 0))
-    check(TaskClock.parse("at 8pm", atLocal(2026, 11, 23, 21, 0)) == atLocal(2026, 11, 24, 20, 0))
+    check(TaskClock.parse("at 5pm", now)?.fireAt == atLocal(2026, 11, 23, 17, 0))
+    check(TaskClock.parse("at 5", now)?.fireAt == atLocal(2026, 11, 23, 17, 0))
+    check(TaskClock.parse("at 9am", now)?.fireAt == atLocal(2026, 11, 24, 9, 0)) // Gone today means tomorrow.
+    check(TaskClock.parse("at 17:30", now)?.fireAt == atLocal(2026, 11, 23, 17, 30))
+    check(TaskClock.parse("at noon", now)?.fireAt == atLocal(2026, 11, 23, 12, 0))
+    check(TaskClock.parse("at midnight", now)?.fireAt == atLocal(2026, 11, 24, 0, 0))
+    check(TaskClock.parse("5pm", now)?.fireAt == atLocal(2026, 11, 23, 17, 0)) // The brain's bare clock words.
+    check(TaskClock.parse("tomorrow at 9am", now)?.fireAt == atLocal(2026, 11, 24, 9, 0))
+    check(TaskClock.parse("at 8pm tomorrow", now)?.fireAt == atLocal(2026, 11, 24, 20, 0)) // The day can come last.
+    check(TaskClock.parse("tonight at 8", now)?.fireAt == atLocal(2026, 11, 23, 20, 0))
+    check(TaskClock.parse("in 20 minutes", now)?.fireAt == now + 20 * 60 * 1000)
+    check(TaskClock.parse("on friday at 8pm", now)?.fireAt == atLocal(2026, 11, 27, 20, 0))
+    check(TaskClock.parse("at 8pm", atLocal(2026, 11, 23, 21, 0))?.fireAt == atLocal(2026, 11, 24, 20, 0))
     check(TaskClock.parse("no time in these words", now) == null)
     check(TaskClock.parse("buy 3 apples now", now) == null) // A number alone is not a time.
+
+    // Recurring times: the first occurrence plus the pattern after it.
+    val daily = TaskClock.parse("every day at 8am", now)
+    check(daily != null && daily.repeat == PipTask.Repeat.DAILY &&
+        daily.fireAt == atLocal(2026, 11, 24, 8, 0)) // 8am has passed today.
+    val soonDaily = TaskClock.parse("daily at 5pm", now)
+    check(soonDaily != null && soonDaily.repeat == PipTask.Repeat.DAILY &&
+        soonDaily.fireAt == atLocal(2026, 11, 23, 17, 0))
+    val weekly = TaskClock.parse("every friday at 8pm", now)
+    check(weekly != null && weekly.repeat == PipTask.Repeat.WEEKLY &&
+        weekly.fireAt == atLocal(2026, 11, 27, 20, 0))
+    val weekdays = TaskClock.parse("weekdays at 7am", now)
+    check(weekdays != null && weekdays.repeat == PipTask.Repeat.WEEKDAYS &&
+        weekdays.fireAt == atLocal(2026, 11, 24, 7, 0))
+    val trailing = TaskClock.parse("check the oven at 8pm every day", now)
+    check(trailing != null && trailing.repeat == PipTask.Repeat.DAILY &&
+        trailing.fireAt == atLocal(2026, 11, 23, 20, 0))
+    val nightly = TaskClock.parse("every night at 9", now)
+    check(nightly != null && nightly.repeat == PipTask.Repeat.DAILY &&
+        nightly.fireAt == atLocal(2026, 11, 23, 21, 0))
+    check(TaskClock.parse("every day", now) == null) // A pattern with no clock time is nothing.
+    check(TaskClock.parse("on friday at 8pm", now)?.repeat == PipTask.Repeat.NONE) // One Friday only.
+    // The next occurrence after a run, whatever days were missed.
+    check(TaskClock.next(atLocal(2026, 11, 24, 8, 0), PipTask.Repeat.DAILY, atLocal(2026, 11, 24, 8, 5)) ==
+        atLocal(2026, 11, 25, 8, 0))
+    check(TaskClock.next(atLocal(2026, 11, 27, 20, 0), PipTask.Repeat.WEEKLY, atLocal(2026, 11, 27, 20, 5)) ==
+        atLocal(2026, 12, 4, 20, 0))
+    check(TaskClock.next(atLocal(2026, 11, 27, 7, 0), PipTask.Repeat.WEEKDAYS, atLocal(2026, 11, 27, 7, 5)) ==
+        atLocal(2026, 11, 30, 7, 0)) // Friday's run comes back on Monday.
+    check(TaskClock.next(atLocal(2026, 11, 28, 10, 0), PipTask.Repeat.WEEKENDS, atLocal(2026, 11, 28, 10, 5)) ==
+        atLocal(2026, 11, 29, 10, 0))
+    val recurring = PipTask.from(TaskCommand.Request.Schedule("every day at 8am", "stretch"), now, 6)
+    check(recurring != null && recurring.repeat == PipTask.Repeat.DAILY &&
+        recurring.fireAt == atLocal(2026, 11, 24, 8, 0))
+    check(recurring != null && PipTask.decode(recurring.encode()) == recurring)
 
     check(TaskCommand.localRequest("Hey Pip, remind me at 5pm to stretch my back") ==
         TaskCommand.Request.Schedule("at 5pm", "stretch my back"))
@@ -1300,6 +1336,12 @@ fun main() {
         TaskCommand.Request.Schedule("at 5pm", "check the oven"))
     check(TaskCommand.localRequest("check the oven at 5pm") ==
         TaskCommand.Request.Schedule("at 5pm", "check the oven"))
+    check(TaskCommand.localRequest("every day at 8am check the oven") ==
+        TaskCommand.Request.Schedule("every day at 8am", "check the oven"))
+    check(TaskCommand.localRequest("check the oven every day at 8am") ==
+        TaskCommand.Request.Schedule("every day at 8am", "check the oven"))
+    check(TaskCommand.localRequest("weekdays at 7am remind me to stretch") ==
+        TaskCommand.Request.Schedule("weekdays at 7am", "stretch"))
     check(TaskCommand.localRequest("remind me in 20 minutes to take out the cake") ==
         TaskCommand.Request.Schedule("in 20 minutes", "take out the cake"))
     check(TaskCommand.localRequest("whenever an ad shows up, skip it") ==

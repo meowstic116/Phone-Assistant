@@ -373,8 +373,9 @@ object AssistantBrain {
         {"action":"delegate","task":"what to do, concretely"}
         Put the request into the task, with only the context this job needs. Paying, buying,
         or checking out is never a phone job: for those return {"action":"refuse_purchase"}.
-        When they ask for something at a time ("at 5pm do X", "remind me tonight to X"),
-        return {"action":"schedule","at":"the time in their words","task":"what to do"}.
+        When they ask for something at a time ("at 5pm do X", "remind me tonight to X", or
+        a recurring time like "every day at 8am" or "weekdays at 7"), return
+        {"action":"schedule","at":"the time in their words, including any repeat words","task":"what to do"}.
         When they want something whenever a condition shows on screen, or again and again
         ("skip all ads on youtube"), return
         {"action":"automate","trigger":"the screen condition","task":"what to do","app":"the app they named, or empty"}.

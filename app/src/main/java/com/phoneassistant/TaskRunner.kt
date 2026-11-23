@@ -73,7 +73,10 @@ internal object TaskRunner {
             if (task.kind != PipTask.Kind.SCHEDULED || task.fireAt > now) continue
             val ready = TaskGate.mayRunScheduled(open, free, atHome = Screen.clearHomeScreen(ctx), agentBusy = busy)
             if (ready) {
-                PipTasks.remove(ctx, task.id)
+                // A recurring time comes back for its next occurrence; a one-shot is done.
+                if (task.repeat == PipTask.Repeat.NONE) PipTasks.remove(ctx, task.id)
+                else PipTasks.update(ctx, task.copy(
+                    fireAt = TaskClock.next(task.fireAt, task.repeat, now), announced = false))
                 OverlayService.runPhoneJob(task.detail, task.detail, ChatTurns.begin())
             } else if (!task.announced) {
                 PipTasks.update(ctx, task.copy(announced = true))

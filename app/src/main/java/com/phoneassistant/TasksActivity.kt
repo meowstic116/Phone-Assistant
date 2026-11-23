@@ -48,7 +48,7 @@ class TasksActivity : Activity() {
         if (automatic.isEmpty()) empty("Nothing watching yet. Tell Pip: “whenever an ad shows up, skip it.”")
         automatic.forEach { content.addView(row(it, now)) }
         heading("Scheduled tasks")
-        if (scheduled.isEmpty()) empty("Nothing due yet. Tell Pip: “at 5pm, remind me to stretch.”")
+        if (scheduled.isEmpty()) empty("Nothing due yet. Tell Pip: “at 5pm, remind me to stretch” or “every day at 8am, check the oven.”")
         scheduled.forEach { content.addView(row(it, now)) }
     }
 
@@ -62,7 +62,7 @@ class TasksActivity : Activity() {
         val subtitle = when {
             !due -> "Pip does: ${task.detail}"
             task.announced && task.fireAt <= now -> "Overdue — waiting for you to be back on the home screen"
-            else -> "Due ${TaskClock.whenSpoken(task.fireAt, now)}"
+            else -> "Due ${TaskClock.dueSpoken(task.fireAt, task.repeat, now)}"
         }
         val textBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

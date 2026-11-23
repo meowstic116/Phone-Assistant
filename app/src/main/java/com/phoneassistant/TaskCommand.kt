@@ -79,7 +79,7 @@ internal object TaskCommand {
 
     /** What Pip says when a task is stored. */
     fun confirmed(task: PipTask, now: Long): String = when (task.kind) {
-        PipTask.Kind.SCHEDULED -> "Done. I’ll ${task.detail} ${TaskClock.whenSpoken(task.fireAt, now)}."
+        PipTask.Kind.SCHEDULED -> "Done. I’ll ${task.detail} ${TaskClock.dueSpoken(task.fireAt, task.repeat, now)}."
         PipTask.Kind.AUTOMATIC -> if (task.app.isNotEmpty()) {
             "Done. Whenever ${task.trigger} in ${task.app}, I’ll ${task.detail}."
         } else "Done. Whenever ${task.trigger}, I’ll ${task.detail}."
