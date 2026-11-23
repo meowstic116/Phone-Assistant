@@ -28,11 +28,27 @@ jobs:
       - name: Check tool versions agree
         run: bash tests/check-tool-versions.sh
       - name: Build debug and unsigned tester APKs
-        run: ./gradlew :app:assembleDebug :app:assembleRelease --no-daemon
+        run: |
+          set -euo pipefail
+          fail() {
+            echo "## $1 failed" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            tail -60 "$RUNNER_TEMP/step.log" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          ./gradlew --version 2>&1 | tee "$RUNNER_TEMP/step.log" || fail "Gradle wrapper"
+          ./gradlew :app:assembleDebug :app:assembleRelease --no-daemon 2>&1 | tee "$RUNNER_TEMP/step.log" || fail "Build"
       - name: Lint
-        run: ./gradlew :app:lint --no-daemon
+        run: |
+          set -euo pipefail
+          ./gradlew :app:lint --no-daemon 2>&1 | tee "$RUNNER_TEMP/step.log" \
+            || { echo '## Lint failed' >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; tail -60 "$RUNNER_TEMP/step.log" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; exit 1; }
       - name: Unit tests (screen builds under Robolectric)
-        run: ./gradlew :app:testDebugUnitTest --no-daemon
+        run: |
+          set -euo pipefail
+          ./gradlew :app:testDebugUnitTest --no-daemon 2>&1 | tee "$RUNNER_TEMP/step.log" \
+            || { echo '## Unit tests failed' >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; tail -80 "$RUNNER_TEMP/step.log" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; exit 1; }
       - name: Run host regression checks
         run: |
           set -euo pipefail
