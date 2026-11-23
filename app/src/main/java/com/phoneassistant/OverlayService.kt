@@ -467,6 +467,7 @@ class OverlayService : Service(), PropHost {
         super.onCreate()
         instance = this
         ScreenLocker.attach(this)
+        TaskRunner.start(this)
         running = true
         windowManager = getSystemService(WindowManager::class.java)
         speechBubble = SpeechBubble(this, limits = {
@@ -772,6 +773,7 @@ class OverlayService : Service(), PropHost {
     override fun onDestroy() {
         voicedReply = null
         WakeListenService.stop(this)
+        TaskRunner.stop()
         PipVoice.stop()
         cancelPowerAnimation()
         cancelToyReach()
@@ -2345,6 +2347,11 @@ class OverlayService : Service(), PropHost {
             done(WakeFeedback.REPLIED)
             return
         }
+        // A time or a condition plus what to do makes a task, decided on the phone.
+        TaskCommand.localRequest(text)?.let { request ->
+            storeTask(PipTask.from(request, System.currentTimeMillis(), System.nanoTime().toInt()), text, done)
+            return
+        }
         val local = JobProgress.routePhoneLocally(text)
         if (!driving && (local || PhoneContext.asksForAppLabel(text) || NowPlaying.requested(text) ||
                 MessageNotifications.request(text) != null)) {
@@ -2440,6 +2447,25 @@ class OverlayService : Service(), PropHost {
         }
     }
 
+    /** A task made from words is stored and confirmed aloud. Money is never a task. */
+    private fun storeTask(task: PipTask?, original: String, done: (WakeFeedback) -> Unit) {
+        if (task != null && PurchasePolicy.asksToPay(task.detail)) {
+            leaveAttention()
+            reviewPurchase(original, done)
+            return
+        }
+        val line = if (task == null) {
+            "I couldn’t work out when or what for that one. Try again with a time, like “at 5pm”, " +
+                "or a condition, like “whenever an ad shows up, skip it”."
+        } else {
+            PipTasks.add(this, task)
+            TaskCommand.confirmed(task, System.currentTimeMillis())
+        }
+        if (screenUsable()) sayAloud(line, finalReply = true, handsFree = true)
+        else PipVoice.reply(this, line, allowLocked = true)
+        done(if (task != null) WakeFeedback.REPLIED else WakeFeedback.CHAT_FAILED)
+    }
+
     /** Phone jobs recognized on the phone run right away, exactly like a typed message. */
     private fun runLocally(text: String, done: (WakeFeedback) -> Unit) {
         val turn = ChatTurns.begin()
@@ -2516,6 +2542,13 @@ class OverlayService : Service(), PropHost {
                     if (outcome is AssistantBrain.TaskOutcome.RefusedPurchase) {
                         leaveAttention()
                         reviewPurchase(text, done)
+                        return@post
+                    }
+                    val created = (outcome as? AssistantBrain.TaskOutcome.Scheduled)?.task
+                        ?: (outcome as? AssistantBrain.TaskOutcome.Automated)?.task
+                    if (created != null) {
+                        leaveAttention()
+                        storeTask(created, text, done)
                         return@post
                     }
                     val task = (outcome as? AssistantBrain.TaskOutcome.Task)?.job

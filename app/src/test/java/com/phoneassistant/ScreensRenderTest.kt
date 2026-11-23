@@ -128,4 +128,12 @@ class ScreensRenderTest {
     fun chatHistoryScreenBuildsWithoutCrashing() {
         build(ChatHistoryActivity::class.java)
     }
+
+    @Test
+    fun tasksMenuBuildsWithBothLists() {
+        val activity = build(TasksActivity::class.java)
+        val texts = allTexts(activity.window.decorView)
+        assertTrue("automatic tasks section is missing", "Automatic tasks" in texts)
+        assertTrue("scheduled tasks section is missing", "Scheduled tasks" in texts)
+    }
 }

@@ -1196,23 +1196,23 @@ fun main() {
     check(!WakeFeedback.LISTENING.isMicEvent && !WakeFeedback.PLAYING.isMicEvent)
 
     val wakePhrase = WakePhrase()
-    check(wakePhrase.accept("Ask Pip what he thinks", 1) == null && !wakePhrase.awaiting)
+    check(wakePhrase.accept("Ask Pip what he thinks", 1) == "Ask what he thinks" && !wakePhrase.awaiting)
     check(wakePhrase.accept("Piper, how are you?", 2) == null && !wakePhrase.awaiting)
     check(wakePhrase.accept("Hey, PIP, tell me a joke!", 3) == "tell me a joke!")
     check(wakePhrase.accept("Pip.", 100) == null && wakePhrase.awaiting)
     check(wakePhrase.accept("How are you?", 5_000) == "How are you?" && !wakePhrase.awaiting)
     check(wakePhrase.accept("Pip", 10_000) == null && wakePhrase.awaiting)
-    check(wakePhrase.expire(20_001) && !wakePhrase.awaiting)
-    check(wakePhrase.accept("This must not send after expiry", 21_000) == null)
+    check(wakePhrase.expire(30_001) && !wakePhrase.awaiting)
+    check(wakePhrase.accept("This must not send after expiry", 31_000) == null)
     check(wakePhrase.hasAddress("“HEY — P. I. P, tell me a joke”"))
     check(wakePhrase.accept("Hey Peep — what time is it?", 23_000) == "what time is it?")
     check(wakePhrase.accept("Peep the window", 24_000) == null)
     check(!wakePhrase.hasAddress("I said Hey Pip yesterday"))
-    wakePhrase.arm(25_000) // The explicit Speak now tap only arms one message.
+    wakePhrase.arm(25_000) // A Speak now tap or a fresh reply arms only one message.
     check(wakePhrase.accept("Tell me a joke", 26_000) == "Tell me a joke")
     check(wakePhrase.accept("Not part of the same request", 26_500) == null)
     wakePhrase.arm(27_000)
-    check(wakePhrase.accept("Too late", 38_000) == null)
+    check(wakePhrase.accept("Too late", 48_000) == null) // The window is generous, not endless.
 
     check(wakePhrase.accept("Good one, Pip!", 40_000) == "Good one!")
     check(wakePhrase.accept("good one pip", 41_000) == "good one") // The recognizer may omit punctuation.
@@ -1263,6 +1263,157 @@ fun main() {
     check(wakePhrase.accept("Pip is on my phone", 76_500) == "is on my phone") // He still answers.
     check(wakePhrase.accept("Could you Pip turn it down?", 77_000) == "Could you turn it down?")
     check(wakePhrase.accept("pass me the pip", 74_000) == null) // "the pip" is an object, not his name.
+    // A request with his name in it counts however the name is spelled; talk about him does not.
+    check(wakePhrase.accept("we asked Pip what he thinks", 80_000) == null)
+    check(wakePhrase.accept("please tell Pip a joke", 80_100) == "please tell a joke")
+    check(wakePhrase.accept("can you ask Pip what he thinks", 80_200) == "can you ask what he thinks")
+    check(wakePhrase.accept("Hey pipe what time is it?", 80_300) == "what time is it?")
+    check(wakePhrase.accept("could you pep turn the music down", 80_400) == "could you turn the music down")
+    check(wakePhrase.accept("some pep in my step", 80_500) == null) // A real word, not his name.
+    check(wakePhrase.accept("P-I-P, pause Spotify", 80_600) == "pause Spotify")
+
+    // ---- automatic and scheduled tasks ----
+    fun atLocal(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =
+        java.util.Calendar.getInstance().apply {
+            set(year, month - 1, day, hour, minute, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    val now = atLocal(2026, 11, 23, 10, 0) // A Monday, ten in the morning.
+    check(TaskClock.parse("at 5pm", now)?.fireAt == atLocal(2026, 11, 23, 17, 0))
+    check(TaskClock.parse("at 5", now)?.fireAt == atLocal(2026, 11, 23, 17, 0))
+    check(TaskClock.parse("at 9am", now)?.fireAt == atLocal(2026, 11, 24, 9, 0)) // Gone today means tomorrow.
+    check(TaskClock.parse("at 17:30", now)?.fireAt == atLocal(2026, 11, 23, 17, 30))
+    check(TaskClock.parse("at noon", now)?.fireAt == atLocal(2026, 11, 23, 12, 0))
+    check(TaskClock.parse("at midnight", now)?.fireAt == atLocal(2026, 11, 24, 0, 0))
+    check(TaskClock.parse("5pm", now)?.fireAt == atLocal(2026, 11, 23, 17, 0)) // The brain's bare clock words.
+    check(TaskClock.parse("tomorrow at 9am", now)?.fireAt == atLocal(2026, 11, 24, 9, 0))
+    check(TaskClock.parse("at 8pm tomorrow", now)?.fireAt == atLocal(2026, 11, 24, 20, 0)) // The day can come last.
+    check(TaskClock.parse("tonight at 8", now)?.fireAt == atLocal(2026, 11, 23, 20, 0))
+    check(TaskClock.parse("in 20 minutes", now)?.fireAt == now + 20 * 60 * 1000)
+    check(TaskClock.parse("on friday at 8pm", now)?.fireAt == atLocal(2026, 11, 27, 20, 0))
+    check(TaskClock.parse("at 8pm", atLocal(2026, 11, 23, 21, 0))?.fireAt == atLocal(2026, 11, 24, 20, 0))
+    check(TaskClock.parse("no time in these words", now) == null)
+    check(TaskClock.parse("buy 3 apples now", now) == null) // A number alone is not a time.
+
+    // Recurring times: the first occurrence plus the pattern after it.
+    val daily = TaskClock.parse("every day at 8am", now)
+    check(daily != null && daily.repeat == PipTask.Repeat.DAILY &&
+        daily.fireAt == atLocal(2026, 11, 24, 8, 0)) // 8am has passed today.
+    val soonDaily = TaskClock.parse("daily at 5pm", now)
+    check(soonDaily != null && soonDaily.repeat == PipTask.Repeat.DAILY &&
+        soonDaily.fireAt == atLocal(2026, 11, 23, 17, 0))
+    val weekly = TaskClock.parse("every friday at 8pm", now)
+    check(weekly != null && weekly.repeat == PipTask.Repeat.WEEKLY &&
+        weekly.fireAt == atLocal(2026, 11, 27, 20, 0))
+    val weekdays = TaskClock.parse("weekdays at 7am", now)
+    check(weekdays != null && weekdays.repeat == PipTask.Repeat.WEEKDAYS &&
+        weekdays.fireAt == atLocal(2026, 11, 24, 7, 0))
+    val trailing = TaskClock.parse("check the oven at 8pm every day", now)
+    check(trailing != null && trailing.repeat == PipTask.Repeat.DAILY &&
+        trailing.fireAt == atLocal(2026, 11, 23, 20, 0))
+    val nightly = TaskClock.parse("every night at 9", now)
+    check(nightly != null && nightly.repeat == PipTask.Repeat.DAILY &&
+        nightly.fireAt == atLocal(2026, 11, 23, 21, 0))
+    check(TaskClock.parse("every day", now) == null) // A pattern with no clock time is nothing.
+    check(TaskClock.parse("on friday at 8pm", now)?.repeat == PipTask.Repeat.NONE) // One Friday only.
+    // "Every weekday", "every weekend", and "every week" say their days differently.
+    val everyWeekday = TaskClock.parse("every weekday at 7am", now)
+    check(everyWeekday != null && everyWeekday.repeat == PipTask.Repeat.WEEKDAYS &&
+        everyWeekday.fireAt == atLocal(2026, 11, 24, 7, 0))
+    val everyWeekend = TaskClock.parse("every weekend at 10am", now)
+    check(everyWeekend != null && everyWeekend.repeat == PipTask.Repeat.WEEKENDS &&
+        everyWeekend.fireAt == atLocal(2026, 11, 28, 10, 0)) // The next Saturday.
+    val weeklyPlain = TaskClock.parse("every week at 8am", now)
+    check(weeklyPlain != null && weeklyPlain.repeat == PipTask.Repeat.WEEKLY &&
+        weeklyPlain.fireAt == atLocal(2026, 11, 30, 8, 0)) // Today's eight is gone; a week from it.
+    val weeklyLater = TaskClock.parse("every week at 8pm", now)
+    check(weeklyLater != null && weeklyLater.repeat == PipTask.Repeat.WEEKLY &&
+        weeklyLater.fireAt == atLocal(2026, 11, 23, 20, 0)) // Tonight is the first one.
+    // Part-of-day words steer the hour from either side of the clock words.
+    val fridayMorning = TaskClock.parse("every friday morning at 7", now)
+    check(fridayMorning != null && fridayMorning.repeat == PipTask.Repeat.WEEKLY &&
+        fridayMorning.fireAt == atLocal(2026, 11, 27, 7, 0)) // Morning means seven in the morning.
+    val trailingMorning = TaskClock.parse("at 7 every friday morning", now)
+    check(trailingMorning != null && trailingMorning.repeat == PipTask.Repeat.WEEKLY &&
+        trailingMorning.fireAt == atLocal(2026, 11, 27, 7, 0))
+    val tomorrowMorning = TaskClock.parse("tomorrow morning at 7", now)
+    check(tomorrowMorning != null && tomorrowMorning.repeat == PipTask.Repeat.NONE &&
+        tomorrowMorning.fireAt == atLocal(2026, 11, 24, 7, 0))
+    val onFridays = TaskClock.parse("at 8pm on fridays", now)
+    check(onFridays != null && onFridays.repeat == PipTask.Repeat.WEEKLY &&
+        onFridays.fireAt == atLocal(2026, 11, 27, 20, 0))
+    // A pattern's day off never fires on the wrong kind of day, even ahead of time.
+    check(TaskClock.next(atLocal(2026, 11, 28, 7, 0), PipTask.Repeat.WEEKDAYS, atLocal(2026, 11, 28, 6, 0)) ==
+        atLocal(2026, 11, 30, 7, 0)) // A Saturday seed walks to Monday.
+    // The next occurrence after a run, whatever days were missed.
+    check(TaskClock.next(atLocal(2026, 11, 24, 8, 0), PipTask.Repeat.DAILY, atLocal(2026, 11, 24, 8, 5)) ==
+        atLocal(2026, 11, 25, 8, 0))
+    check(TaskClock.next(atLocal(2026, 11, 27, 20, 0), PipTask.Repeat.WEEKLY, atLocal(2026, 11, 27, 20, 5)) ==
+        atLocal(2026, 12, 4, 20, 0))
+    check(TaskClock.next(atLocal(2026, 11, 27, 7, 0), PipTask.Repeat.WEEKDAYS, atLocal(2026, 11, 27, 7, 5)) ==
+        atLocal(2026, 11, 30, 7, 0)) // Friday's run comes back on Monday.
+    check(TaskClock.next(atLocal(2026, 11, 28, 10, 0), PipTask.Repeat.WEEKENDS, atLocal(2026, 11, 28, 10, 5)) ==
+        atLocal(2026, 11, 29, 10, 0))
+    val recurring = PipTask.from(TaskCommand.Request.Schedule("every day at 8am", "stretch"), now, 6)
+    check(recurring != null && recurring.repeat == PipTask.Repeat.DAILY &&
+        recurring.fireAt == atLocal(2026, 11, 24, 8, 0))
+    check(recurring != null && PipTask.decode(recurring.encode()) == recurring)
+
+    check(TaskCommand.localRequest("Hey Pip, remind me at 5pm to stretch my back") ==
+        TaskCommand.Request.Schedule("at 5pm", "stretch my back"))
+    check(TaskCommand.localRequest("at 5pm check the oven") ==
+        TaskCommand.Request.Schedule("at 5pm", "check the oven"))
+    check(TaskCommand.localRequest("check the oven at 5pm") ==
+        TaskCommand.Request.Schedule("at 5pm", "check the oven"))
+    check(TaskCommand.localRequest("every day at 8am check the oven") ==
+        TaskCommand.Request.Schedule("every day at 8am", "check the oven"))
+    check(TaskCommand.localRequest("check the oven every day at 8am") ==
+        TaskCommand.Request.Schedule("every day at 8am", "check the oven"))
+    check(TaskCommand.localRequest("weekdays at 7am remind me to stretch") ==
+        TaskCommand.Request.Schedule("weekdays at 7am", "stretch"))
+    check(TaskCommand.localRequest("every weekday at 7am remind me to stretch") ==
+        TaskCommand.Request.Schedule("every weekday at 7am", "stretch"))
+    check(TaskCommand.localRequest("every day check the oven at 8am") ==
+        TaskCommand.Request.Schedule("every day at 8am", "check the oven"))
+    check(TaskCommand.localRequest("every day, check the oven at 8am") ==
+        TaskCommand.Request.Schedule("every day at 8am", "check the oven"))
+    check(TaskCommand.localRequest("remind me in 20 minutes to take out the cake") ==
+        TaskCommand.Request.Schedule("in 20 minutes", "take out the cake"))
+    check(TaskCommand.localRequest("whenever an ad shows up, skip it") ==
+        TaskCommand.Request.Automate("an ad shows up", "skip it", ""))
+    check(TaskCommand.localRequest("when the kettle boils, do turn it off") ==
+        TaskCommand.Request.Automate("the kettle boils", "turn it off", ""))
+    check(TaskCommand.localRequest("every time an ad plays, click the skip button") ==
+        TaskCommand.Request.Automate("an ad plays", "click the skip button", ""))
+    check(TaskCommand.localRequest("skip all ads on youtube") == null) // The brain's shape to fill in.
+    check(TaskCommand.localRequest("tell me a joke") == null)
+
+    check(TaskCommand.fromReply("""{"action":"schedule","at":"5pm","task":"stretch my back"}""") ==
+        TaskCommand.Request.Schedule("5pm", "stretch my back"))
+    check(TaskCommand.fromReply("""{"action":"automate","trigger":"an ad is showing","task":"click the skip button","app":"youtube"}""") ==
+        TaskCommand.Request.Automate("an ad is showing", "click the skip button", "youtube"))
+    check(TaskCommand.fromReply("""{"action":"delegate","task":"open Spotify"}""") == null)
+    check(TaskCommand.fromReply("sounds good") == null)
+
+    val one = PipTask("t1", PipTask.Kind.SCHEDULED, "stretch", "", "", now + 1000, now)
+    check(PipTask.decode(one.encode()) == one)
+    check(PipTask.decode("junk line without tabs") == null)
+    val scheduled = PipTask.from(TaskCommand.Request.Schedule("in 10 minutes", "stretch"), now, 3)
+    check(scheduled != null && scheduled.kind == PipTask.Kind.SCHEDULED &&
+        scheduled.fireAt == now + 10 * 60 * 1000 && !scheduled.announced)
+    check(PipTask.from(TaskCommand.Request.Schedule("at 5pm", ""), now, 3) == null)
+    val automatic = PipTask.from(TaskCommand.Request.Automate("an ad shows", "skip it", "youtube"), now, 4)
+    check(automatic != null && automatic.kind == PipTask.Kind.AUTOMATIC &&
+        automatic.trigger == "an ad shows" && automatic.fireAt == 0L)
+    check(PipTask.from(TaskCommand.Request.Automate("", "skip it", ""), now, 4) == null)
+
+    check(TaskGate.mayRunScheduled(interactive = true, unlocked = true, atHome = true, agentBusy = false))
+    check(!TaskGate.mayRunScheduled(interactive = true, unlocked = true, atHome = false, agentBusy = false))
+    check(!TaskGate.mayRunScheduled(interactive = true, unlocked = false, atHome = true, agentBusy = false))
+    check(!TaskGate.mayRunScheduled(interactive = true, unlocked = true, atHome = true, agentBusy = true))
+    check(TaskGate.mayRunAutomatic(interactive = true, unlocked = true, agentBusy = false))
+    check(!TaskGate.mayRunAutomatic(interactive = true, unlocked = true, agentBusy = true))
+
     val captureRecovery = WakeCaptureRecovery()
     check(!captureRecovery.stalled(3999, lastPcmAt = 0) && captureRecovery.stalled(4000, lastPcmAt = 0))
     check(captureRecovery.tryRestart(4000) && captureRecovery.tryRestart(8000))

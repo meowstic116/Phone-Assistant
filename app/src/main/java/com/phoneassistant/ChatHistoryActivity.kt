@@ -139,6 +139,23 @@ class ChatHistoryActivity : Activity() {
             showJobStarted(OverlayService.runPhoneJob(text, text, turn))
             return
         }
+        // A time or a condition plus what to do makes a task, no round trip needed.
+        TaskCommand.localRequest(text)?.takeIf { !PurchasePolicy.asksToPay(it.detail) }?.let { request ->
+            val created = PipTask.from(request, System.currentTimeMillis(), System.nanoTime().toInt())
+            val line = if (created == null) {
+                "I couldn’t work out when or what for that one. Try again with a time, like “at 5pm”."
+            } else {
+                PipTasks.add(this, created)
+                TaskCommand.confirmed(created, System.currentTimeMillis())
+            }
+            ChatRecovery.attempt(Unit, { Diag.chatFailure("chat task", it) }) {
+                Memory.append(this, "assistant", line)
+            }
+            addBubble(line, false)
+            sendButton.isEnabled = true
+            OverlayService.speak(this, line)
+            return
+        }
         val event = ChatRecovery.attempt<String?>(null, { Diag.chatFailure("chat toy reaction", it) }) {
             OverlayService.reactTo(text)
         }
@@ -164,6 +181,20 @@ class ChatHistoryActivity : Activity() {
                 val job = if (ok) Agent.delegated(reply) else null
                 if (job != null) {
                     if (visible) showJobStarted(OverlayService.runPhoneJob(job, text, turn))
+                    return@runOnUiThread
+                }
+                // The same words can make a standing task instead of a one-time job.
+                val created = if (ok) AssistantBrain.taskRequest(MemorySuggestion.splitReply(reply).line) else null
+                if (created != null && !PurchasePolicy.asksToPay(created.detail)) {
+                    PipTasks.add(this, created)
+                    val line = TaskCommand.confirmed(created, System.currentTimeMillis())
+                    ChatRecovery.attempt(Unit, { Diag.chatFailure("chat task", it) }) {
+                        Memory.append(this, "assistant", line)
+                    }
+                    if (!visible) return@runOnUiThread
+                    addBubble(line, false)
+                    sendButton.isEnabled = true
+                    OverlayService.speak(this, line)
                     return@runOnUiThread
                 }
                 // A plain reply still belongs in history if Android recreated or closed this screen.

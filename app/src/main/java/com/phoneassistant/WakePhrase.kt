@@ -3,26 +3,35 @@ package com.phoneassistant
 /** Decide locally whether speech addresses Pip. Never send ambient speech to the chat API to decide. */
 internal class WakePhrase {
     private val separators = "[\\s\\p{Z},.!?;:–—-]"
-    private val name = "p[. ]*i[. ]*p"
-    private val greeting = "(?:hey|okay|ok|yo)$separators+(?:$name|pipp|peep|pep|pips)"
+    private val name = "p[. \\-]*i[. \\-]*p"
+    private val variantName = "(?:pip+s?|peeps?|peps?|pipes?|pippy|peepy)"
+    private val greeting = "(?:hey|okay|ok|yo)$separators+(?:$name|$variantName)"
     private fun pattern(value: String) = Regex(value, RegexOption.IGNORE_CASE)
     private val prefix = pattern("^(?:$greeting|$name)(?=$|$separators|[…\"”]|[’'](?=$|$separators))")
     private val suffix = pattern("$separators+(?:$greeting|$name)([.?!…]*)[\\s\\p{Z}\"'”’]*$")
     // An explicit voice address can also interrupt a sentence: "Can you, Pip, tell me another?"
-    private val inset = pattern("\\s*[,–—]\\s*(?:$greeting|$name)\\s*[,–—]\\s*")
+    private val inset = pattern("\\s*[,–—]\\s*(?:$greeting|$name|$variantName)\\s*[,–—]\\s*")
     private val leading = Regex("""^[\s\p{Z}"'“‘]+""")
     private val mention = pattern("\\b(?:about|to|with|of|for|from|at|by|in|on|as|is|was|than|like|love|hate|called|named|call|name|ask|asked|tell|told|saw|see|heard|hear|find|found|met|meet|know|knows|remember|miss|watch|watching|use|using|thank|thanked|thinks|mentions|mention|mentioned)\\s*$")
     private val reported = pattern("""\b(?:said|says|wrote|reads|quoted)\b.*""")
     private val committed = pattern("\\b(?:as|like|than|was|is)\\s+$")
+    // "Ask Pip what he thinks" is a request to him, while "we asked Pip" or "tell me
+    // about Pip" is talk about him. Only a bare verb or politeness word in front of
+    // the name turns those mention words into an address.
+    private val imperativeStems = pattern("^(?:(?:please|just|hey|yo|ok(?:ay)?|kay|pls|plz|u|can u|could u|would u|can you|could you|would you|will you)[\\s\\p{Z},]*)*$")
+    private fun imperativeAddress(head: String): Boolean = imperativeStems.matches(
+        mention.replace(head, "").trimEnd(::addressPunctuation).lowercase())
     // The name can land anywhere in a sentence, even without the commas a vocative would
     // normally get: "could you pip turn the music down". Match whole words only, so
     // "pipe", "piper", and "Pip's" are not mistaken for an address.
     private val anywhere = pattern("(?<![\\p{L}\\p{N}])$name(?![\\p{L}\\p{N}])")
-    // Decoders often write his name as "Peep", "Pep", or "Pipp". Accept those at the start
-    // of a request ("Peep, pause Spotify") but not as ordinary words ("peep the window").
-    private val variantName = "(?:pipp|peep|pep)"
+    // Decoders often write his name as "Peep", "Pep", "Pipp", or "Pipe". Accept those
+    // at the start of a request ("Peep, pause Spotify") but not as ordinary words
+    // ("peep the window"). Mid-sentence they count only in an address frame.
+    private val anywhereVariant = pattern("(?<![\\p{L}\\p{N}])$variantName(?![\\p{L}\\p{N}])")
+    private val addressHead = pattern("\\b(?:can|could|would|will|do)\\s+(?:you|u)\\s+$|\b(?:please|hey|yo|ok|okay|pls|plz)\\s+$")
     private val variant = pattern("^$variantName(?=$|$separators|[…\"”])")
-    private val objectWord = pattern("^(?:the|a|an|this|that|these|those|my|your|his|her|its|our|their|at|on|in|of|for|to|from|with|and|or|is|was)\\b")
+    private val objectWord = pattern("^(?:the|a|an|this|that|these|those|my|your|his|her|its|our|their|at|on|in|of|for|to|from|with|and|or|is|was|are|were)\\b")
     private val trailingGreeting = pattern("(?:^|[\\s\\p{Z},.!?;:–—-])(?:hey|okay|ok|yo)[\\s\\p{Z},.!?;:–—-]*$")
     // "Pass me the pip" names an object, not the assistant. Greetings, fillers, and
     // questions may still come right before the name.
@@ -51,7 +60,7 @@ internal class WakePhrase {
         }
         suffix.find(text)?.let {
             val head = text.substring(0, it.range.first).trimEnd()
-            if (head.any(Char::isLetterOrDigit) && !mention.containsMatchIn(head) &&
+            if (head.any(Char::isLetterOrDigit) && !(mention.containsMatchIn(head) && !imperativeAddress(head)) &&
                 !reported.containsMatchIn(head) && !article.containsMatchIn(head)) {
                 return head + it.groupValues[1]
             }
@@ -75,15 +84,19 @@ internal class WakePhrase {
 
     /** The name mid-sentence, with any greeting and punctuation at the seam removed. */
     private fun anywhereMessage(text: String): String? {
-        val match = anywhere.find(text) ?: return null
+        val match = anywhere.find(text) ?: anywhereVariant.find(text)?.takeIf {
+            // A bare spelling variant mid-sentence needs an address frame around it,
+            // so "could you pep turn it down" counts and "some pep in my step" does not.
+            addressHead.containsMatchIn(text.substring(0, it.range.first))
+        } ?: return null
         val head = text.substring(0, match.range.first)
         val tail = text.substring(match.range.last + 1)
         if (tail.startsWith("'") || tail.startsWith("’")) return null // Pip's next move
         // The name is a noun here, not an address. Commas mark a vocative even behind "ask"
         // ("ask Pip, what time is it?").
         val commaAfter = tail.firstOrNull()?.let { it == ',' || it == '–' || it == '—' } == true
-        if (!commaAfter && (mention.containsMatchIn(head) || committed.containsMatchIn(head) ||
-                reported.containsMatchIn(head))) return null
+        if (!commaAfter && (committed.containsMatchIn(head) || reported.containsMatchIn(head) ||
+                (mention.containsMatchIn(head) && !imperativeAddress(head)))) return null
         // Nothing after the name and an article before it: "pass me the pip" isn't an address.
         if (tail.isBlank() && article.containsMatchIn(head)) return null
         val left = leadingGreeting.replace(trailingGreeting.replace(head.trimEnd(), ""), "")
@@ -111,7 +124,7 @@ internal class WakePhrase {
 
     fun arm(now: Long) {
         clearPartial()
-        until = now + 10_000L
+        until = now + 20_000L
     }
 
     fun expire(now: Long): Boolean {

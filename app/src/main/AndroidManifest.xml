@@ -104,6 +104,11 @@
             android:label="@string/toys_menu" />
 
         <activity
+            android:name=".TasksActivity"
+            android:exported="false"
+            android:label="@string/tasks_menu" />
+
+        <activity
             android:name=".PlantCollectionActivity"
             android:exported="false"
             android:label="@string/plant_collection_title" />

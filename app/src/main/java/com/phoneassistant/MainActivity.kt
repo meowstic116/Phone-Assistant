@@ -48,6 +48,10 @@ class MainActivity : Activity() {
             startActivity(Intent(this, ChatHistoryActivity::class.java))
         }
 
+        findViewById<Button>(R.id.tasksButton).setOnClickListener {
+            startActivity(Intent(this, TasksActivity::class.java))
+        }
+
         // A crash is shown here rather than only in Diagnostics, because Diagnostics is
         // reached through Pip settings — the screen that a crash may have just killed.
         findViewById<Button>(R.id.crashClear).setOnClickListener {

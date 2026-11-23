@@ -69,4 +69,5 @@
     <string name="permissions_message_previews">Read message notifications</string>
     <string name="read_message_with_pip">Read with Pip</string>
     <string name="permissions_message_previews_info">Off by default. When you ask who texted you, Pip checks current message previews only while the phone is unlocked. Pip reads the preview with an offline voice. The message is never saved to chat history or sent to the API.</string>
+    <string name="tasks_menu">Tasks</string>
 </resources>
