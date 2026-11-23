@@ -49,6 +49,13 @@ internal object VoiceSettings {
         if (!enabled) PipVoice.stop()
     }
 
+    /** How loud Pip speaks, 0–1, on top of the phone's own media volume. */
+    fun volume(context: Context): Float = prefs(context).getFloat("voice_volume", 1f).coerceIn(0f, 1f)
+
+    fun setVolume(context: Context, value: Float) {
+        prefs(context).edit().putFloat("voice_volume", value.coerceIn(0f, 1f)).apply()
+    }
+
     fun save(context: Context, config: Config) {
         PipVoice.stop()
         prefs(context).edit().putString("source", config.source.name)

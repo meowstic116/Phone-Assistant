@@ -85,6 +85,28 @@ internal object WakeModel {
         }
     }
 
+    /** Deletes the download and any partial staging, stopping a session that is using it first. */
+    fun remove(ctx: Context, done: (Boolean) -> Unit) {
+        if (busy) return
+        val app = ctx.applicationContext
+        if (!ready(app)) return
+        busy = true
+        notifyObservers()
+        WakeListenService.stop(app)
+        executor.execute {
+            val target = directory(app)
+            val stage = File(app.noBackupFilesDir, "$PACK.partial")
+            val removed = runCatching {
+                target.deleteRecursively() && stage.deleteRecursively()
+            }.getOrDefault(false)
+            main.post {
+                busy = false
+                notifyObservers()
+                done(removed)
+            }
+        }
+    }
+
     fun recognizer(ctx: Context): OnlineRecognizer {
         check(ready(ctx))
         val root = directory(ctx)

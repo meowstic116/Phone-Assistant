@@ -19,12 +19,14 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.phoneassistant.PipSettings.Option
 import com.phoneassistant.SetupPolicy.Permission
+import kotlin.math.roundToInt
 
 class PipSettingsActivity : Activity() {
     companion object {
@@ -39,6 +41,7 @@ class PipSettingsActivity : Activity() {
     private lateinit var wakeAction: Button
     private lateinit var wakeStatus: TextView
     private lateinit var wakeSpeak: Button
+    private lateinit var wakeRemoveAction: Button
     private val kokoroChanged: () -> Unit = { refreshVoiceSummary() }
     private val wakeModelChanged: () -> Unit = { refreshWakeAction() }
     private var refreshApiIfChanged: () -> Unit = {}
@@ -57,6 +60,8 @@ class PipSettingsActivity : Activity() {
             "leaves existing notes and direct requests to remember something unchanged."
         val readingAloud = "Both voice options speak offline. If a voice can’t play, Pip shows text " +
             "without switching voices."
+        val voiceVolume = "How loud Pip speaks, on top of the phone’s own media volume. It applies " +
+            "the next time he speaks."
         val listening = "Speak in English and address him by name, like ‘Hey Pip, tell me a joke’ " +
             "or ‘Good one, Pip.’ Listening runs on your phone, even after locking. It can use " +
             "battery. To stop, tap Stop listening for Pip here or stop the assistant. " +
@@ -200,6 +205,12 @@ class PipSettingsActivity : Activity() {
         toggle("Read Pip’s replies aloud", VoiceSettings.config(this).enabled, Notes.readingAloud) {
             VoiceSettings.setEnabled(this, it)
         }
+        volumeSlider("Pip’s voice volume", { Notes.voiceVolume }, 0, VoiceSettings.volume(this),
+            { VoiceSettings.setVolume(this, it) }) {
+            PipVoice.preview(this) { result ->
+                if (!isFinishing && !isDestroyed) Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+            }
+        }
         voiceSummary = text("")
         plainButton("Choose Pip’s voice") { configureVoice() }
         kokoroStatus = text("")
@@ -244,6 +255,7 @@ class PipSettingsActivity : Activity() {
                 Toast.makeText(this, "Wait until Pip is ready to listen.", Toast.LENGTH_SHORT).show()
             }
         }
+        wakeRemoveAction = plainButton("Remove offline recognition download") { confirmRemoveWakeModel() }
         refreshWakeAction()
 
         step("Hands-free driving")
@@ -318,6 +330,9 @@ class PipSettingsActivity : Activity() {
             !WakeModel.ready(this) -> "Download offline recognition (57 MB)"
             else -> "Start listening for Pip"
         }
+        // The download can be undone the same way Kokoro's can; the button exists only
+        // while there is something to remove.
+        wakeRemoveAction.visibility = if (WakeModel.ready(this) && !WakeModel.busy) View.VISIBLE else View.GONE
     }
 
     private fun changeWakeListening() {
@@ -357,6 +372,21 @@ class PipSettingsActivity : Activity() {
             return
         }
         if (!WakeListenService.start(this)) Toast.makeText(this, "Android couldn’t start listening. Try again with settings open.", Toast.LENGTH_LONG).show()
+    }
+
+    /** Removes the 57 MB recognition download after a confirmation, the way Kokoro's does. */
+    private fun confirmRemoveWakeModel() {
+        AlertDialog.Builder(this).setTitle("Remove offline recognition?")
+            .setMessage("Listening stops and the 57 MB download is deleted from this phone. " +
+                "You can download it again later.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Remove") { _, _ ->
+                WakeModel.remove(this) { success ->
+                    if (isFinishing || isDestroyed) return@remove
+                    Toast.makeText(this, if (success) "Offline recognition removed."
+                        else "Couldn’t remove every file. Try again.", Toast.LENGTH_LONG).show()
+                }
+            }.show()
     }
 
     private fun refreshVoiceSummary() {
@@ -452,15 +482,9 @@ class PipSettingsActivity : Activity() {
             ToyAudio.setEnabled(this, it)
             if (it) ToyAudio.play(this, ToySounds.Sound.POP, 0.9f)
         }
-        button("Toy sound volume: ${(ToyAudio.volume(this) * 100).toInt()}%", Notes.toySoundsVolume) {
-            val values = arrayOf(30, 50, 70, 90, 100)
-            AlertDialog.Builder(this).setTitle("Toy sound volume")
-                .setItems(values.map { "$it%" }.toTypedArray()) { _, which ->
-                    ToyAudio.setVolume(this, values[which] / 100f)
-                    ToyAudio.play(this, ToySounds.Sound.SQUEAK, 0.9f)
-                    recreate()
-                }
-                .setNegativeButton("Cancel", null).show()
+        volumeSlider("Toy sound volume", { Notes.toySoundsVolume }, 20, ToyAudio.volume(this),
+            { ToyAudio.setVolume(this, it) }) {
+            ToyAudio.play(this, ToySounds.Sound.SQUEAK, 0.9f)
         }
         plainButton("Try a toy sound") {
             ToyAudio.play(this, ToySounds.Sound.SQUEAK, 1f)
@@ -650,6 +674,40 @@ class PipSettingsActivity : Activity() {
         }
         OverlayService.behaviorSettingsChanged()
         refreshHints()
+    }
+
+    /**
+     * A volume row: a live percent label over a slider. [change] hears every step, while
+     * [commit] fires once when the thumb is released — a preview sound per tick while
+     * dragging would machine-gun. [floorPercent] keeps the toy box from turning down to a
+     * silence that reads as a broken toy; the off switch above does silence.
+     */
+    private fun volumeSlider(label: String, note: () -> String?, floorPercent: Int, value: Float,
+                             change: (Float) -> Unit, commit: () -> Unit) {
+        val title = TextView(this).apply {
+            textSize = 15f
+            setTextColor(getColor(R.color.text))
+        }
+        val seek = SeekBar(this)
+        seek.max = 100 - floorPercent
+        fun show() {
+            title.text = "$label: ${floorPercent + seek.progress}%"
+        }
+        seek.progress = ((value * 100).roundToInt() - floorPercent).coerceIn(0, seek.max)
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                show()
+                change((floorPercent + progress) / 100f)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) = commit()
+        })
+        show()
+        withInfo(label, note, LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(title)
+            addView(seek)
+        })
     }
 
     /**
