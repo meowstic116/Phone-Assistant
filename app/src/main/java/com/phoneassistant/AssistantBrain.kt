@@ -1,11 +1,20 @@
 package com.phoneassistant
 
 import android.content.Context
+import android.content.SharedPreferences
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
+import java.security.KeyStore
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Talks to any OpenAI-compatible chat completions endpoint.
@@ -34,7 +43,7 @@ object AssistantBrain {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return Config(
             baseUrl = prefs.getString("baseUrl", DEFAULT_BASE) ?: DEFAULT_BASE,
-            apiKey = prefs.getString("apiKey", "") ?: "",
+            apiKey = readApiKey(prefs),
             model = prefs.getString("model", DEFAULT_MODEL) ?: DEFAULT_MODEL
         )
     }
@@ -43,12 +52,86 @@ object AssistantBrain {
         store(ctx, Config(baseUrl, apiKey, model), verified = false)
 
     private fun store(ctx: Context, config: Config, verified: Boolean) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        val edit = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString("baseUrl", config.baseUrl.ifBlank { DEFAULT_BASE })
-            .putString("apiKey", config.apiKey)
             .putString("model", config.model.ifBlank { DEFAULT_MODEL })
             .putBoolean(SETUP_VERIFIED, verified)
-            .apply()
+        // The key is sealed with the Keystore before it is written, like the logins vault.
+        // If it cannot be sealed, the previously stored key is left alone rather than
+        // falling back to plain text.
+        if (config.apiKey.isEmpty()) edit.remove("apiKey")
+        else runCatching { edit.putString("apiKey", sealKey(config.apiKey)) }
+            .onFailure { Diag.caught("api key · sealing", it) }
+        edit.apply()
+    }
+
+    // ------------------------------------------------------------- key sealing
+
+    /** The API key is sealed under its own Keystore alias, separate from the vault's. */
+    private const val KEY_ALIAS = "pip_brain"
+    private const val ENC_PREFIX = "enc:v1:"
+    private const val CIPHER = "AES/GCM/NoPadding"
+    private const val KEYSTORE = "AndroidKeyStore"
+    private const val TAG_BITS = 128
+
+    /** GCM's own nonce length. It is stored in front of the ciphertext. */
+    private const val IV_BYTES = 12
+
+    /**
+     * Reads the stored key. Values from older versions are plain text; they are sealed in
+     * place the first time they are read. A blob that cannot be opened is treated as
+     * missing and left untouched — never overwritten — so only the key itself is lost.
+     */
+    private fun readApiKey(prefs: SharedPreferences): String {
+        val raw = prefs.getString("apiKey", "") ?: ""
+        if (!raw.startsWith(ENC_PREFIX)) {
+            if (raw.isNotEmpty()) {
+                runCatching { prefs.edit().putString("apiKey", sealKey(raw)).apply() }
+                    .onFailure { Diag.caught("api key · sealing", it) }
+            }
+            return raw
+        }
+        return try {
+            unsealKey(raw)
+        } catch (e: Exception) {
+            Diag.caught("api key · opening", e)
+            ""
+        }
+    }
+
+    private fun sealKey(plain: String): String {
+        val cipher = Cipher.getInstance(CIPHER)
+        cipher.init(Cipher.ENCRYPT_MODE, brainKey())
+        val body = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
+        // The nonce is not a secret, and it has to be kept: the same one twice would break
+        // the cipher that protects everything else.
+        return ENC_PREFIX + Base64.encodeToString(cipher.iv + body, Base64.NO_WRAP)
+    }
+
+    private fun unsealKey(blob: String): String {
+        val packed = Base64.decode(blob.removePrefix(ENC_PREFIX), Base64.NO_WRAP)
+        if (packed.size <= IV_BYTES) throw IllegalArgumentException("stored key is too short")
+        val cipher = Cipher.getInstance(CIPHER)
+        cipher.init(Cipher.DECRYPT_MODE, brainKey(), GCMParameterSpec(TAG_BITS, packed, 0, IV_BYTES))
+        return String(cipher.doFinal(packed, IV_BYTES, packed.size - IV_BYTES), Charsets.UTF_8)
+    }
+
+    private fun brainKey(): SecretKey {
+        val store = KeyStore.getInstance(KEYSTORE).apply { load(null) }
+        val existing = store.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
+        if (existing != null) return existing.secretKey
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
+        generator.init(
+            KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+        )
+        return generator.generateKey()
     }
 
     internal fun setupComplete(ctx: Context): Boolean =
@@ -113,12 +196,12 @@ object AssistantBrain {
                 // Spoken follow-ups can use only the immediately preceding unlocked voice exchange.
                 val history = if (handsFree) buildList {
                     voiceContext?.let {
-                        add(Memory.Msg("user", it.input))
-                        add(Memory.Msg("assistant", it.reply))
+                        add(Msg("user", it.input))
+                        add(Msg("assistant", it.reply))
                     }
-                    add(Memory.Msg("user", message))
+                    add(Msg("user", message))
                 } else {
-                    val stored = ChatRecovery.attempt(emptyList<Memory.Msg>(), { Diag.chatFailure("chat history", it) }) {
+                    val stored = ChatRecovery.attempt(emptyList<Msg>(), { Diag.chatFailure("chat history", it) }) {
                         Memory.history(appContext)
                     }
                     Memory.forReply(stored, message)
@@ -155,10 +238,10 @@ object AssistantBrain {
                 if (!ChatTurns.isCurrent(turn)) return@attempt TaskOutcome.Failed
                 val history = buildList {
                     voiceContext?.let {
-                        add(Memory.Msg("user", it.input))
-                        add(Memory.Msg("assistant", it.reply))
+                        add(Msg("user", it.input))
+                        add(Msg("assistant", it.reply))
                     }
-                    add(Memory.Msg("user", message))
+                    add(Msg("user", message))
                 }
                 val prompt = Persona.systemPrompt(appContext, canAct = true, includePersonalContext = false) +
                     "\n\nThis is a spoken request to work the phone. " + TASK_INSTRUCTIONS
@@ -176,7 +259,7 @@ object AssistantBrain {
         }
     }
 
-    private fun resolveReply(appContext: Context, history: List<Memory.Msg>, stage: String?, event: String?, turn: Long, handsFree: Boolean): Pair<Boolean, String> {
+    private fun resolveReply(appContext: Context, history: List<Msg>, stage: String?, event: String?, turn: Long, handsFree: Boolean): Pair<Boolean, String> {
         if (!ChatTurns.isCurrent(turn)) return false to ""
         val config = config(appContext)
         val latest = history.lastOrNull()?.takeIf { it.role == "user" }?.content.orEmpty()
@@ -252,7 +335,7 @@ object AssistantBrain {
     private fun request(
         config: Config,
         systemPrompt: String,
-        history: List<Memory.Msg>,
+        history: List<Msg>,
         suggestMemory: Boolean
     ): Pair<Boolean, String> {
         if (config.apiKey.isBlank()) {
