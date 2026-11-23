@@ -44,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew :app:lint --no-daemon 2>&1 | tee "$RUNNER_TEMP/step.log" \
-            || { echo "::error title=Lint::$(grep -E '^e: |error: ' "$RUNNER_TEMP/step.log" | head -8 | tr '\n' '|' | cut -c1-2000)"; exit 1; }
+            || { echo "::error title=Lint::$(grep -E 'Error: |error: |^e: |Lint found' "$RUNNER_TEMP/step.log" | head -8 | tr '\n' '|' | cut -c1-2000)"; exit 1; }
       - name: Unit tests (screen builds under Robolectric)
         run: |
           set -euo pipefail
