@@ -86,7 +86,10 @@ android {
             if (pipDevUnsigned) signingConfig = null
         }
         release {
-            isMinifyEnabled = false
+            // Shrink the tester APK, but keep every class and method name: stack traces in
+            // Diagnostics crash notes must stay readable, and the JNI bindings resolve
+            // their methods by name (see proguard-rules.pro).
+            isMinifyEnabled = true
             // Assemble unsigned. Sign locally with the owner's private key (see DISTRIBUTION.md).
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
