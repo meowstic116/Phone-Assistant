@@ -3248,6 +3248,9 @@ class OverlayService : Service(), PropHost {
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            // Whatever changed, the task clock's next look is now wrong: a locked phone
+            // sleeps to a deadline, and waking (or locking) is exactly what moves it.
+            TaskRunner.poke()
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
                     screenOffGeneration++

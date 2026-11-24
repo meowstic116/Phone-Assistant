@@ -39,6 +39,12 @@ object AssistantBrain {
     private val executor = Executors.newSingleThreadExecutor()
     private val setupExecutor = Executors.newSingleThreadExecutor()
 
+    // The automatic watcher's question runs apart from conversation: a screen check is a
+    // housekeeping call and must never sit behind a slow chat reply, and a reply the user
+    // is waiting on must never sit behind the watcher. One check is in flight at a time
+    // regardless — the task runner only ever asks the next question after the last lands.
+    private val watchExecutor = Executors.newSingleThreadExecutor()
+
     fun config(ctx: Context): Config {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return Config(
@@ -396,7 +402,7 @@ object AssistantBrain {
      */
     internal fun screenCheck(ctx: Context, question: String, onDone: (Boolean?) -> Unit) {
         val appContext = ctx.applicationContext
-        executor.execute {
+        watchExecutor.execute {
             val done = { answer: Boolean? -> onDone(answer) }
             val config = config(appContext)
             if (config.apiKey.isBlank() || !Screen.available()) return@execute done(null)
@@ -521,6 +527,10 @@ object AssistantBrain {
             .put("messages", messages)
             .put("temperature", temperature)
             .put("max_tokens", maxTokens)
+        // No disconnect() on the happy path: a closed socket means a fresh TCP and TLS
+        // handshake on the next call, and this path is every chat reply, every screen
+        // check, and every step of every phone job. Reading the body fully and closing
+        // the streams hands the connection back to the JVM's keep-alive pool instead.
         val connection = (URL(SetupPolicy.endpoint(config.baseUrl)).openConnection() as javax.net.ssl.HttpsURLConnection).apply {
             requestMethod = "POST"
             // Never forward the authenticated POST or its contents to redirect targets.
@@ -543,9 +553,13 @@ object AssistantBrain {
                 // that keeps trickling in could stall every reply behind it.
                 it.readBounded(256 * 1024, budgetNanos = (if (setup) 15L else 25L) * 1_000_000_000L)
             }
+            // An error body is deliberately never read, so its socket cannot be reused;
+            // close it here rather than leave it lingering. (Contents stay unread.)
+            if (stream == null && code !in 200..299) connection.disconnect()
             return HttpReply(code, raw)
-        } finally {
-            connection.disconnect()
+        } catch (t: Throwable) {
+            runCatching { connection.disconnect() }
+            throw t
         }
     }
 }

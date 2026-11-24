@@ -10,6 +10,7 @@ kotlinc app/src/main/java/com/phoneassistant/JobProgress.kt app/src/main/java/co
   app/src/main/java/com/phoneassistant/ToyMotion.kt app/src/main/java/com/phoneassistant/SpotifyQuickPlan.kt \
   app/src/main/java/com/phoneassistant/DoomscrollMotion.kt app/src/main/java/com/phoneassistant/HomeScreenPolicy.kt \
   app/src/main/java/com/phoneassistant/SetupPolicy.kt app/src/main/java/com/phoneassistant/WateringPose.kt \
+  app/src/main/java/com/phoneassistant/PlantSway.kt \
   app/src/main/java/com/phoneassistant/PreferredName.kt app/src/main/java/com/phoneassistant/MemorySuggestion.kt \
   app/src/main/java/com/phoneassistant/NowPlaying.kt app/src/main/java/com/phoneassistant/PhoneContext.kt \
   app/src/main/java/com/phoneassistant/MessageNotifications.kt \

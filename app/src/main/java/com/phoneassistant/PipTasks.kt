@@ -13,6 +13,18 @@ internal object PipTasks {
     /** Called after any change, so open menus can re-render. */
     var onChanged: (() -> Unit)? = null
 
+    // A second channel for listeners that are not the menu (the task runner wakes on
+    // it): onChanged is one slot, and an open menu already owns it.
+    private val storeListeners = mutableListOf<() -> Unit>()
+
+    fun addStoreListener(listener: () -> Unit) {
+        storeListeners.add(listener)
+    }
+
+    fun removeStoreListener(listener: () -> Unit) {
+        storeListeners.remove(listener)
+    }
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun all(ctx: Context): List<PipTask> =
@@ -36,5 +48,6 @@ internal object PipTasks {
         change(lines)
         prefs(ctx).edit().putStringSet(KEY, lines).apply()
         onChanged?.invoke()
+        storeListeners.toList().forEach { it() }
     }
 }
