@@ -263,7 +263,7 @@ object Agent {
                         finish("I couldn't open $commLabel.", "communication app launch failed")
                         return
                     }
-                    SystemClock.sleep(OPEN_MS)
+                    awaitApp(commPackage)
                 }
             }
             val named = if (communication == null && playlist == null) Screen.appInRequest(apps, request) else null
@@ -286,7 +286,7 @@ object Agent {
                     if (opened) "opened it" else "$FAILED ${named.label} would not open",
                     opened
                 )
-                if (opened) SystemClock.sleep(OPEN_MS)
+                if (opened) awaitApp(named.packageName)
             }
 
             val expectedPackage = commPackage ?: SpotifyQuickPlan.PACKAGE.takeIf { playlist != null }
@@ -507,6 +507,20 @@ object Agent {
         }
         web.failed(target.label)
         return "$FAILED no navigation verified for this title; don't retry it"
+    }
+
+    /**
+     * Waits for an app that has just been opened: once its window is up and readable the
+     * job goes on, instead of always waiting out the old fixed pause. The cap is that same
+     * pause, so a slow app keeps all the patience it ever had.
+     */
+    private fun awaitApp(pkg: String) {
+        val end = SystemClock.uptimeMillis() + OPEN_MS
+        while (SystemClock.uptimeMillis() < end) {
+            val up = runCatching { Screen.snapshot(expectedApp = pkg) }.getOrNull()
+            if (up != null && up.listing.isNotBlank()) return
+            SystemClock.sleep(120L)
+        }
     }
 
     /**
