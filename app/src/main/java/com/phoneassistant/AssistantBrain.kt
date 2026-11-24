@@ -320,8 +320,13 @@ object AssistantBrain {
         }
         if (!result.first) return result
         val (line, payload) = MemorySuggestion.splitReply(result.second)
-        // A spoken turn is read-only: a stray delegation must not become a secret phone job.
-        if (handsFree && (line.trimStart().startsWith("{") || Agent.delegated(line) != null)) {
+        // A spoken turn may hand over work — a job for his hands, or a task for later — and the
+        // caller runs it with the same guards typed words get, the money ones included. Anything
+        // else JSON-shaped is a stray artifact: never an answer to read aloud.
+        if (handsFree && (line.trimStart().startsWith("{") || Agent.delegated(line) != null) &&
+            Agent.delegated(line) == null && taskRequest(line) == null &&
+            runCatching { JSONObject(line.trimStart()).optString("action") }.getOrDefault("") !in
+                setOf("refuse_purchase", "inspect_screen")) {
             return true to "I’d rather do that from the phone screen. Tap Pip to type it."
         }
         if (line.startsWith("{") && runCatching {

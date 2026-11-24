@@ -27,10 +27,12 @@ internal object DrivingVoice {
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private var queryInProgress = false
+    /** The last projection answer, so a second request during a query is not left unknowing. */
+    @Volatile private var lastAnswer: Boolean? = null
 
     /** Query the AndroidX CarConnection provider contract, not Bluetooth or an untrusted broadcast. */
     fun projected(context: Context, done: (Boolean?) -> Unit) {
-        if (queryInProgress) { done(null); return }
+        if (queryInProgress) { done(lastAnswer); return }
         val ctx = context.applicationContext
         val signal = CancellationSignal()
         queryInProgress = true
@@ -45,7 +47,9 @@ internal object DrivingVoice {
         worker.execute {
             val result = runCatching {
                 val provider = ctx.packageManager.resolveContentProvider(AUTHORITY, 0)
-                if (provider?.packageName != HOST) null else ctx.contentResolver.query(projectionUri,
+                // No projection host on the phone means nothing to project to: that is an
+                // answer (not connected), not an unknown.
+                if (provider?.packageName != HOST) false else ctx.contentResolver.query(projectionUri,
                     arrayOf(CONNECTION_COLUMN), null, null, null, signal)?.use { row ->
                     val index = row.getColumnIndex(CONNECTION_COLUMN)
                     if (index < 0 || !row.moveToFirst() || row.isNull(index)) null else when (row.getInt(index)) {
@@ -58,7 +62,10 @@ internal object DrivingVoice {
             main.post {
                 queryInProgress = false
                 main.removeCallbacks(deadline)
-                if (!delivered) done(result)
+                if (!delivered) {
+                    result?.let { lastAnswer = it }
+                    done(result)
+                }
             }
         }
     }
