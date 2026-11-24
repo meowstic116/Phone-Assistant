@@ -1422,6 +1422,16 @@ fun main() {
     check(ToyFooting.beside(8f, 172, 64, 360, 6f, preferLeft = true) == 218f)
     check(ToyFooting.beside(180f, 172, 64, 360, 6f, preferLeft = false) == 142f)
 
+    // The plant's idle breeze: slow, small, and phased from elapsed time so it never
+    // jumps. A sprout rocks a little; a grown plant, with more sail, rocks a little more.
+    check(PlantSway.angle(0L, 0L, stage = 0) == 0f) // It starts at rest.
+    val sproutPeak = PlantSway.angle(0L, 1_100L, stage = 0) // A quarter of the cycle in.
+    check(sproutPeak > 1.1f && sproutPeak < 1.2f)
+    check(PlantSway.angle(0L, 1_100L, stage = 3) > sproutPeak)
+    check(kotlin.math.abs(PlantSway.angle(0L, 2_200L, stage = 0)) < 0.001f) // Halfway back home.
+    check(kotlin.math.abs(PlantSway.angle(500L, 4_900L, stage = 2)) < 0.001f) // A full period home.
+    check(kotlin.math.abs(PlantSway.angle(0L, 3_000_000L, stage = 3)) <= 2.5f) // Always in range.
+
     val counter = OverlayBounds.Box(36, 180, 112, 148)
     val station = LemonadeLayout.station(counter.x.toFloat(), counter.y.toFloat(), counter.width, 86, 1f)
     check(station == DragMotion.Point(92f, 248f))

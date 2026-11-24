@@ -42,6 +42,9 @@ class Plant(host: PropHost) : Prop(host) {
     /** Degrees of lean toward Pip, eased rather than set, so a step is a sway and not a jump. */
     private var lean = 0f
 
+    /** When the breeze last asked for a repaint; it keeps a standing plant breathing. */
+    private var lastSwayFrameAt = 0L
+
     private val outline = stroke(0xFF352445.toInt(), 2.1f)
     private val pot = fill(0xFFFF8B99.toInt())
     private val potShade = fill(0xFFD45582.toInt())
@@ -158,6 +161,13 @@ class Plant(host: PropHost) : Prop(host) {
     override fun onFrame() {
         val now = SystemClock.uptimeMillis()
         leanTowardsPip()
+        // The breeze runs whether or not anything moves, so a standing plant is repainted
+        // at the idle rate — the pet's own sway paces itself the same way. When Pip does
+        // move, lean's repaints carry the sway along for free.
+        if (now - lastSwayFrameAt >= 50L) {
+            lastSwayFrameAt = now
+            invalidate()
+        }
         if (dropUntil > 0L && now > dropUntil) {
             dropUntil = 0L
             invalidate()
@@ -217,7 +227,7 @@ class Plant(host: PropHost) : Prop(host) {
             kotlin.math.sin(t * Math.PI * 2).toFloat() * (1f - t) * 0.12f
         } else 0f
         canvas.save()
-        canvas.rotate(lean, cx, potTop)
+        canvas.rotate(lean + PlantSway.angle(bornAt, now, stage), cx, potTop)
         canvas.scale(1f, bounce, cx, potTop)
         path.reset()
         path.moveTo(cx, potTop)
