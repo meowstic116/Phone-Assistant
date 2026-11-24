@@ -15,6 +15,9 @@ import android.os.SystemClock
  * recording at that file name and its toy starts using it — nothing else changes.
  * Until a slot holds real audio it is a silent placeholder, so its toy stays quiet.
  *
+ * One sound is not a toy: toy_ack is his "I heard my name" chime, played by the
+ * wake word listener through [cue] — it never asks the toy-sounds switch.
+ *
  *   toy_pop    a bubble popping         toy_clink  ice in a glass
  *   toy_squeak the lemonade handle      toy_drip   a water drop
  *   toy_pour   liquid into a glass      toy_swipe  a quick page swish
@@ -51,6 +54,7 @@ object ToyAudio {
 
     /** The sounds and the files that hold them. The names are the upload contract. */
     enum class Sound(val raw: Int) {
+        ACK(R.raw.toy_ack),
         POP(R.raw.toy_pop),
         SQUEAK(R.raw.toy_squeak),
         POUR(R.raw.toy_pour),
@@ -141,6 +145,17 @@ object ToyAudio {
         if (!enabled(ctx)) return
         if (ringerMuted(ctx)) return
         if (SystemClock.elapsedRealtime() < duckedUntil) return
+        emit(ctx, sound, gain)
+    }
+
+    /**
+     * A cue is feedback about the conversation itself — Pip's "I heard my name" chime. It
+     * plays even with toy sounds off or the ringer silent: the listener answering the user is
+     * not a toy squeaking. The volume slider still shapes it.
+     */
+    fun cue(ctx: Context, sound: Sound, gain: Float = 1f) = emit(ctx, sound, gain)
+
+    private fun emit(ctx: Context, sound: Sound, gain: Float) {
         val level = (BASE_GAIN * gain * volume(ctx)).coerceIn(0f, 1f)
         if (level <= 0.001f) return
         val fresh = pool(ctx)

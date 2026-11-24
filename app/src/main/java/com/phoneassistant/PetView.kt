@@ -74,9 +74,18 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
     private var doomscrollCue = DoomscrollMotion.Cue.CLEAR
     private var doomscrollAt = 0L
     private var doomscrollSide = -1f
+
+    /** When the "I heard my name" mark over his head goes away. */
+    private var nameCueUntil = 0L
     private val swipeInk = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFF99EDFF.toInt()
         strokeCap = Paint.Cap.ROUND
+    }
+
+    /** The listener heard his name; answers with a mark over his head for a moment. */
+    internal fun showNameCue() {
+        nameCueUntil = SystemClock.uptimeMillis() + 2_400L
+        invalidate()
     }
 
     internal fun showDoomscrollCue(cue: DoomscrollMotion.Cue, side: Float = -1f) {
@@ -354,6 +363,8 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
             foot(cx + spread - legW / 2f, rightLift, pickup?.rightFoot ?: 0f)
         }
 
+        if (now < nameCueUntil) drawNameCue(canvas, cx, bodyCenterY - bodyH / 2f)
+
         canvas.save()
         canvas.translate(cx, bodyCenterY)
         val poseTilt = tilt + gardenLean * 10f
@@ -455,6 +466,22 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
             canvas.drawOval(x - r, y - r * 0.35f, x + r, y + r * 0.35f, powerInk)
             canvas.drawOval(x - r * 0.35f, y - r, x + r * 0.35f, y + r, powerInk)
         }
+    }
+
+    /** "I heard you": a small exclamation over his head while the name is still fresh. */
+    private fun drawNameCue(canvas: Canvas, cx: Float, bodyTop: Float) {
+        val top = bodyTop - dp(23f)
+        val barW = dp(3f)
+        val barH = dp(8f)
+        val dotY = top + barH + dp(2.2f)
+        fillScratch.style = Paint.Style.FILL
+        fillScratch.alpha = 255
+        fillScratch.color = 0xFF4A3B5C.toInt()
+        canvas.drawRoundRect(cx - barW, top - dp(1f), cx + barW, top + barH + dp(1f), dp(2.2f), dp(2.2f), fillScratch)
+        canvas.drawCircle(cx, dotY, dp(2.4f), fillScratch)
+        fillScratch.color = 0xFFFFD66B.toInt()
+        canvas.drawRoundRect(cx - barW * 0.55f, top, cx + barW * 0.55f, top + barH, dp(1.3f), dp(1.3f), fillScratch)
+        canvas.drawCircle(cx, dotY, dp(1.4f), fillScratch)
     }
 
     private fun drawFace(canvas: Canvas, t: Float, now: Long, attention: DoomscrollMotion.Pose?) {

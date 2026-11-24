@@ -156,6 +156,14 @@ class OverlayService : Service(), PropHost {
             else service.handleVoice(text, stillListening, done)
         }
 
+        /** The listener heard his name; mark it on him so a phone in hand says "got it". */
+        fun heardName() {
+            instance?.let {
+                it.pet?.showNameCue()
+                it.petHost?.showNameCue()
+            }
+        }
+
         internal fun discardVoiceDraft() {
             instance?.let {
                 it.voiceExchange.clear()
@@ -865,10 +873,10 @@ class OverlayService : Service(), PropHost {
         replyAskedAt = SystemClock.uptimeMillis()
     }
 
-    private fun modelSays(text: String) {
+    private fun modelSays(text: String, handsFree: Boolean = false) {
         awaitingReply = false
         replyUntil = SystemClock.uptimeMillis() + REPLY_HOLD_MS
-        sayAloud(text, finalReply = true)
+        sayAloud(text, finalReply = true, handsFree = handsFree)
     }
 
     /**
@@ -2353,8 +2361,13 @@ class OverlayService : Service(), PropHost {
             return
         }
         val local = JobProgress.routePhoneLocally(text)
-        if (!driving && (local || PhoneContext.asksForAppLabel(text) || NowPlaying.requested(text) ||
-                MessageNotifications.request(text) != null)) {
+        // What the phone answers by itself with no screen and no model — a message check, the
+        // playing track, the notification digest — is as safe in the car as the bounded car
+        // commands, so the car gate does not hold those back. The rest of local is screen
+        // work and stays parked-only.
+        val spokenLocal = MessageNotifications.request(text) != null || NowPlaying.requested(text) ||
+            NotificationDigest.request(text)
+        if (spokenLocal || (!driving && (local || PhoneContext.asksForAppLabel(text)))) {
             runLocally(text, done)
             return
         }
@@ -2470,14 +2483,19 @@ class OverlayService : Service(), PropHost {
     private fun runLocally(text: String, done: (WakeFeedback) -> Unit) {
         val turn = ChatTurns.begin()
         // A spoken message check is answered by its own route and reads nothing aloud to
-        // anyone nearby unless the user asked for it.
+        // anyone nearby unless the user asked for it. Asked by voice, it is spoken even with
+        // the screen locked — the car and the pocket are exactly where it is wanted — and the
+        // text goes on screen only when there is a lit screen to put it on.
         MessageNotifications.request(text)?.let { request ->
             Agent.cancel()
             hideThinking()
             awaitingReply = false
-            PrivateMessageRead.present(this, PipMediaAccess.messageAnswer(this, request), turn) { reply, _ ->
-                speechBubble.setScreenHidden(false)
-                speechBubble.text(reply, readMs = bubbleLifetime(reply), conversation = true, privatePreview = true)
+            PrivateMessageRead.present(this, PipMediaAccess.messageAnswer(this, request, handsFree = true),
+                turn, handsFree = true) { reply, _ ->
+                if (screenUsable()) {
+                    speechBubble.setScreenHidden(false)
+                    speechBubble.text(reply, readMs = bubbleLifetime(reply), conversation = true, privatePreview = true)
+                }
             }
             done(WakeFeedback.REPLIED)
             return
@@ -2486,7 +2504,16 @@ class OverlayService : Service(), PropHost {
             val reply = ChatRecovery.attempt(ChatRecovery.REPLY_FAILED, { Diag.chatFailure("now playing reply", it) }) {
                 PipMediaAccess.answer(this)
             }
-            modelSays(reply)
+            modelSays(reply, handsFree = true)
+            done(WakeFeedback.REPLIED)
+            return
+        }
+        if (NotificationDigest.request(text)) {
+            val reply = ChatRecovery.attempt(ChatRecovery.REPLY_FAILED, { Diag.chatFailure("notification digest", it) }) {
+                PipMediaAccess.notificationDigest(this)
+            }
+            // Asked for them out loud, so they are spoken in the car and the pocket too.
+            modelSays(reply, handsFree = true)
             done(WakeFeedback.REPLIED)
             return
         }

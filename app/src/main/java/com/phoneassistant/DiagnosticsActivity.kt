@@ -193,6 +193,7 @@ class DiagnosticsActivity : Activity() {
         line("listener", WakeListenService.feedback.message)
         line("driving commands", if (VoiceSettings.drivingEnabled(this)) "on" else "off")
         line("car audio", CarAudio.summary(this))
+        line("mic route", WakeListenService.micRoute())
         line("maps notification access", if (PipMediaAccess.enabled(this)) "on — navigation can be read and stopped"
             else "off — navigation stops run blind")
         line("toy sounds", ToyAudio.summary(this))
