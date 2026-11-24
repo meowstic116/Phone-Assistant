@@ -480,15 +480,15 @@ class PipSettingsActivity : Activity() {
         plainButton("Painting gallery") { startActivity(Intent(this, PaintingGalleryActivity::class.java)) }
         toggle("Toy sound effects", ToyAudio.enabled(this), Notes.toySounds) {
             ToyAudio.setEnabled(this, it)
-            if (it) ToyAudio.play(this, ToySounds.Sound.POP, 0.9f)
+            if (it) ToyAudio.play(this, ToyAudio.Sound.POP, 0.9f)
         }
         volumeSlider("Toy sound volume", { Notes.toySoundsVolume }, 20, ToyAudio.volume(this),
             { ToyAudio.setVolume(this, it) }) {
-            ToyAudio.play(this, ToySounds.Sound.SQUEAK, 0.9f)
+            ToyAudio.play(this, ToyAudio.Sound.SQUEAK, 0.9f)
         }
         plainButton("Try a toy sound") {
-            ToyAudio.play(this, ToySounds.Sound.SQUEAK, 1f)
-            ToyAudio.playPair(this, ToySounds.Sound.POP, ToySounds.Sound.GOAL, 1f)
+            ToyAudio.play(this, ToyAudio.Sound.SQUEAK, 1f)
+            ToyAudio.playPair(this, ToyAudio.Sound.POP, ToyAudio.Sound.GOAL, 1f)
         }
         return toyHeading
     }
