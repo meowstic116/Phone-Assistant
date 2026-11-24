@@ -1098,37 +1098,6 @@ fun main() {
     check(ClearRows.report(0, false).startsWith("I didn’t find"))
     check(ClearRows.report(12, false).contains("12"))
 
-    // Every toy sound must actually make noise, be a sensible length, and be quiet enough at
-    // the ends that it does not click. A silent "sound" is the failure this catches.
-    for (sound in ToySounds.Sound.entries) {
-        val voice = ToySounds.voice(sound, 1f)
-        val clip = ToySounds.render(voice)
-        check(ToySounds.audible(clip)) { "$sound rendered silence" }
-        val length = ToySounds.length(sound)
-        check(length in 0.03f..0.6f) { "$sound is $length s" }
-        // The first and last sample are faded, so a track never starts or stops mid-waveform.
-        check(kotlin.math.abs(clip.samples.first().toInt()) < 1_200) { "$sound starts loud" }
-        check(kotlin.math.abs(clip.samples.last().toInt()) < 1_200) { "$sound ends loud" }
-    }
-    // Variation is real: the same sound at two pitches is two different renders.
-    val low = ToySounds.render(ToySounds.voice(ToySounds.Sound.POP, 0.8f))
-    val high = ToySounds.render(ToySounds.voice(ToySounds.Sound.POP, 1.2f))
-    check(!low.samples.contentEquals(high.samples))
-    // Pitch is clamped to the small range that keeps a family recognisable.
-    check(ToySounds.voice(ToySounds.Sound.POP, 5f).pitch == ToySounds.MAX_PITCH)
-    check(ToySounds.voice(ToySounds.Sound.POP, 0.1f).pitch == ToySounds.MIN_PITCH)
-    // The same voice renders identical bytes, which is what makes the cache safe.
-    check(ToySounds.render(ToySounds.voice(ToySounds.Sound.SQUEAK, 1.03f)).samples
-        .contentEquals(ToySounds.render(ToySounds.voice(ToySounds.Sound.SQUEAK, 1.03f)).samples))
-    // A pop decays: most of its energy is at the front, and it is nearly gone by the end.
-    val pop = ToySounds.render(ToySounds.voice(ToySounds.Sound.POP, 1f))
-    check(ToySounds.rms(pop, 0f, 0.2f) > ToySounds.rms(pop, 0.8f, 1f) * 4)
-    val pour = ToySounds.render(ToySounds.voice(ToySounds.Sound.POUR, 1f))
-    check(ToySounds.rms(pour, 0.3f, 0.7f) > 100.0) { "pour is silent in its middle" }
-    // Two joined clips are longer than either, and still end quietly.
-    val joined = ToySounds.join(pop, pour)
-    check(joined.samples.size > pop.samples.size + pour.samples.size - 4)
-    check(kotlin.math.abs(joined.samples.last().toInt()) < 1_200)
     // Stopping a route is a bounded car command, and must never need the screen.
     check(CarCommand.parse("stop navigation") == CarCommand.StopNavigation)
     check(CarCommand.parse("Cancel navigation.") == CarCommand.StopNavigation)

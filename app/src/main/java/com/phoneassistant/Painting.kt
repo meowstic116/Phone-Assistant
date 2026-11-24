@@ -89,7 +89,7 @@ internal class Painting(host: PropHost, val picture: PaintingGallery.Picture, pr
             // Only once he is actually painting, and only every so often.
             if (before > 0.02f && now - lastStrokeSound >= 340L) {
                 lastStrokeSound = now
-                sound(if (brush > 0.97f) ToySounds.Sound.SPLAT else ToySounds.Sound.CHALK, 0.55f)
+                sound(if (brush > 0.97f) ToyAudio.Sound.SPLAT else ToyAudio.Sound.CHALK, 0.55f)
             }
             if (brush >= 1f) finishPainting()
             invalidate()
@@ -107,7 +107,7 @@ internal class Painting(host: PropHost, val picture: PaintingGallery.Picture, pr
         host.cancelPetWalk(this)
         val canWalkAway = host.petLeaveSeat(this)
         host.feel(PetView.Mood.HAPPY, 3200L)
-        host.sound(ToySounds.Sound.SPARKLE, 0.8f)
+        host.sound(ToyAudio.Sound.SPARKLE, 0.8f)
         host.say("done. it's \"${picture.title}\". *holds it out* still wet, and I'm quietly pleased.")
         if (canWalkAway) host.petWalkTo(this,
             host.stageWidth() * (0.2f + Random.nextFloat() * 0.6f),

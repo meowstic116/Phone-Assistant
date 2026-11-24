@@ -876,12 +876,12 @@ class OverlayService : Service(), PropHost {
      * switch covers every toy and his own voice can hush them. A toy sound never competes with
      * a spoken line: while the reply has the floor the effects wait for the next interaction.
      */
-    override fun sound(effect: ToySounds.Sound, gain: Float) {
+    override fun sound(effect: ToyAudio.Sound, gain: Float) {
         if (replyHasFloor()) return
         ToyAudio.play(this, effect, gain)
     }
 
-    override fun postDelayedSound(effect: ToySounds.Sound, delayMs: Long, gain: Float) {
+    override fun postDelayedSound(effect: ToyAudio.Sound, delayMs: Long, gain: Float) {
         handler.postDelayed({ sound(effect, gain) }, delayMs.coerceIn(0L, 2_000L))
     }
 
@@ -1120,7 +1120,7 @@ class OverlayService : Service(), PropHost {
         toyHop = null
         // Feet on the sheet: the softest sound in the box, because it is the landing and not
         // the event. Only on a real landing — a cancelled hop went nowhere.
-        if (landed) sound(ToySounds.Sound.TAP, 0.45f)
+        if (landed) sound(ToyAudio.Sound.TAP, 0.45f)
         pet?.apply { scaleX = 1f; scaleY = 1f }
         if (!landed) {
             // A moved sheet invalidates this target. Settle at the current horizontal spot

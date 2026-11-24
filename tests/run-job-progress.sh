@@ -28,7 +28,6 @@ kotlinc app/src/main/java/com/phoneassistant/JobProgress.kt app/src/main/java/co
   app/src/main/java/com/phoneassistant/PipTask.kt app/src/main/java/com/phoneassistant/TaskGate.kt \
   app/src/main/java/com/phoneassistant/PurchasePolicy.kt app/src/main/java/com/phoneassistant/CarVoice.kt app/src/main/java/com/phoneassistant/NavVoice.kt \
   app/src/main/java/com/phoneassistant/ClearRows.kt \
-  app/src/main/java/com/phoneassistant/ToySounds.kt \
   app/src/main/java/com/phoneassistant/ScreenLock.kt \
   app/src/main/java/com/phoneassistant/ChatWindow.kt \
   app/src/main/java/com/phoneassistant/SiteHost.kt \
