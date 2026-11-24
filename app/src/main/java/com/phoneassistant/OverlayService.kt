@@ -44,6 +44,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.random.Random
+import org.json.JSONObject
 
 /**
  * Owns the overlay windows: the character, a speech bubble or thinking indicator above
@@ -154,6 +155,14 @@ class OverlayService : Service(), PropHost {
             val service = instance
             if (service == null || service.ending || !running) done(WakeFeedback.BUSY)
             else service.handleVoice(text, stillListening, done)
+        }
+
+        /** The listener heard his name; mark it on him so a phone in hand says "got it". */
+        fun heardName() {
+            instance?.let {
+                it.pet?.showNameCue()
+                it.petHost?.showNameCue()
+            }
         }
 
         internal fun discardVoiceDraft() {
@@ -865,10 +874,10 @@ class OverlayService : Service(), PropHost {
         replyAskedAt = SystemClock.uptimeMillis()
     }
 
-    private fun modelSays(text: String) {
+    private fun modelSays(text: String, handsFree: Boolean = false) {
         awaitingReply = false
         replyUntil = SystemClock.uptimeMillis() + REPLY_HOLD_MS
-        sayAloud(text, finalReply = true)
+        sayAloud(text, finalReply = true, handsFree = handsFree)
     }
 
     /**
@@ -2251,6 +2260,9 @@ class OverlayService : Service(), PropHost {
     }
 
     private fun handleVoice(text: String, stillListening: () -> Boolean, done: (WakeFeedback) -> Unit) {
+        // A time or a condition plus what to do makes a task record — nothing on the screen and
+        // nothing to drive — so it is decided on the phone wherever Pip is asked, car included.
+        if (taskFromWords(text, done)) return
         val command = CarCommand.parse(text)
         val task = command != null || CarCommand.looksLikeTask(text)
         if (!task && !VoiceSettings.drivingEnabled(this)) {
@@ -2259,6 +2271,13 @@ class OverlayService : Service(), PropHost {
         }
         DrivingVoice.projected(this) { projected ->
             if (instance !== this || ending || !stillListening()) { done(WakeFeedback.BUSY); return@projected }
+            // A definite "no projection" is a phone, not a car: here speech works like typing,
+            // and every request takes the phone's own routes. Only an actually projected
+            // phone takes the driving-command lane.
+            if (projected == false) {
+                handleOrdinaryVoice(text, stillListening, done, driving = false)
+                return@projected
+            }
             val enabled = VoiceSettings.drivingEnabled(this)
             val route = CarVoiceRoute.choose(enabled, projected, supported = command != null, task = task)
             Diag.carConnection(CarVoiceRoute.label(route, projected))
@@ -2323,11 +2342,12 @@ class OverlayService : Service(), PropHost {
         }
         // Tapping Pip first opens an empty composer. It shouldn't swallow a spoken request.
         if (inputBar != null) closeChat()
-        // Navigation questions and stops are answered from Maps' notification, so they need no
-        // screen and no unlock whether or not a car is attached.
-        val navigation = CarCommand.parse(text)
-        if (navigation == CarCommand.StopNavigation || navigation == CarCommand.NavigationState) {
-            runNavigation(navigation, done, driving)
+        // A driving command spoken away from the car is still the same bounded action — a
+        // media control or a Maps handoff — so any parsed command runs here, no screen and
+        // no model, whether or not a car is attached.
+        val command = CarCommand.parse(text)
+        if (command != null) {
+            runBoundedCommand(command, done, driving)
             return
         }
         // A spoken lock request is answered by the phone itself. It needs no screen and no
@@ -2348,13 +2368,15 @@ class OverlayService : Service(), PropHost {
             return
         }
         // A time or a condition plus what to do makes a task, decided on the phone.
-        TaskCommand.localRequest(text)?.let { request ->
-            storeTask(PipTask.from(request, System.currentTimeMillis(), System.nanoTime().toInt()), text, done)
-            return
-        }
+        if (taskFromWords(text, done)) return
         val local = JobProgress.routePhoneLocally(text)
-        if (!driving && (local || PhoneContext.asksForAppLabel(text) || NowPlaying.requested(text) ||
-                MessageNotifications.request(text) != null)) {
+        // What the phone answers by itself with no screen and no model — a message check, the
+        // playing track, the notification digest — is as safe in the car as the bounded car
+        // commands, so the car gate does not hold those back. The rest of local is screen
+        // work and stays parked-only.
+        val spokenLocal = MessageNotifications.request(text) != null || NowPlaying.requested(text) ||
+            NotificationDigest.request(text)
+        if (spokenLocal || (!driving && (local || PhoneContext.asksForAppLabel(text)))) {
             runLocally(text, done)
             return
         }
@@ -2394,6 +2416,48 @@ class OverlayService : Service(), PropHost {
                     if (instance !== this || ending || !ChatTurns.isCurrent(turn)) return@post
                     awaitingReply = false
                     if (!stillListening()) { hideThinking(); leaveAttention(); return@post }
+                    // Work in the words runs here, the same as typed words get it: a job goes
+                    // to his hands, a task with a time stands on its own. A job needs the
+                    // screen, so behind the wheel it waits for parked; storeTask and the
+                    // purchase checks below are the same money guards typing gets.
+                    if (ok) {
+                        val work = MemorySuggestion.splitReply(reply).line
+                        val job = Agent.delegated(work)
+                        val created = AssistantBrain.taskRequest(work)
+                        val refuses = runCatching {
+                            JSONObject(work.trimStart()).optString("action") == "refuse_purchase"
+                        }.getOrDefault(false)
+                        if (job != null || created != null || refuses) {
+                            leaveAttention()
+                            if (refuses || (job != null && PurchasePolicy.asksToPay(job))) {
+                                reviewPurchase(text, done)
+                                return@post
+                            }
+                            if (created != null) {
+                                storeTask(created, text, done)
+                                return@post
+                            }
+                            if (job == null) return@post
+                            if (driving) {
+                                hideThinking()
+                                val line = "That’s work for the phone screen. Try it when you’re parked."
+                                if (screenUsable()) sayAloud(line, finalReply = true, handsFree = true)
+                                else PipVoice.reply(this, line, allowLocked = true)
+                                done(parkedOnly())
+                                return@post
+                            }
+                            if (startJob(job, text, turn)) {
+                                if (unlocked && screenOffGeneration == screenGeneration && bubbleScreenUsable()) {
+                                    voiceExchange.remember(text, "On it.", SystemClock.elapsedRealtime())
+                                }
+                                done(WakeFeedback.REPLIED)
+                            } else {
+                                hideThinking()
+                                done(WakeFeedback.CHAT_FAILED)
+                            }
+                            return@post
+                        }
+                    }
                     ChatRecovery.attempt(Unit, { Diag.chatFailure("voice chat history", it) }) {
                         Memory.append(this, "user", text)
                         if (ok) Memory.append(this, "assistant", reply)
@@ -2416,10 +2480,11 @@ class OverlayService : Service(), PropHost {
     }
 
     /**
-     * A navigation stop or question, answered without the screen. While driving the answer is
-     * spoken with the other hands-free replies; otherwise it goes through the normal bubble.
+     * A bounded command needs no screen and no model, whether or not a car is attached:
+     * navigation questions and stops come from Maps' notification, and a destination or a
+     * media control is the same handoff it is in the car.
      */
-    private fun runNavigation(command: CarCommand, done: (WakeFeedback) -> Unit, driving: Boolean) {
+    private fun runBoundedCommand(command: CarCommand, done: (WakeFeedback) -> Unit, driving: Boolean) {
         fun answer(result: DrivingVoice.Result) {
             Diag.handsFreeCommand(result.message)
             if (driving) {
@@ -2433,18 +2498,29 @@ class OverlayService : Service(), PropHost {
                 modelSays(result.message)
             }
         }
-        if (command == CarCommand.NavigationState) {
-            CarNavigation.status { navigation ->
-                val canInspect = PipMediaAccess.enabled(this)
-                answer(DrivingVoice.Result(
-                    NavVoice.message(NavVoice.Action.STATUS, navigation, canInspect)))
+        when (command) {
+            CarCommand.NavigationState -> {
+                CarNavigation.status { navigation ->
+                    val canInspect = PipMediaAccess.enabled(this)
+                    answer(DrivingVoice.Result(
+                        NavVoice.message(NavVoice.Action.STATUS, navigation, canInspect)))
+                }
             }
-        } else {
-            CarNavigation.stop(this) { action ->
-                answer(DrivingVoice.Result(NavVoice.message(action, null, canInspect = true),
-                    handedOff = true, verified = action == NavVoice.Action.STOPPED_AND_VERIFIED))
+            CarCommand.StopNavigation -> {
+                CarNavigation.stop(this) { action ->
+                    answer(DrivingVoice.Result(NavVoice.message(action, null, canInspect = true),
+                        handedOff = true, verified = action == NavVoice.Action.STOPPED_AND_VERIFIED))
+                }
             }
+            else -> DrivingVoice.execute(this, command, ::answer)
         }
+    }
+
+    /** A time or a condition plus what to do makes a task, decided on the phone. */
+    private fun taskFromWords(text: String, done: (WakeFeedback) -> Unit): Boolean {
+        val request = TaskCommand.localRequest(text) ?: return false
+        storeTask(PipTask.from(request, System.currentTimeMillis(), System.nanoTime().toInt()), text, done)
+        return true
     }
 
     /** A task made from words is stored and confirmed aloud. Money is never a task. */
@@ -2470,14 +2546,19 @@ class OverlayService : Service(), PropHost {
     private fun runLocally(text: String, done: (WakeFeedback) -> Unit) {
         val turn = ChatTurns.begin()
         // A spoken message check is answered by its own route and reads nothing aloud to
-        // anyone nearby unless the user asked for it.
+        // anyone nearby unless the user asked for it. Asked by voice, it is spoken even with
+        // the screen locked — the car and the pocket are exactly where it is wanted — and the
+        // text goes on screen only when there is a lit screen to put it on.
         MessageNotifications.request(text)?.let { request ->
             Agent.cancel()
             hideThinking()
             awaitingReply = false
-            PrivateMessageRead.present(this, PipMediaAccess.messageAnswer(this, request), turn) { reply, _ ->
-                speechBubble.setScreenHidden(false)
-                speechBubble.text(reply, readMs = bubbleLifetime(reply), conversation = true, privatePreview = true)
+            PrivateMessageRead.present(this, PipMediaAccess.messageAnswer(this, request, handsFree = true),
+                turn, handsFree = true) { reply, _ ->
+                if (screenUsable()) {
+                    speechBubble.setScreenHidden(false)
+                    speechBubble.text(reply, readMs = bubbleLifetime(reply), conversation = true, privatePreview = true)
+                }
             }
             done(WakeFeedback.REPLIED)
             return
@@ -2486,7 +2567,16 @@ class OverlayService : Service(), PropHost {
             val reply = ChatRecovery.attempt(ChatRecovery.REPLY_FAILED, { Diag.chatFailure("now playing reply", it) }) {
                 PipMediaAccess.answer(this)
             }
-            modelSays(reply)
+            modelSays(reply, handsFree = true)
+            done(WakeFeedback.REPLIED)
+            return
+        }
+        if (NotificationDigest.request(text)) {
+            val reply = ChatRecovery.attempt(ChatRecovery.REPLY_FAILED, { Diag.chatFailure("notification digest", it) }) {
+                PipMediaAccess.notificationDigest(this)
+            }
+            // Asked for them out loud, so they are spoken in the car and the pocket too.
+            modelSays(reply, handsFree = true)
             done(WakeFeedback.REPLIED)
             return
         }

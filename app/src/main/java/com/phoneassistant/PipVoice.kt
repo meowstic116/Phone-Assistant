@@ -151,7 +151,8 @@ internal object PipVoice {
     }
 
     /** Explicit read-aloud uses only Android voices marked offline, never model/TTS API paths. */
-    fun readPrivate(context: Context, text: String, unavailable: (String) -> Unit, finished: () -> Unit = {}): Long? {
+    fun readPrivate(context: Context, text: String, unavailable: (String) -> Unit,
+                    allowLocked: Boolean = false, finished: () -> Unit = {}): Long? {
         val line = SpeechCaption.literal(text, TextToSpeech.getMaxSpeechInputLength())
         if (line == null) {
             unavailable("This text is empty or too long for Android’s offline voice. Try sharing a shorter selection.")
@@ -160,12 +161,15 @@ internal object PipVoice {
         }
         stop()
         val id = sequence
+        allowLockedPlayback = allowLocked
         val ctx = context.applicationContext
         if (!mayPlay(ctx, id)) return null
         // The overlay isn't always running (e.g. when invoked from Android's Share menu).
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == Intent.ACTION_SCREEN_OFF && id == sequence) stop()
+                // A read the user asked for aloud keeps going with the screen off — the
+                // pocket and the car are exactly where it is wanted.
+                if (!allowLocked && intent?.action == Intent.ACTION_SCREEN_OFF && id == sequence) stop()
             }
         }
         val registered = runCatching {

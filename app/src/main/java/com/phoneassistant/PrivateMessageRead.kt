@@ -30,8 +30,8 @@ internal object PrivateMessageRead {
     data class Result(val text: String, val quote: String? = null, val app: String? = null,
                       val conversation: PendingIntent? = null)
 
-    fun present(ctx: Context, result: Result, turn: Long, show: (String, Boolean) -> Unit) {
-        fun current() = ChatTurns.isCurrent(turn) && PipMediaAccess.canShowMessage(ctx)
+    fun present(ctx: Context, result: Result, turn: Long, handsFree: Boolean = false, show: (String, Boolean) -> Unit) {
+        fun current() = ChatTurns.isCurrent(turn) && (handsFree || PipMediaAccess.canShowMessage(ctx))
         if (!current()) return
         val app = result.app
         val label = app?.let { Screen.appLabel(ctx, it) ?: "your messaging app" }
@@ -42,7 +42,7 @@ internal object PrivateMessageRead {
         }
         // Spoken in order: explain the missing preview, then hand off locally to the app.
         if (app != null) {
-            PipVoice.readPrivate(ctx, announcement, ::voiceProblem) open@{
+            PipVoice.readPrivate(ctx, announcement, ::voiceProblem, handsFree) open@{
                 if (!current()) return@open
                 val conversation = result.conversation?.takeIf { Build.VERSION.SDK_INT >= 31 && it.creatorPackage == app && it.isActivity }
                 val tapped = conversation != null && runCatching { conversation.send() }.isSuccess
@@ -52,7 +52,7 @@ internal object PrivateMessageRead {
                 } else voiceProblem("Android couldn’t open $label.")
             }
         } else {
-            PipVoice.readPrivate(ctx, result.quote ?: announcement, ::voiceProblem)
+            PipVoice.readPrivate(ctx, result.quote ?: announcement, ::voiceProblem, handsFree)
         }
     }
 }

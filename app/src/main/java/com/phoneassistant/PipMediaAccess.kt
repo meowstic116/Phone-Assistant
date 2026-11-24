@@ -40,9 +40,14 @@ class PipMediaAccess : NotificationListenerService() {
             ctx.getSystemService(PowerManager::class.java)?.isInteractive == true &&
                 ctx.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == false
 
-        internal fun messageAnswer(ctx: Context, request: MessageNotifications.Request): PrivateMessageRead.Result {
+        internal fun messageAnswer(ctx: Context, request: MessageNotifications.Request,
+            handsFree: Boolean = false): PrivateMessageRead.Result {
             val locked = PrivateMessageRead.Result("Unlock your phone to check message notifications.")
-            if (!canShowMessage(ctx)) return locked
+            // A check asked out loud is a check the user wanted read: answered in the car or
+            // with the phone in a pocket just like the other driving commands. The unlocked
+            // screens only ever show the text (never speak it unless asked) and that gate
+            // stays on the screen side.
+            if (!canShowMessage(ctx) && !handsFree) return locked
             if (!PipSettings.enabled(ctx, PipSettings.Option.MESSAGE_NOTIFICATIONS)) {
                 return PrivateMessageRead.Result("Turn on Read message notifications in Pip settings → Permissions, then ask again.")
             }
@@ -58,7 +63,7 @@ class PipMediaAccess : NotificationListenerService() {
             val candidates = active.asSequence().filter { it.packageName != ctx.packageName &&
                 (explicitApp == null || it.packageName == explicitApp) }
                 .flatMap { runCatching { previews(it) }.getOrDefault(emptyList()).asSequence() }.toList()
-            if (!canShowMessage(ctx)) return locked
+            if (!canShowMessage(ctx) && !handsFree) return locked
             return when (val match = MessageNotifications.match(request.sender, candidates)) {
                 MessageNotifications.Match.Ambiguous -> PrivateMessageRead.Result(
                     "More than one sender matches that name. Ask again using their full name.")
@@ -75,6 +80,30 @@ class PipMediaAccess : NotificationListenerService() {
                     }
                 }
             }
+        }
+
+        /** A spoken digest of the shade: read-only, bounded, and never a model input. */
+        internal fun notificationDigest(ctx: Context): String {
+            if (!enabled(ctx)) return "Allow Pip’s Notification access when you're parked, then ask again."
+            val active = try { connected?.activeNotifications }
+                catch (_: RuntimeException) { null }
+                ?: return "Android hasn’t made your notifications available to me."
+            val rows = active.asSequence().filter { it.packageName != ctx.packageName }
+                .mapNotNull { note -> runCatching { previews(note) }.getOrDefault(emptyList()).firstOrNull() }
+                .sortedByDescending { maxOf(it.sentAt, it.postedAt) }
+                .toList()
+            if (rows.isEmpty()) return "I can’t read any of your current notifications."
+            val shown = rows.take(5)
+            val lines = shown.joinToString(" ") { preview ->
+                val body = MessageNotifications.excerpt(preview.body, 90)
+                if (body == null) "From ${preview.sender}." else "From ${preview.sender}: $body"
+            }
+            val count = if (rows.size == shown.size) {
+                "${rows.size} notification${if (rows.size == 1) "" else "s"}"
+            } else {
+                "the latest ${shown.size} of ${rows.size} notifications"
+            }
+            return "You have $count. $lines"
         }
 
         @Suppress("DEPRECATION") // Legacy MessagingStyle uses sender name instead of Person.

@@ -57,6 +57,10 @@ internal class WakeListenService : Service() {
             ctx.startForegroundService(Intent(ctx, WakeListenService::class.java)) != null
         }.getOrDefault(false)
         fun stop(ctx: Context) { ctx.stopService(Intent(ctx, WakeListenService::class.java)) }
+
+        /** Which microphone the session captures: the car's over Bluetooth, else the phone's. */
+        @Volatile private var carMicInUse = false
+        internal fun micRoute(): String = if (carMicInUse) "car mic (Bluetooth)" else "phone mic"
     }
 
     @Volatile private var active = false
@@ -122,6 +126,12 @@ internal class WakeListenService : Service() {
     private fun publish(status: WakeFeedback) {
         if (status.isMicEvent) Diag.wakeInput(status)
         if (status.isOutcome) Diag.wakeOutcome(status)
+        if (status == WakeFeedback.NAME_HEARD) {
+            // He answers "I heard you" on both channels: a short chime for the pocket and
+            // the car, an exclamation above his head for the phone in hand.
+            ToyAudio.cue(this, ToyAudio.Sound.ACK)
+            OverlayService.heardName()
+        }
         val now = SystemClock.elapsedRealtime()
         if ((status == WakeFeedback.LISTENING || status == WakeFeedback.PLAYING) && now < outcomeUntil) return
         main.removeCallbacks(resetOutcome)
@@ -277,6 +287,7 @@ internal class WakeListenService : Service() {
                             // whatever the phone microphone had buffered before the switch.
                             if (sco != null && !carMicLive) {
                                 carMicLive = true
+                                carMicInUse = true
                                 carMicHeard = false
                                 if (recording) mic.stop()
                                 recording = false
@@ -375,6 +386,7 @@ internal class WakeListenService : Service() {
                                         sco?.stop()
                                         sco = null
                                         carMicLive = false
+                                        carMicInUse = false
                                         restartCapture()
                                         continue
                                     }
@@ -436,6 +448,7 @@ internal class WakeListenService : Service() {
 
     override fun onDestroy() {
         active = false
+        carMicInUse = false
         main.removeCallbacks(startupDeadline)
         main.removeCallbacks(resetOutcome)
         if (instance === this) instance = null

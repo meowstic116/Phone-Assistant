@@ -25,11 +25,20 @@ internal sealed interface CarCommand {
         private val spotify = mapOf(
             "play spotify" to Spotify.PLAY, "resume spotify" to Spotify.PLAY, "pause spotify" to Spotify.PAUSE,
             "resume music" to Spotify.PLAY, "pause music" to Spotify.PAUSE,
+            "play music" to Spotify.PLAY, "play some music" to Spotify.PLAY,
+            "play a song" to Spotify.PLAY, "play songs" to Spotify.PLAY,
+            "play something" to Spotify.PLAY, "play something else" to Spotify.PLAY,
+            "start the music" to Spotify.PLAY,
+            "play" to Spotify.PLAY, "pause" to Spotify.PAUSE,
             "next song" to Spotify.NEXT, "next track" to Spotify.NEXT, "skip song" to Spotify.NEXT,
-            "skip this song" to Spotify.NEXT, "skip track" to Spotify.NEXT,
-            "previous song" to Spotify.PREVIOUS, "previous track" to Spotify.PREVIOUS
+            "skip this song" to Spotify.NEXT, "skip track" to Spotify.NEXT, "skip this track" to Spotify.NEXT,
+            "skip" to Spotify.NEXT, "skip it" to Spotify.NEXT, "next" to Spotify.NEXT,
+            "previous song" to Spotify.PREVIOUS, "previous track" to Spotify.PREVIOUS,
+            "previous" to Spotify.PREVIOUS, "last song" to Spotify.PREVIOUS, "back" to Spotify.PREVIOUS
         )
-        private val barePlaylist = Regex("""^play (?:me )?(?:(?:the |my )?playlist (?:called |named )?(.+)|(.+ mix))$""",
+        // "play jazz" is how people name music, so a play with anything like a name after it
+        // goes to Spotify's search; the playlist and mix shapes keep their own wording.
+        private val barePlaylist = Regex("""^play (?:me )?(?:(?:the |my )?playlist (?:called |named )?(.+)|(.+ mix)|(.+))$""",
             RegexOption.IGNORE_CASE)
         private val taskStart = Regex("""^(?:play|resume|pause|skip|next song|next track|previous song|previous track|navigate|take me|drive me|start navigation|start directions|give me directions|are we still navigating|is navigation still|stop navigation|cancel navigation|open|send|text|message|call|dial|doomscroll|remove|delete|clear|dismiss|press|click|tap|hit)\b""",
             RegexOption.IGNORE_CASE)
@@ -37,6 +46,10 @@ internal sealed interface CarCommand {
         private val otherMediaService = Regex("""\b(?:on|in|from) (?:spotify|youtube(?: music)?|apple music|amazon music|pandora|tidal|soundcloud|deezer)\b""",
             RegexOption.IGNORE_CASE)
         private val additionalTask = Regex("""\b(?:then|and (?:play|pause|open|queue|skip|send|text|call|navigate|add|share))\b""",
+            RegexOption.IGNORE_CASE)
+        // "Play a game with me" is an invitation, not a record: words playing with a person
+        // never become a music search.
+        private val playWithSomeone = Regex("""\b(?:with|against) (?:me|us|him|her|them|you)\b""",
             RegexOption.IGNORE_CASE)
         private val whitespace = Regex("[\\s\\p{Z}]+")
         private val chained = Regex("\\b(?:and then|then (?:open|send|play|navigate)|and (?:open|send|play|navigate)|after that)\\b",
@@ -51,11 +64,13 @@ internal sealed interface CarCommand {
             if (otherMediaService.containsMatchIn(titleRequest)) return null
             val explicit = SpotifyQuickPlan.playlistRequest("$titleRequest on Spotify")
             val bare = if (explicit == null) barePlaylist.matchEntire(titleRequest)?.let { match ->
-                match.groups[1]?.value ?: match.groups[2]?.value
+                (match.groups[1]?.value ?: match.groups[2]?.value ?: match.groups[3]?.value)
+                    ?.replace(Regex(""" (?:for|to) me$""", RegexOption.IGNORE_CASE), "")
             } else null
             return (explicit ?: bare)?.trim()?.trim('"', '“', '”')?.trim()?.takeIf {
                 it.length in 1..120 && it.any(Char::isLetterOrDigit) && !it.contains("://") &&
-                    it.none { char -> char in ";,\\" } && !additionalTask.containsMatchIn(it)
+                    it.none { char -> char in ";,\\" } && !additionalTask.containsMatchIn(it) &&
+                    !playWithSomeone.containsMatchIn(it)
             }
         }
 
