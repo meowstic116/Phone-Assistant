@@ -103,6 +103,27 @@ class ScreensRenderTest {
     }
 
     @Test
+    fun everyToySoundHasAnMp3() {
+        val resources = build(PipSettingsActivity::class.java).resources
+        val expected = ToyAudio.Sound.entries.map { it.resourceName }.toSet()
+        val bundled = R.raw::class.java.fields.map { it.name }
+            .filter { it.startsWith("toy_") }.toSet()
+        assertTrue("toy sound resources do not match the enum: $bundled", bundled == expected)
+        for (sound in ToyAudio.Sound.entries) {
+            assertTrue("${sound.resourceName} has no resource id", sound.raw != 0)
+            resources.openRawResource(sound.raw).use { stream ->
+                val bytes = stream.readBytes()
+                assertTrue("${sound.resourceName} is empty", bytes.size > 1_000)
+                val hasId3 = bytes.size > 2 && bytes[0] == 0x49.toByte() &&
+                    bytes[1] == 0x44.toByte() && bytes[2] == 0x33.toByte()
+                val hasFrameSync = bytes.size > 1 && bytes[0] == 0xff.toByte() &&
+                    (bytes[1].toInt() and 0xe0) == 0xe0
+                assertTrue("${sound.resourceName} is not an mp3", hasId3 || hasFrameSync)
+            }
+        }
+    }
+
+    @Test
     fun onboardingScreenBuildsWithoutCrashing() {
         build(OnboardingActivity::class.java)
     }

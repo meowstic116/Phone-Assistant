@@ -45,9 +45,9 @@ limited to 4,096 characters.
   `Lemonade.kt`, `Painting.kt`, `Soccer.kt`, `BubbleWrap.kt`, `Plant.kt`. `Toys.kt` is the
   only way a toy arrives: it reads chat messages and buttons, spawns through one `summon`
   path, and returns a note so Pip's reply matches. `Quiet.kt` remembers how long he has
-  been told to stay out of the toy box. `ToySounds.kt` synthesises every toy sound from
-  scratch and `ToyAudio.kt` plays them: pitch variation and cache, the silent-mode and
-  speaking checks, and the volume setting. There are no audio assets in the APK.
+  been told to stay out of the toy box. `app/src/main/res/raw/toy_*.mp3` holds one short clip
+  per event; `ToyAudio.kt` decodes them into a `SoundPool`, varies the playback rate, and
+  applies the silent-mode, speaking and volume checks. Nothing is downloaded at runtime.
 - Locking the screen: `ScreenLock.kt` decides whether a message is a lock request, and
   `ScreenLocker.kt` performs it — the accessibility global action on Android 9+, the Quick
   Settings tile below that — and reports honestly when it cannot.

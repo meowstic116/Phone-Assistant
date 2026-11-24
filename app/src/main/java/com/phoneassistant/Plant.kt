@@ -91,6 +91,8 @@ class Plant(host: PropHost) : Prop(host) {
             if (++hurried >= 5 && !warnedFlood) {
                 warnedFlood = true
                 host.feel(PetView.Mood.ANNOYED, 2400L)
+                // One escaped drop: the sound of the water he is about to complain about.
+                sound(ToyAudio.Sound.DRIP, 0.35f)
                 host.say(Lines.pick(OVERWATER_LINES))
             }
             return
@@ -98,7 +100,8 @@ class Plant(host: PropHost) : Prop(host) {
         hurried = 0
         if (growth.water(now, PlantGrowth.Waterer.USER)) {
             dropUntil = now + 460L
-            sound(ToySounds.Sound.POUR, 0.5f)
+            sound(ToyAudio.Sound.POUR, 0.5f)
+            postDelayedSound(ToyAudio.Sound.SPRAY, 90L, 0.3f)
             invalidate()
         }
     }
@@ -127,7 +130,7 @@ class Plant(host: PropHost) : Prop(host) {
                     lastAutoAt = landed
                     nextPourAt = landed + PlantGrowth.PIP_POUR_PAUSE_MS
                     if (!leaving && growth.water(landed, PlantGrowth.Waterer.PIP)) {
-                        sound(ToySounds.Sound.POUR, 0.42f)
+                        sound(ToyAudio.Sound.POUR, 0.42f)
                         if (firstPour) {
                             firstPour = false
                             host.say("a little water from me. give the pot a tap to add yours.")
@@ -171,12 +174,12 @@ class Plant(host: PropHost) : Prop(host) {
             if (growth.blooming) {
                 discovery = PlantCollection.bloom(context, flower).first
                 host.feel(PetView.Mood.HAPPY, 3_000L)
-                host.sound(ToySounds.Sound.SPARKLE, 0.9f)
+                host.sound(ToyAudio.Sound.SPARKLE, 0.9f)
                 host.say(if (discovery) "${flower.display}! a new bloom for your collection."
                     else "*sets down the can* a ${flower.display}. look, the ladybug approves.")
             } else {
                 host.feel(PetView.Mood.HAPPY, 900L)
-                host.sound(ToySounds.Sound.GROW, 0.6f)
+                host.sound(ToyAudio.Sound.GROW, 0.6f)
                 host.say(GROW_LINES[growth.stage - 1])
             }
         }

@@ -49,13 +49,13 @@ interface PropHost {
      * slightly different takes; [gain] is that toy's sense of how loud it should be, 0–1.
      * Silently does nothing when toy sounds are off or the phone is on silent.
      */
-    fun sound(effect: ToySounds.Sound, gain: Float = 1f)
+    fun sound(effect: ToyAudio.Sound, gain: Float = 1f)
 
     /**
      * The same, later. Part of the host rather than a timer in each toy so a prop that is put
      * away mid-sequence does not leave a delayed squeak to fire at nothing.
      */
-    fun postDelayedSound(effect: ToySounds.Sound, delayMs: Long, gain: Float = 1f)
+    fun postDelayedSound(effect: ToyAudio.Sound, delayMs: Long, gain: Float = 1f)
 
     fun petWidth(): Int
     fun petHeight(): Int
@@ -326,7 +326,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     private fun lift(held: Boolean) {
         // Every toy in the box answers a pickup with the same small rubbery note, so they feel
         // like objects rather than windows. Quiet: the user is doing this, not the toy.
-        sound(if (held) ToySounds.Sound.BOING else ToySounds.Sound.TAP, 0.35f)
+        sound(if (held) ToyAudio.Sound.BOING else ToyAudio.Sound.TAP, 0.35f)
         animate().cancel()
         animate()
             .alpha(1f)
@@ -337,7 +337,7 @@ abstract class Prop(protected val host: PropHost) : View(host.stageContext()) {
     }
 
     /** This toy's own sound, at its own sense of loudness. */
-    protected fun sound(effect: ToySounds.Sound, gain: Float = 0.8f) = host.sound(effect, gain)
+    protected fun sound(effect: ToyAudio.Sound, gain: Float = 0.8f) = host.sound(effect, gain)
 
     /** Called for a tap that was not a drag. Coordinates are inside this prop. */
     protected open fun onTap(x: Float, y: Float) {}

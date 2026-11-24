@@ -27,23 +27,21 @@ so his reply matches: tell him the lemonade was bad and he takes it in good humo
 
 ### Toy sounds
 
-Every toy is audible. Bubbles pop, the lemonade stand squeaks and pours, the glass glugs,
-the ball thumps and the goal nets a little fanfare and a referee's whistle, the brush
-scratches on the easel, the watering can pours and the plant swells as it grows, and
-picking a toy up or setting it down makes a small rubbery note. Nothing is downloaded or
-recorded: each sound is synthesised on the phone at 44.1 kHz when it is first needed, in
-about a millisecond, and then cached.
+Every toy is audible. Bubbles pop, the lemonade stand squeaks, pours and clinks, the glass
+glugs, the ball thumps and the goal nets a little fanfare and a referee's whistle, the brush
+scratches on the easel, the watering can sprays and the plant swells as it grows, the feed
+he browses swipes and taps, and picking a toy up or setting it down makes a small rubbery
+note. Nothing is downloaded or recorded: each event is a short mono MP3 in
+`app/src/main/res/raw/`, decoded once into a SoundPool when the service starts.
 
-No two pops are identical. Every sound is rendered at a random pitch between 0.94× and 1.06×
-of its written pitch — the same small band a human hand would vary by — and the noise
-component is seeded from that exact pitch, so the slightly higher pop is also slightly
-crisper. Cache keying follows the pitch, so a sound still repeats its earlier takes instead
-of drifting into sounding like a different sound.
+No two pops are identical. Every clip is played at a rate between 0.94× and 1.06×, the same
+small band a human hand would vary by, so its pitch and length shift a little on each press
+without the sound drifting into a different one.
 
 The toys hush while Pip is speaking. His own voice is the point of the conversation, so toy
 sounds are dropped rather than ducked for the length of a reply, and they resume on their own
-afterwards. They also respect the ringer: with the phone on silent or vibrate, the toys are
-silent too. **Toy sound effects** and **Toy sound volume** in Toy settings switch them off
+afterwards. They also respect the ringer: with the phone on silent the toys are silent too,
+while vibrate still gets squeaks. **Toy sound effects** and **Toy sound volume** in Toy settings switch them off
 or take them down; **Try a toy sound** plays a sample so you can judge the volume without
 waiting for a bubble. **Diagnostics** shows whether sounds are on, off, or being held back by
 silent mode.

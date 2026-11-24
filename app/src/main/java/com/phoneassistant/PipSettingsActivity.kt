@@ -92,9 +92,9 @@ class PipSettingsActivity : Activity() {
             "can pick Doomscroll on his own only when your Home screen is clear. He skips the " +
             "last toy when picking on his own and waits if there’s no other eligible toy; you " +
             "can still ask for it yourself."
-        val toySounds = "Squeaks, pops, pours and whistles, made on the phone with no downloads. " +
-            "Every one is a little different each time. Pip stays quiet while he is talking, and " +
-            "silent mode still means silent."
+        val toySounds = "Squeaks, pops, pours and whistles, bundled with the app and never " +
+            "downloaded. Every one is a little different each time. Pip stays quiet while he is " +
+            "talking, and silent mode still means silent."
         val toySoundsVolume = "How loud the toys are. It is a multiplier on top of your phone’s " +
             "media volume, so this is the whole range and the phone’s volume keys still work." +
             "\n\nTry a toy sound plays a sample at the current volume without waiting for a " +
@@ -480,15 +480,15 @@ class PipSettingsActivity : Activity() {
         plainButton("Painting gallery") { startActivity(Intent(this, PaintingGalleryActivity::class.java)) }
         toggle("Toy sound effects", ToyAudio.enabled(this), Notes.toySounds) {
             ToyAudio.setEnabled(this, it)
-            if (it) ToyAudio.play(this, ToySounds.Sound.POP, 0.9f)
+            if (it) ToyAudio.play(this, ToyAudio.Sound.POP, 0.9f)
         }
         volumeSlider("Toy sound volume", { Notes.toySoundsVolume }, 20, ToyAudio.volume(this),
             { ToyAudio.setVolume(this, it) }) {
-            ToyAudio.play(this, ToySounds.Sound.SQUEAK, 0.9f)
+            ToyAudio.play(this, ToyAudio.Sound.SQUEAK, 0.9f)
         }
         plainButton("Try a toy sound") {
-            ToyAudio.play(this, ToySounds.Sound.SQUEAK, 1f)
-            ToyAudio.playPair(this, ToySounds.Sound.POP, ToySounds.Sound.GOAL, 1f)
+            ToyAudio.play(this, ToyAudio.Sound.SQUEAK, 1f)
+            ToyAudio.playPair(this, ToyAudio.Sound.POP, ToyAudio.Sound.GOAL, 1f)
         }
         return toyHeading
     }

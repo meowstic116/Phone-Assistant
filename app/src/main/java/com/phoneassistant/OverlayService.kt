@@ -466,6 +466,9 @@ class OverlayService : Service(), PropHost {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // Decode the toy clips once at startup; the first tap should not be the one that
+        // waits for a file to load.
+        ToyAudio.prepare(this)
         ScreenLocker.attach(this)
         TaskRunner.start(this)
         running = true
@@ -876,12 +879,12 @@ class OverlayService : Service(), PropHost {
      * switch covers every toy and his own voice can hush them. A toy sound never competes with
      * a spoken line: while the reply has the floor the effects wait for the next interaction.
      */
-    override fun sound(effect: ToySounds.Sound, gain: Float) {
+    override fun sound(effect: ToyAudio.Sound, gain: Float) {
         if (replyHasFloor()) return
         ToyAudio.play(this, effect, gain)
     }
 
-    override fun postDelayedSound(effect: ToySounds.Sound, delayMs: Long, gain: Float) {
+    override fun postDelayedSound(effect: ToyAudio.Sound, delayMs: Long, gain: Float) {
         handler.postDelayed({ sound(effect, gain) }, delayMs.coerceIn(0L, 2_000L))
     }
 
@@ -1120,7 +1123,7 @@ class OverlayService : Service(), PropHost {
         toyHop = null
         // Feet on the sheet: the softest sound in the box, because it is the landing and not
         // the event. Only on a real landing — a cancelled hop went nowhere.
-        if (landed) sound(ToySounds.Sound.TAP, 0.45f)
+        if (landed) sound(ToyAudio.Sound.TAP, 0.45f)
         pet?.apply { scaleX = 1f; scaleY = 1f }
         if (!landed) {
             // A moved sheet invalidates this target. Settle at the current horizontal spot
@@ -2819,6 +2822,17 @@ class OverlayService : Service(), PropHost {
                         (Agent.isActive(id) || cue == DoomscrollMotion.Cue.CLEAR && Agent.isCurrent(id))) {
                         val side = if (petCentreX() >= screenW / 2f) -1f else 1f
                         pet?.showDoomscrollCue(cue, side)
+                        // The feed used to be the one toy Pip worked with in silence. A swipe
+                        // and the tap on a reel get the same quiet effects as his other toys.
+                        if (PipSettings.toyAllowed(this, Toy.DOOMSCROLL)) {
+                            when (cue) {
+                                DoomscrollMotion.Cue.SWIPE ->
+                                    ToyAudio.play(this, ToyAudio.Sound.SWIPE, 0.3f)
+                                DoomscrollMotion.Cue.WATCH ->
+                                    ToyAudio.play(this, ToyAudio.Sound.TAP, 0.25f)
+                                DoomscrollMotion.Cue.CLEAR -> Unit
+                            }
+                        }
                     }
                 }
             },
