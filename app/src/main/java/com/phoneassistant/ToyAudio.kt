@@ -37,7 +37,7 @@ import android.os.SystemClock
  *   playing is a single call, and a phone with no free mixer channel loses a
  *   squeak, not a tap.
  */
-internal object ToyAudio {
+object ToyAudio {
     private const val PREFS = "toy_sounds"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_VOLUME = "volume"
