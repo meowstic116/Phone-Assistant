@@ -168,6 +168,21 @@ internal object TaskClock {
         return PipTask.When(at.timeInMillis, PipTask.Repeat.NONE)
     }
 
+    /**
+     * How long until the task runner must look again. A second while the phone is in
+     * use, where anything can happen at any moment. While it is not, the looking sleeps
+     * to the next deadline — [nextFireAt] is the earliest upcoming one, or null when
+     * none is coming — so a locked phone ticks at most once a minute. A change to the
+     * task store wakes the runner at once, so the sleep can never make a deadline
+     * late; the cap keeps an unnoticed change (a clock that jumped, a task written
+     * from outside the app) from waiting longer than that to be seen.
+     */
+    fun tickDelay(now: Long, nextFireAt: Long?, screenOpen: Boolean): Long = when {
+        screenOpen -> 1_000L
+        nextFireAt == null -> 60_000L
+        else -> (nextFireAt - now).coerceIn(1_000L, 60_000L)
+    }
+
     /** The next occurrence of a recurring time: strictly after [now], and on its days. */
     fun next(fireAt: Long, repeat: PipTask.Repeat, now: Long): Long {
         if (repeat == PipTask.Repeat.NONE) return fireAt

@@ -1383,6 +1383,16 @@ fun main() {
     check(TaskGate.mayRunAutomatic(interactive = true, unlocked = true, agentBusy = false))
     check(!TaskGate.mayRunAutomatic(interactive = true, unlocked = true, agentBusy = true))
 
+    // The task clock sleeps with the phone: a look a second while the screen is on, and
+    // while it is off, one that lands exactly on the next deadline — and at most a
+    // minute apart, so anything the runner was not told about is never noticed late.
+    check(TaskClock.tickDelay(now, null, screenOpen = true) == 1_000L)
+    check(TaskClock.tickDelay(now, now + 5 * 60_000L, screenOpen = true) == 1_000L)
+    check(TaskClock.tickDelay(now, null, screenOpen = false) == 60_000L)
+    check(TaskClock.tickDelay(now, now + 90_000L, screenOpen = false) == 60_000L) // Capped.
+    check(TaskClock.tickDelay(now, now + 250L, screenOpen = false) == 1_000L) // Floored.
+    check(TaskClock.tickDelay(now, now + 7_500L, screenOpen = false) == 7_500L) // On the deadline.
+
     val captureRecovery = WakeCaptureRecovery()
     check(!captureRecovery.stalled(3999, lastPcmAt = 0) && captureRecovery.stalled(4000, lastPcmAt = 0))
     check(captureRecovery.tryRestart(4000) && captureRecovery.tryRestart(8000))

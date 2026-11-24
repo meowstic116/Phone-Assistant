@@ -8,7 +8,7 @@ import android.os.PowerManager
 
 /**
  * The clock and the watcher behind the two kinds of task. It runs while Pip's overlay
- * runs, and looks once a second:
+ * runs, and looks at the tasks:
  *
  * A scheduled task whose time has come goes the moment the phone is open and the user is
  * at the home screen doing nothing. While they are in the middle of something, Pip says
@@ -18,6 +18,12 @@ import android.os.PowerManager
  * changed since the last look, its trigger is checked against what is on screen. A match
  * runs the task's action as an ordinary phone job, and the watch stands until the task is
  * deleted from the tasks menu.
+ *
+ * The looking is paced by what could actually happen (TaskClock.tickDelay): a second
+ * while the screen is on, and while it is off, sleep to the next deadline instead of
+ * ticking over a phone that cannot run or announce anything yet. A change to the task
+ * store — a reminder said to Pip in a pocket counts — wakes the runner at once, so the
+ * sleeping can never make a deadline late.
  */
 internal object TaskRunner {
 
@@ -34,21 +40,34 @@ internal object TaskRunner {
 
     private val tick = object : Runnable {
         override fun run() {
+            // A store change during the last step can queue a twin; one look is enough.
+            handler.removeCallbacks(this)
             val ctx = app ?: return
-            handler.postDelayed(this, TICK_MS)
-            runCatching { step(ctx) }
+            val delay = runCatching { step(ctx) }.getOrDefault(TICK_MS)
+            handler.postDelayed(this, delay)
         }
     }
+
+    /** A task just changed, or the phone just woke: look now, not at the old schedule. */
+    fun poke() {
+        if (app == null) return
+        handler.removeCallbacks(tick)
+        handler.post(tick)
+    }
+
+    private val rearm: () -> Unit = { poke() }
 
     fun start(ctx: Context) {
         if (app != null) return
         app = ctx.applicationContext
+        PipTasks.addStoreListener(rearm)
         handler.post(tick)
     }
 
     fun stop() {
         app = null
         handler.removeCallbacks(tick)
+        PipTasks.removeStoreListener(rearm)
         seenListing.clear()
         lastFired.clear()
         sinceAuto = 0
@@ -63,15 +82,20 @@ internal object TaskRunner {
         runCatching { ctx.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != true }
             .getOrDefault(false)
 
-    private fun step(ctx: Context) {
+    private fun step(ctx: Context): Long {
         val now = System.currentTimeMillis()
         val tasks = PipTasks.all(ctx)
         val open = interactive(ctx)
         val free = unlocked(ctx)
         val busy = Agent.running()
+        // The home check walks the accessibility windows, so it is asked once per look
+        // and only when it can matter: a locked phone cannot be at the home screen any
+        // more than it can run the task — and the announce below must still be reached.
+        val atHome = tasks.any { it.kind == PipTask.Kind.SCHEDULED && it.fireAt <= now } &&
+            open && free && !busy && Screen.clearHomeScreen(ctx)
         for (task in tasks) {
             if (task.kind != PipTask.Kind.SCHEDULED || task.fireAt > now) continue
-            val ready = TaskGate.mayRunScheduled(open, free, atHome = Screen.clearHomeScreen(ctx), agentBusy = busy)
+            val ready = TaskGate.mayRunScheduled(open, free, atHome, busy)
             if (ready) {
                 // A recurring time comes back for its next occurrence; a one-shot is done.
                 if (task.repeat == PipTask.Repeat.NONE) PipTasks.remove(ctx, task.id)
@@ -83,14 +107,23 @@ internal object TaskRunner {
                 OverlayService.speak(ctx, TaskCommand.deferred(task))
             }
         }
-        if (++sinceAuto < AUTO_EVERY) return
-        sinceAuto = 0
-        if (!TaskGate.mayRunAutomatic(open, free, busy) || !Screen.available()) return
-        for (task in tasks) {
-            if (task.kind != PipTask.Kind.AUTOMATIC) continue
-            if (task.app.isNotEmpty() && Screen.inFront() != task.app) continue
-            watch(ctx, task)
+        if (++sinceAuto >= AUTO_EVERY) {
+            sinceAuto = 0
+            if (TaskGate.mayRunAutomatic(open, free, busy) && Screen.available()) {
+                for (task in tasks) {
+                    if (task.kind != PipTask.Kind.AUTOMATIC) continue
+                    if (task.app.isNotEmpty() && Screen.inFront() != task.app) continue
+                    watch(ctx, task)
+                }
+            }
         }
+        // Upcoming deadlines are all the next look needs to know about; a task already
+        // due has just been announced (or run) above and only waits for the gate, which
+        // comes from a wake, not from another look.
+        val nextFire = tasks.asSequence()
+            .filter { it.kind == PipTask.Kind.SCHEDULED && it.fireAt > now }
+            .minOfOrNull { it.fireAt }
+        return TaskClock.tickDelay(now, nextFire, open)
     }
 
     private fun watch(ctx: Context, task: PipTask) {
