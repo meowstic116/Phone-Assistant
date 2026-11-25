@@ -200,7 +200,7 @@ internal class WakeListenService : Service() {
                     try {
                         val samples = ShortArray(640)
                         val floats = FloatArray(samples.size)
-                        val phrase = WakePhrase()
+                        val phrase = WakePhrase(VoiceSettings.triggerWords(this@WakeListenService))
                         var recording = false
                         var filled = 0
                         var handledManual = 0

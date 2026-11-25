@@ -1238,6 +1238,19 @@ fun main() {
     check(wakePhrase.accept("That was funny", 48_000) == null)
     check(wakePhrase.accept("Hey Pep, pause Spotify", 49_000) == "pause Spotify")
     check(wakePhrase.accept("Pep, pause Spotify", 49_100) == "pause Spotify") // Variant spelling as a direct address.
+
+    // Extra trigger words wake him like his name: direct at the start of a request or in
+    // an address frame — never as an ordinary noun in conversation.
+    val computer = WakePhrase(listOf("computer", "hey buddy"))
+    check(computer.accept("Computer, pause Spotify", 1) == "pause Spotify")
+    check(computer.accept("computer pause Spotify", 2) == "pause Spotify")
+    check(computer.accept("Computer", 3) == null && computer.awaiting) // Said alone, he listens.
+    check(computer.accept("play something", 4) == "play something")
+    check(computer.accept("Hey buddy, what time is it?", 5) == "what time is it?")
+    check(computer.accept("my computer is slow", 6) == null) // An ordinary noun, not an address.
+    check(computer.accept("Good one, computer!", 7) == "Good one!")
+    check(computer.accept("tell me about my computer", 8) == null)
+    check(WakePhrase().accept("Computer, pause", 9) == null) // Unset words wake no one.
     check(wakePhrase.accept("Pip’s next move", 49_200) == null)
     check(wakePhrase.accept("Pip…", 50_000) == null && wakePhrase.awaiting)
     check(wakePhrase.accept("pause Spotify", 50_600) == "pause Spotify")

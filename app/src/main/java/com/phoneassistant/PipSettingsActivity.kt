@@ -42,6 +42,7 @@ class PipSettingsActivity : Activity() {
     private lateinit var wakeStatus: TextView
     private lateinit var wakeSpeak: Button
     private lateinit var wakeRemoveAction: Button
+    private lateinit var triggerAction: Button
     private val kokoroChanged: () -> Unit = { refreshVoiceSummary() }
     private val wakeModelChanged: () -> Unit = { refreshWakeAction() }
     private var refreshApiIfChanged: () -> Unit = {}
@@ -62,6 +63,10 @@ class PipSettingsActivity : Activity() {
             "without switching voices."
         val voiceVolume = "How loud Pip speaks, on top of the phone’s own media volume. It applies " +
             "the next time he speaks."
+        val triggerWords = "Extra names that get Pip’s attention, like ‘Computer’ or ‘Hey buddy’. " +
+            "Say the word alone and he listens for the next thing; say it with the request and " +
+            "it counts like his name. ‘Pip’ always works. Listening matches these on the phone " +
+            "only — nothing is saved or sent anywhere."
         val listening = "Speak in English and address him by name, like ‘Hey Pip, tell me a joke’ " +
             "or ‘Good one, Pip.’ Listening runs on your phone, even after locking. It can use " +
             "battery. To stop, tap Stop listening for Pip here or stop the assistant. " +
@@ -257,6 +262,8 @@ class PipSettingsActivity : Activity() {
         }
         wakeRemoveAction = plainButton("Remove offline recognition download") { confirmRemoveWakeModel() }
         refreshWakeAction()
+        triggerAction = plainButton("") { manageTriggerWords() }
+        refreshTriggerSummary()
 
         step("Hands-free driving")
         heading("Hands-free driving", Notes.driving)
@@ -314,6 +321,71 @@ class PipSettingsActivity : Activity() {
         if (savedInstanceState == null && intent.getBooleanExtra(EXTRA_SHOW_TOYS, false)) {
             scroll.post { scroll.scrollTo(0, toyHeading.top) }
         }
+    }
+
+    private fun refreshTriggerSummary() {
+        triggerAction.text = "Trigger words: " + (listOf("Pip") + VoiceSettings.triggerWords(this)).joinToString(", ")
+    }
+
+    /** Add or remove the extra names that get his attention. “Pip” always works. */
+    private fun manageTriggerWords() {
+        val rows = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 0)
+        }
+        var open: AlertDialog? = null
+        fun wordRow(word: String, fixed: Boolean) {
+            val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            line.addView(TextView(this).apply {
+                text = if (fixed) "$word (built in)" else word
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            if (!fixed) line.addView(Button(this).apply {
+                text = "Remove"
+                setOnClickListener {
+                    VoiceSettings.setTriggerWords(this@PipSettingsActivity,
+                        VoiceSettings.triggerWords(this@PipSettingsActivity).filter { it != word })
+                    open?.dismiss()
+                    manageTriggerWords()
+                }
+            })
+            rows.addView(line)
+        }
+        wordRow("Pip", fixed = true)
+        VoiceSettings.triggerWords(this).forEach { wordRow(it, fixed = false) }
+        val input = EditText(this).apply {
+            hint = "Add a word or short phrase"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(40))
+            setSingleLine(true)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        rows.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(input)
+            addView(Button(this@PipSettingsActivity).apply {
+                text = "Add"
+                setOnClickListener {
+                    val word = input.text.toString().trim().replace(Regex("\\s+"), " ")
+                    val ok = word.length in 2..40 && word.any(Char::isLetterOrDigit) &&
+                        word.all { c -> c.isLetterOrDigit() || c == ' ' || c == '\'' || c == '-' }
+                    if (ok) {
+                        VoiceSettings.setTriggerWords(this@PipSettingsActivity,
+                            VoiceSettings.triggerWords(this@PipSettingsActivity) + word)
+                        open?.dismiss()
+                        manageTriggerWords()
+                    } else {
+                        Toast.makeText(this@PipSettingsActivity,
+                            "Use letters and spaces, 2 to 40 characters.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            })
+        })
+        open = AlertDialog.Builder(this).setTitle("Trigger words")
+            .setMessage(Notes.triggerWords)
+            .setView(ScrollView(this).apply { addView(rows) })
+            .setNegativeButton("Done") { _, _ -> refreshTriggerSummary() }
+            .show()
     }
 
     private fun refreshWakeAction() {

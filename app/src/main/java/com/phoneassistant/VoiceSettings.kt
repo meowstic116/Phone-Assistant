@@ -31,6 +31,21 @@ internal object VoiceSettings {
         prefs(context).edit().putString("driving_home", address.trim().take(180)).apply()
     }
 
+    /** Extra names Pip answers to, saved as typed; “Pip” itself is built in. */
+    fun triggerWords(context: Context): List<String> =
+        prefs(context).getString("trigger_words", "").orEmpty().split('\n').map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+    fun setTriggerWords(context: Context, words: List<String>) {
+        val cleaned = words.map { it.trim().replace(Regex("\\s+"), " ") }
+            .filter {
+                it.length in 2..40 && it.any(Char::isLetterOrDigit) &&
+                    it.all { c -> c.isLetterOrDigit() || c == ' ' || c == '\'' || c == '-' }
+            }
+            .distinct().take(10)
+        prefs(context).edit().putString("trigger_words", cleaned.joinToString("\n")).apply()
+    }
+
     fun config(context: Context): Config {
         val prefs = prefs(context)
         val saved = prefs.all

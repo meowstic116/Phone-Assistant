@@ -1,14 +1,19 @@
 package com.phoneassistant
 
 /** Decide locally whether speech addresses Pip. Never send ambient speech to the chat API to decide. */
-internal class WakePhrase {
+internal class WakePhrase(extraNames: List<String> = emptyList()) {
     private val separators = "[\\s\\p{Z},.!?;:–—-]"
     private val name = "p[. \\-]*i[. \\-]*p"
-    private val variantName = "(?:pip+s?|peeps?|peps?|pipes?|pippy|peepy)"
+    // User-added names join the decoder-variant class: direct at the start of a request
+    // and in an address frame mid-sentence, never as an ordinary noun in conversation.
+    private val custom = extraNames.filter { it.isNotBlank() }.joinToString("|") { word ->
+        word.trim().split(Regex("\\s+")).joinToString("$separators+") { Regex.escape(it) }
+    }
+    private val variantName = "(?:pip+s?|peeps?|peps?|pipes?|pippy|peepy${if (custom.isEmpty()) "" else "|$custom"})"
     private val greeting = "(?:hey|okay|ok|yo)$separators+(?:$name|$variantName)"
     private fun pattern(value: String) = Regex(value, RegexOption.IGNORE_CASE)
     private val prefix = pattern("^(?:$greeting|$name)(?=$|$separators|[…\"”]|[’'](?=$|$separators))")
-    private val suffix = pattern("$separators+(?:$greeting|$name)([.?!…]*)[\\s\\p{Z}\"'”’]*$")
+    private val suffix = pattern("$separators+(?:$greeting|$name${if (custom.isEmpty()) "" else "|$custom"})([.?!…]*)[\\s\\p{Z}\"'”’]*$")
     // An explicit voice address can also interrupt a sentence: "Can you, Pip, tell me another?"
     private val inset = pattern("\\s*[,–—]\\s*(?:$greeting|$name|$variantName)\\s*[,–—]\\s*")
     private val leading = Regex("""^[\s\p{Z}"'“‘]+""")
@@ -31,6 +36,7 @@ internal class WakePhrase {
     private val anywhereVariant = pattern("(?<![\\p{L}\\p{N}])$variantName(?![\\p{L}\\p{N}])")
     private val addressHead = pattern("\\b(?:can|could|would|will|do)\\s+(?:you|u)\\s+$|\b(?:please|hey|yo|ok|okay|pls|plz)\\s+$")
     private val variant = pattern("^$variantName(?=$|$separators|[…\"”])")
+    private val customLead = if (custom.isEmpty()) null else pattern("^$custom(?=$|$separators|[…\"”])")
     private val objectWord = pattern("^(?:the|a|an|this|that|these|those|my|your|his|her|its|our|their|at|on|in|of|for|to|from|with|and|or|is|was|are|were)\\b")
     private val trailingGreeting = pattern("(?:^|[\\s\\p{Z},.!?;:–—-])(?:hey|okay|ok|yo)[\\s\\p{Z},.!?;:–—-]*$")
     // "Pass me the pip" names an object, not the assistant. Greetings, fillers, and
@@ -72,6 +78,16 @@ internal class WakePhrase {
         prefix.find(text)?.let {
             // Anything after the name is the message. The name leads, so it is an address.
             return text.substring(it.range.last + 1).trimStart(::addressPunctuation)
+        }
+        // A user-added name at the start needs no vocative comma; said alone it asks
+        // him to listen, the way "Pip." alone arms for the rest of the request.
+        if (customLead != null) customLead.find(text)?.let { match ->
+            val rest = text.substring(match.range.last + 1).trimStart(::addressPunctuation)
+            val separator = text.getOrNull(match.range.last + 1)
+            val vocative = separator == ',' || separator == '–' || separator == '—'
+            if (rest.isEmpty()) return ""
+            if (!vocative && objectWord.containsMatchIn(rest)) return null
+            return rest
         }
         val match = variant.find(text) ?: return null
         val rest = text.substring(match.range.last + 1).trimStart(::addressPunctuation)
