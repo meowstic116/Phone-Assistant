@@ -470,7 +470,8 @@ class PetView(context: android.content.Context) : View(context), Choreographer.F
 
     /** "I heard you": a small exclamation over his head while the name is still fresh. */
     private fun drawNameCue(canvas: Canvas, cx: Float, bodyTop: Float) {
-        val top = bodyTop - dp(23f)
+        // Floored at the window's top edge: a bobbing body must never push the cue out.
+        val top = (bodyTop - dp(23f)).coerceAtLeast(dp(1f))
         val barW = dp(3f)
         val barH = dp(8f)
         val dotY = top + barH + dp(2.2f)

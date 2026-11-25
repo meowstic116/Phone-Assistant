@@ -560,7 +560,10 @@ class OverlayService : Service(), PropHost {
             bottomInset = insets.bottom
         }
         petW = (64 * density).toInt().coerceAtLeast(1)
-        petH = (86 * density).toInt().coerceAtLeast(1)
+        // Tall enough to hold the exclamation cue over his head: the body and legs use
+        // about 73 dp, the cue needs 24 more above the body, and clipping at the window
+        // top is what used to cut the exclamation's bar off.
+        petH = (100 * density).toInt().coerceAtLeast(1)
         speed = 55 * density
     }
 
