@@ -4,7 +4,7 @@ package com.phoneassistant
 internal sealed interface CarCommand {
     sealed interface Media : CarCommand
     enum class Spotify : Media { PLAY, PAUSE, NEXT, PREVIOUS }
-    data class SpotifyPlaylist(val title: String) : Media
+    data class SpotifyPlaylist(val title: String, val namedPlaylist: Boolean = true) : Media
     data class Navigate(val destination: String) : CarCommand
 
     /** Every way of saying "I'm done with this route". */
@@ -59,19 +59,28 @@ internal sealed interface CarCommand {
 
         fun looksLikeTask(text: String) = taskStart.containsMatchIn(spoken(text).replace(Regex("^please ", RegexOption.IGNORE_CASE), ""))
 
-        private fun playlist(text: String): String? {
+        // "play the song called hello" names a song the way people say it; the wrapper is
+        // stripped before the shapes see it, so the search gets the name alone.
+        private val songWrapper = Regex("""^play (?:me )?(?:the |my |a )?(?:song|album|track) (?:called |named |by )?(.+)$""",
+            RegexOption.IGNORE_CASE)
+
+        /** The title and whether the words named a playlist or mix; a plain name is searched free. */
+        private fun playlist(text: String): Pair<String, Boolean>? {
             val titleRequest = text.replace(spotifySuffix, "")
             if (otherMediaService.containsMatchIn(titleRequest)) return null
             val explicit = SpotifyQuickPlan.playlistRequest("$titleRequest on Spotify")
-            val bare = if (explicit == null) barePlaylist.matchEntire(titleRequest)?.let { match ->
+            val wrapper = songWrapper.matchEntire(titleRequest)?.groupValues?.get(1)
+            val bare = if (explicit == null && wrapper == null) barePlaylist.matchEntire(titleRequest)?.let { match ->
                 (match.groups[1]?.value ?: match.groups[2]?.value ?: match.groups[3]?.value)
                     ?.replace(Regex(""" (?:for|to) me$""", RegexOption.IGNORE_CASE), "")
+                    ?.let { it to (match.groups[1]?.value != null || match.groups[2]?.value != null) }
             } else null
-            return (explicit ?: bare)?.trim()?.trim('"', '“', '”')?.trim()?.takeIf {
+            val (raw, named) = explicit?.let { it to true } ?: wrapper?.let { it to false } ?: bare ?: return null
+            return raw.trim().trim('"', '“', '”').trim().takeIf {
                 it.length in 1..120 && it.any(Char::isLetterOrDigit) && !it.contains("://") &&
                     it.none { char -> char in ";,\\" } && !additionalTask.containsMatchIn(it) &&
                     !playWithSomeone.containsMatchIn(it)
-            }
+            }?.let { it to named }
         }
 
         fun parse(text: String): CarCommand? {
@@ -83,7 +92,9 @@ internal sealed interface CarCommand {
             val exact = spotify[media]
             if (exact != null) return exact
             spotify[media.removeSuffix(" on spotify")]?.let { return it }
-            playlist(spoken.replace(Regex("^please ", RegexOption.IGNORE_CASE), ""))?.let { return SpotifyPlaylist(it) }
+            playlist(spoken.replace(Regex("^please ", RegexOption.IGNORE_CASE), ""))?.let {
+            return SpotifyPlaylist(it.first, it.second)
+        }
             if (home.matches(spoken)) return Navigate("home")
             if (stop.matches(spoken)) return StopNavigation
             if (navState.matches(spoken)) return NavigationState
