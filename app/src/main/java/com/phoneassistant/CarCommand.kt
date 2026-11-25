@@ -57,6 +57,76 @@ internal sealed interface CarCommand {
 
         private fun spoken(text: String) = text.trim().trimEnd('.', '!', '?').replace(whitespace, " ")
 
+        // A spoken street number arrives as words: "one one two four Main Street" is
+        // 1124 Main Street. Only a leading run of number words becomes digits; the name
+        // of a place stays exactly as heard, and one lonely number word ("six flags",
+        // "one world trade center") is left to Maps.
+        private val singles = mapOf("zero" to 0, "oh" to 0, "one" to 1, "two" to 2, "three" to 3,
+            "four" to 4, "five" to 5, "six" to 6, "seven" to 7, "eight" to 8, "nine" to 9,
+            "ten" to 10, "eleven" to 11, "twelve" to 12, "thirteen" to 13, "fourteen" to 14,
+            "fifteen" to 15, "sixteen" to 16, "seventeen" to 17, "eighteen" to 18, "nineteen" to 19)
+        private val decades = mapOf("twenty" to 20, "thirty" to 30, "forty" to 40, "fifty" to 50,
+            "sixty" to 60, "seventy" to 70, "eighty" to 80, "ninety" to 90)
+        private val ordinals = setOf("first", "second", "third", "fourth", "fifth", "sixth",
+            "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth", "thirteenth",
+            "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth",
+            "twentieth", "thirtieth", "fortieth", "fiftieth", "sixtieth", "seventieth",
+            "eightieth", "ninetieth", "hundredth", "thousandth")
+
+        private fun spokenAddress(destination: String): String {
+            val parts = destination.split(whitespace)
+            val numberWord = { w: String -> w in singles || w in decades || w == "hundred" || w == "and" || w == "a" }
+            val run = parts.takeWhile { numberWord(it.lowercase(java.util.Locale.ROOT)) }
+            if (run.size < 2) return destination
+            // "fifty fifth street" is a street name, not 50: an ordinal after the run keeps
+            // every word of it.
+            val after = parts.getOrNull(run.size)?.lowercase(java.util.Locale.ROOT)
+            if (after != null && after in ordinals) return destination
+            val lower = run.map { it.lowercase(java.util.Locale.ROOT) }
+            val number = when {
+                lower.all { it in singles } -> lower.joinToString("") { singles.getValue(it).toString() }
+                else -> {
+                    val groups = numberGroups(lower) ?: return destination
+                    when {
+                        groups.size == 1 -> groups[0].toString()
+                        groups.size == 2 && groups.all { it in 0..99 } -> groups.joinToString("")
+                        else -> return destination
+                    }
+                }
+            }
+            return (listOf(number) + parts.drop(run.size)).joinToString(" ")
+        }
+
+        /** Number groups of at most 999: "two hundred and five" is one, "twelve thirty four" is two. */
+        private fun numberGroups(tokens: List<String>): List<Int>? {
+            val groups = mutableListOf<Int>()
+            var i = 0
+            while (i < tokens.size) {
+                var value = 0
+                var consumed = false
+                if (i + 1 < tokens.size && tokens[i + 1] == "hundred" &&
+                    (tokens[i] == "a" || (singles[tokens[i]] ?: -1) in 1..9)) {
+                    value = if (tokens[i] == "a") 100 else singles.getValue(tokens[i]) * 100
+                    i += 2
+                    if (i < tokens.size && tokens[i] == "and") i++
+                    consumed = true
+                }
+                if (i < tokens.size && tokens[i] in decades) {
+                    value += decades.getValue(tokens[i]); i++
+                    if (i < tokens.size && (singles[tokens[i]] ?: -1) in 1..9) {
+                        value += singles.getValue(tokens[i]); i++
+                    }
+                    consumed = true
+                } else if (i < tokens.size && (singles[tokens[i]] ?: -1) in 1..19) {
+                    value += singles.getValue(tokens[i]); i++
+                    consumed = true
+                }
+                if (!consumed) return null
+                groups += value
+            }
+            return groups
+        }
+
         fun looksLikeTask(text: String) = taskStart.containsMatchIn(spoken(text).replace(Regex("^please ", RegexOption.IGNORE_CASE), ""))
 
         // "play the song called hello" names a song the way people say it; the wrapper is
@@ -104,7 +174,7 @@ internal sealed interface CarCommand {
                     it.none { char -> char in "&=?#\\" } && !it.contains("://") &&
                     !home.containsMatchIn("take me $it") && !navState.containsMatchIn(it)
             } ?: return null
-            return Navigate(place)
+            return Navigate(spokenAddress(place))
         }
     }
 }
