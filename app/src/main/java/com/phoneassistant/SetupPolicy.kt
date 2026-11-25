@@ -4,7 +4,7 @@ import java.net.URI
 
 /** Pure onboarding rules; the API screen only unlocks after the configured model replies. */
 internal object SetupPolicy {
-    enum class Step { WELCOME, API, PERMISSIONS }
+    enum class Step { WELCOME, API, PERMISSIONS, VOICE }
     enum class Check { OK, MISSING, URL, KEY, MODEL, LIMIT, PROVIDER, NETWORK, RESPONSE }
 
     // Shared by the initial setup and Pip settings, in display order.
@@ -15,7 +15,7 @@ internal object SetupPolicy {
         if (replay) replayProof else storedProof
 
     fun resumeStep(saved: Step?, verified: Boolean): Step = when {
-        saved == Step.PERMISSIONS && !verified -> Step.API
+        saved != null && saved != Step.WELCOME && saved != Step.API && !verified -> Step.API
         saved != null -> saved
         verified -> Step.PERMISSIONS
         else -> Step.WELCOME

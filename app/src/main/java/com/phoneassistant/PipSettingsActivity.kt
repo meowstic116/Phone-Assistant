@@ -207,8 +207,16 @@ class PipSettingsActivity : Activity() {
 
         step("Voice")
         heading("Voice")
-        toggle("Read Pip’s replies aloud", VoiceSettings.config(this).enabled, Notes.readingAloud) {
-            VoiceSettings.setEnabled(this, it)
+        // Speaking aloud is not a wish: the voice service has to be on the device first.
+        var voiceToggle: Switch? = null
+        voiceToggle = toggle("Read Pip’s replies aloud", VoiceSettings.config(this).enabled, Notes.readingAloud) { enabled ->
+            if (enabled && !PipVoice.textToVoiceReady(this)) {
+                val why = if (VoiceSettings.config(this).source == VoiceSource.KOKORO)
+                    "Download Kokoro below first — it’s Pip’s offline voice."
+                else "No text-to-voice service is on this phone yet. Download Kokoro below, or install an Android voice."
+                Toast.makeText(this, why, Toast.LENGTH_LONG).show()
+                voiceToggle?.isChecked = false
+            } else VoiceSettings.setEnabled(this, enabled)
         }
         volumeSlider("Pip’s voice volume", { Notes.voiceVolume }, 0, VoiceSettings.volume(this),
             { VoiceSettings.setVolume(this, it) }) {
@@ -247,12 +255,20 @@ class PipSettingsActivity : Activity() {
 
         step("Talk to Pip")
         heading("Talk to Pip", Notes.listening)
-        toggle("Start listening when Pip starts", PipStartup.listenOnStart(this), Notes.listenOnStart) { enabled ->
-            PipStartup.setListenOnStart(this, enabled)
-            if (enabled) WakeListenService.startProblem(this)?.let {
-                Toast.makeText(this, it, Toast.LENGTH_LONG).show()
+        // Listening needs its offline recognition on the device before it can be turned on.
+        var listenToggle: Switch? = null
+        listenToggle = toggle("Start listening when Pip starts", PipStartup.listenOnStart(this), Notes.listenOnStart) { enabled ->
+            if (enabled && !WakeModel.ready(this)) {
+                Toast.makeText(this, "Download offline recognition first — the button below.", Toast.LENGTH_LONG).show()
+                listenToggle?.isChecked = false
+            } else {
+                PipStartup.setListenOnStart(this, enabled)
+                if (enabled) WakeListenService.startProblem(this)?.let {
+                    Toast.makeText(this, it, Toast.LENGTH_LONG).show()
+                }
             }
-        }.isEnabled = true
+        }
+        listenToggle?.isEnabled = true
         wakeAction = plainButton("") { changeWakeListening() }
         wakeStatus = text("")
         wakeSpeak = plainButton("Speak now (no wake word)") {

@@ -33,6 +33,13 @@ internal object PipVoice {
     @Volatile private var keepMicMutedUntil = 0L
     fun microphoneBlocked() = speaking || SystemClock.elapsedRealtime() < keepMicMutedUntil
     fun stopHandsFree() { if (allowLockedPlayback) stop() }
+
+    /** The text-to-voice service the chosen source speaks with, on the device right now. */
+    fun textToVoiceReady(ctx: Context): Boolean = when (VoiceSettings.config(ctx).source) {
+        VoiceSource.KOKORO -> KokoroVoice.ready(ctx)
+        VoiceSource.ANDROID -> ctx.packageManager.queryIntentServices(
+            Intent("android.intent.action.TTS_SERVICE"), 0).isNotEmpty()
+    }
     fun stopUnlessHandsFree() { if (!allowLockedPlayback) stop() }
     private var kokoroRequest: KokoroIpc.Request? = null
     private var player: KokoroPlayback? = null

@@ -668,6 +668,9 @@ fun main() {
     check(setup.resumeStep(permissionStep, verified = false) == apiStep)
     check(setup.resumeStep(permissionStep, verified = true) == permissionStep)
     check(setup.resumeStep(null, verified = true) == permissionStep)
+    val voiceStep = SetupPolicy.Step.VOICE
+    check(setup.resumeStep(voiceStep, verified = false) == apiStep)
+    check(setup.resumeStep(voiceStep, verified = true) == voiceStep)
     val startedReplay = setup.proofForRun(replay = true, storedProof = true, replayProof = false)
     check(setup.resumeStep(null, verified = startedReplay) == welcomeStep)
     check(setup.resumeStep(permissionStep, verified = startedReplay) == apiStep)

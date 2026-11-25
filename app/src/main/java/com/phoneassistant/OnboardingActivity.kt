@@ -36,6 +36,13 @@ class OnboardingActivity : Activity() {
     private var requestId = 0
     private var validation: Future<*>? = null
     private val permissionUpdates = mutableListOf<() -> Unit>()
+    private var wakeFailed = false
+    private var wakeStatus: TextView? = null
+    private var wakeButton: Button? = null
+    private var kokoroStatus: TextView? = null
+    private var kokoroButton: Button? = null
+    private val wakeListener: () -> Unit = { runOnUiThread { refreshVoiceCards() } }
+    private val kokoroListener: () -> Unit = { runOnUiThread { refreshVoiceCards() } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +73,8 @@ class OnboardingActivity : Activity() {
     override fun onResume() {
         super.onResume()
         permissionUpdates.forEach { it() }
+        WakeModel.observe(wakeListener)
+        KokoroVoice.observe(kokoroListener)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -76,12 +85,20 @@ class OnboardingActivity : Activity() {
     @Deprecated("Wizard back navigates within its own steps")
     override fun onBackPressed() {
         if (!::step.isInitialized || step == Step.WELCOME) finish()
-        else show(if (step == Step.PERMISSIONS) Step.API else Step.WELCOME)
+        else show(backTarget())
     }
 
     override fun onDestroy() {
         cancelValidation()
+        WakeModel.forget(wakeListener)
+        KokoroVoice.forget(kokoroListener)
         super.onDestroy()
+    }
+
+    private fun backTarget(): Step = when (step) {
+        Step.VOICE -> Step.PERMISSIONS
+        Step.PERMISSIONS -> Step.API
+        else -> Step.WELCOME
     }
 
     private fun show(target: Step) {
@@ -101,13 +118,14 @@ class OnboardingActivity : Activity() {
         })
         page.requestFocus()
         if (step != Step.WELCOME) {
-            button(page, "Back") { show(if (step == Step.PERMISSIONS) Step.API else Step.WELCOME) }
+            button(page, "Back") { show(backTarget()) }
         }
         line(page, "STEP ${step.ordinal + 1} OF ${Step.values().size}", 12f, R.color.accent, 16).letterSpacing = 0.13f
         when (step) {
             Step.WELCOME -> welcome()
             Step.API -> connect()
             Step.PERMISSIONS -> permissions()
+            Step.VOICE -> voice()
         }
     }
 
@@ -221,6 +239,36 @@ class OnboardingActivity : Activity() {
                 line(card, getString(R.string.permissions_message_previews_info), 14f)
             }
         }
+        button(page, "Continue", primary = true, top = 18) { show(Step.VOICE) }
+    }
+
+    /** The optional voice services: ask once, download now or later in Pip settings. */
+    private fun voice() {
+        heading("Voice, if you want it")
+        line(page, "Two optional downloads let you talk to Pip and hear him answer aloud. Both work offline on this phone. Say no for now and add them later in Pip settings.", 15f, top = 10)
+
+        val stt = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.settings_card)
+            setPadding(dp(16), dp(12), dp(16), dp(14))
+        }
+        page.addView(stt, row(12))
+        line(stt, "Voice to text — talk to Pip", 16f, R.color.text).setTypeface(null, Typeface.BOLD)
+        line(stt, "Lets you ask out loud, hands-free. The wake word and your speech are recognized on this phone; audio is never saved or sent.", 14f, top = 6)
+        wakeStatus = line(stt, "", 14f, R.color.accent, 8)
+        wakeButton = button(stt, "", top = 6) { startWakeDownload() }
+
+        val tts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.settings_card)
+            setPadding(dp(16), dp(12), dp(16), dp(14))
+        }
+        page.addView(tts, row(11))
+        line(tts, "Text to voice — Pip speaks", 16f, R.color.text).setTypeface(null, Typeface.BOLD)
+        line(tts, "Pip reads his replies aloud in his own voice, offline.", 14f, top = 6)
+        kokoroStatus = line(tts, "", 14f, R.color.accent, 8)
+        kokoroButton = button(tts, "", top = 6) { startKokoroDownload() }
+
         button(page, "Finish setup", primary = true, top = 18) {
             if (replay) {
                 val verifiedDraft = replayDraft ?: return@button show(Step.API)
@@ -228,6 +276,53 @@ class OnboardingActivity : Activity() {
                 finish()
             } else if (AssistantBrain.finishSetup(this)) openMain() else show(Step.API)
         }
+        refreshVoiceCards()
+    }
+
+    private fun startWakeDownload() {
+        if (WakeModel.busy || WakeModel.ready(this)) return
+        wakeFailed = false
+        refreshVoiceCards()
+        WakeModel.install(this) { ok ->
+            runOnUiThread {
+                if (!ok) wakeFailed = true
+                refreshVoiceCards()
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                Toast.makeText(this, if (ok) "Voice to text is ready."
+                    else "Couldn’t download voice to text. Check your connection and free space.",
+                    Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun startKokoroDownload() {
+        if (KokoroVoice.busy() || KokoroVoice.ready(this)) return
+        KokoroVoice.install(this)
+    }
+
+    private fun refreshVoiceCards() {
+        if (!::step.isInitialized || step != Step.VOICE || wakeStatus == null) return
+        val wakeReady = WakeModel.ready(this)
+        wakeStatus?.text = when {
+            wakeReady -> "Installed."
+            WakeModel.busy -> "Downloading voice to text…"
+            wakeFailed -> "Couldn’t download. Check your connection and free space."
+            else -> "Not downloaded — a one-time 57 MB download."
+        }
+        wakeButton?.text = when {
+            wakeReady -> "Installed"
+            WakeModel.busy -> "Downloading…"
+            else -> "Download voice to text (57 MB)"
+        }
+        wakeButton?.isEnabled = !wakeReady && !WakeModel.busy
+        val kokoroReady = KokoroVoice.ready(this)
+        kokoroStatus?.text = KokoroVoice.status(this)
+        kokoroButton?.text = when {
+            kokoroReady -> "Installed"
+            KokoroVoice.busy() -> "Downloading…"
+            else -> "Download Pip’s voice (110 MB)"
+        }
+        kokoroButton?.isEnabled = !kokoroReady && !KokoroVoice.busy() && KokoroVoice.supported()
     }
 
     private fun permission(title: String, description: String, granted: () -> Boolean, request: () -> Unit): LinearLayout {
