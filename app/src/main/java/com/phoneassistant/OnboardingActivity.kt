@@ -170,6 +170,13 @@ class OnboardingActivity : Activity() {
         api.findViewById<Button>(R.id.keyLink).setOnClickListener {
             openSettings(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey")))
         }
+        api.findViewById<Button>(R.id.resetApiButton).setOnClickListener {
+            // Refills the form only; the key is not saved until setup is verified.
+            val defaults = AssistantBrain.defaultConfig()
+            base.setText(defaults.baseUrl)
+            key.setText(defaults.apiKey)
+            model.setText(defaults.model)
+        }
         api.findViewById<Button>(R.id.saveApiButton).visibility = View.GONE
         val status = line(page, "", 14f, R.color.accent, 8).apply {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE

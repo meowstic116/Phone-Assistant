@@ -27,6 +27,7 @@
     <string name="settings_api_key">API key</string>
     <string name="settings_api_model">Model</string>
     <string name="settings_api_save">Save API settings</string>
+    <string name="settings_api_reset">Reset to defaults</string>
     <string name="settings_api_saved">API settings saved</string>
     <string name="settings_api_browser_missing">No browser is available to open Google AI Studio.</string>
     <string name="permissions_heading">Permissions</string>

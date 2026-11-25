@@ -45,6 +45,9 @@ object AssistantBrain {
     // regardless — the task runner only ever asks the next question after the last lands.
     private val watchExecutor = Executors.newSingleThreadExecutor()
 
+    /** The provider Pip ships with: Gemini's free-tier endpoint and no key of its own. */
+    fun defaultConfig(): Config = Config(DEFAULT_BASE, "", DEFAULT_MODEL)
+
     fun config(ctx: Context): Config {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return Config(

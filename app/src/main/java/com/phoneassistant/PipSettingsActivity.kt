@@ -656,6 +656,12 @@ class PipSettingsActivity : Activity() {
                 Toast.makeText(this, R.string.settings_api_browser_missing, Toast.LENGTH_SHORT).show()
             }
         }
+        api.findViewById<Button>(R.id.resetApiButton).setOnClickListener {
+            // Refills the form only; nothing is stored until Save.
+            display(AssistantBrain.defaultConfig())
+            Toast.makeText(this, "Base URL, API key, and model reset to defaults. Tap Save to apply.",
+                Toast.LENGTH_SHORT).show()
+        }
         api.findViewById<Button>(R.id.saveApiButton).setOnClickListener {
             val url = baseUrl.text.toString().trim()
             val apiKey = key.text.toString().trim()
