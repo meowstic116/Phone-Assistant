@@ -1058,12 +1058,18 @@ fun main() {
     // "Play jazz" is how people name music: a play with a name goes to Spotify's search,
     // and the plain verbs speak for themselves.
     check(CarCommand.parse("play some music") == CarCommand.Spotify.PLAY)
-    check(CarCommand.parse("play jazz") == CarCommand.SpotifyPlaylist("jazz"))
-    check(CarCommand.parse("Play jazz on Spotify") == CarCommand.SpotifyPlaylist("jazz"))
+    // A bare name is searched free — a song and a playlist both answer it. The words
+    // that said playlist or mix pin the playlist search.
+    check(CarCommand.parse("play jazz") == CarCommand.SpotifyPlaylist("jazz", namedPlaylist = false))
+    check(CarCommand.parse("Play jazz on Spotify") == CarCommand.SpotifyPlaylist("jazz", namedPlaylist = false))
+    check(CarCommand.parse("play the song called hello") == CarCommand.SpotifyPlaylist("hello", namedPlaylist = false))
+    check(CarCommand.parse("play a song by ed sheeran") == CarCommand.SpotifyPlaylist("ed sheeran", namedPlaylist = false))
+    check(CarCommand.parse("play road trip mix") == CarCommand.SpotifyPlaylist("road trip mix"))
+    check(CarCommand.parse("play my playlist called Road Trip") == CarCommand.SpotifyPlaylist("Road Trip"))
     check(CarCommand.parse("skip this track") == CarCommand.Spotify.NEXT)
     check(CarCommand.parse("play jazz and then navigate home") == null)
     check(CarCommand.parse("play something with me") == null)
-    check(CarCommand.parse("play jazz for me") == CarCommand.SpotifyPlaylist("jazz"))
+    check(CarCommand.parse("play jazz for me") == CarCommand.SpotifyPlaylist("jazz", namedPlaylist = false))
     // Reading the shade is a spoken local answer: not a driving command and not a job.
     check(CarCommand.parse("read me my notifications") == null)
     check(NotificationDigest.request("read me my notifications"))
