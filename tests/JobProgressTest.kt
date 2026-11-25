@@ -348,15 +348,30 @@ fun main() {
 
     val message = JobProgress.Communication(JobProgress.CommunicationKind.MESSAGE, null)
     val call = JobProgress.Communication(JobProgress.CommunicationKind.CALL, null)
-    check(JobProgress.communicationRequest("Message Sam and say I saw it on Discord") == message)
-    check(JobProgress.communicationRequest("Text Sam: open Discord and message me back") == message)
-    check(JobProgress.communicationRequest("Send Sam a text saying Hi") == message)
-    check(JobProgress.communicationRequest("Open Discord and message Sam and say hello") == message.copy(explicitApp = "discord"))
-    check(JobProgress.communicationRequest("Message Sam via WhatsApp and say Hi") == message.copy(explicitApp = "whatsapp"))
-    check(JobProgress.communicationRequest("Call Sam") == call)
-    check(JobProgress.communicationRequest("Call Sam on speaker") == call)
-    check(JobProgress.communicationRequest("Open Discord and call Sam") == call.copy(explicitApp = "discord"))
+    // Recipient and body keep the spelling the request was made in: they go to the person
+    // and into a compose box, never to a model.
+    check(JobProgress.communicationRequest("Message Sam and say I saw it on Discord") ==
+        message.copy(recipient = "Sam", body = "I saw it on Discord"))
+    check(JobProgress.communicationRequest("Text Sam: open Discord and message me back") ==
+        message.copy(recipient = "Sam", body = "open Discord and message me back"))
+    check(JobProgress.communicationRequest("Send Sam a text saying Hi") ==
+        message.copy(recipient = "Sam", body = "Hi"))
+    check(JobProgress.communicationRequest("Open Discord and message Sam and say hello") ==
+        message.copy(explicitApp = "discord", recipient = "Sam", body = "hello"))
+    check(JobProgress.communicationRequest("Message Sam via WhatsApp and say Hi") ==
+        message.copy(explicitApp = "whatsapp", recipient = "Sam", body = "Hi"))
+    check(JobProgress.communicationRequest("Call Sam") == call.copy(recipient = "Sam"))
+    check(JobProgress.communicationRequest("Call Sam on speaker") == call.copy(recipient = "Sam"))
+    check(JobProgress.communicationRequest("Open Discord and call Sam") ==
+        call.copy(explicitApp = "discord", recipient = "Sam"))
     check(JobProgress.communicationRequest("Don't call Sam") == null)
+    check(JobProgress.communicationRequest("Text mom: happy birthday") ==
+        message.copy(recipient = "mom", body = "happy birthday"))
+    check(JobProgress.communicationRequest("send mom a message to say happy birthday") ==
+        message.copy(recipient = "mom", body = "happy birthday"))
+    check(JobProgress.communicationRequest("text mom happy birthday") ==
+        message.copy(recipient = "mom happy birthday"))
+    check(JobProgress.communicationRequest("Call 555-1234") == call.copy(recipient = "555-1234"))
     check(!JobProgress.communicationActionAllowed("open_app") && !JobProgress.communicationActionAllowed("search"))
     check(JobProgress.communicationActionAllowed("tap"))
 

@@ -498,13 +498,15 @@ internal object JobProgress {
     }
 
     enum class CommunicationKind { MESSAGE, CALL }
-    data class Communication(val kind: CommunicationKind, val explicitApp: String?)
+    data class Communication(val kind: CommunicationKind, val explicitApp: String?,
+        val recipient: String? = null, val body: String? = null)
 
-    private val messageStart = Regex("^(?:message|text|sms|send (?:a )?(?:text(?: message)?|message) to) (.+)$")
-    private val sendToPerson = Regex("^send (.+?) (?:a )?(?:text(?: message)?|message)(.*)$")
-    private val callStart = Regex("^(?:call|dial|ring|phone) (.+)$")
-    private val bodyStart = Regex(":|,? and (?:say|tell|write|send)\\b|[, ]+(?:saying|with (?:the )?(?:message|text))\\b|[\"“]")
-    private val appSuffix = Regex(".+ (?:on|via|using|in) (.+)")
+    private val messageStart = Regex("^(?:message|text|sms|send (?:a )?(?:text(?: message)?|message) to) (.+)$", RegexOption.IGNORE_CASE)
+    private val sendToPerson = Regex("^send (.+?) (?:a )?(?:text(?: message)?|message)(.*)$", RegexOption.IGNORE_CASE)
+    private val callStart = Regex("^(?:call|dial|ring|phone) (.+)$", RegexOption.IGNORE_CASE)
+    private val bodyStart = Regex(":|,? and (?:say|tell|write|send)\\b|[, ]+(?:saying|with (?:the )?(?:message|text))\\b|\\bto (?:say|tell|wish)(?: (?:him|her|them|me))?\\b|[\"“]", RegexOption.IGNORE_CASE)
+    private val appSuffix = Regex(".+ (?:on|via|using|in) (.+)", RegexOption.IGNORE_CASE)
+    private val spelledOpen = Regex("open(?: up)? (.+?),? and (.+)", RegexOption.IGNORE_CASE)
 
     fun communicationRequest(original: String): Communication? {
         val text = feedText(original)
@@ -519,7 +521,36 @@ internal object JobProgress {
         val head = target.substring(0, bodyStart.find(target)?.range?.first ?: target.length).trim()
         val suffix = appSuffix.matchEntire(head)?.groupValues?.get(1)
             ?.takeIf { it !in setOf("speaker", "speakerphone", "the phone") }
-        return Communication(kind, openedFirst?.groupValues?.get(1) ?: suffix)
+        val spelled = spelledTarget(original)
+        return Communication(kind, openedFirst?.groupValues?.get(1) ?: suffix,
+            spelled?.first, spelled?.second)
+    }
+
+    /**
+     * The same request with the spelling it was made in, split into who it is for and what it
+     * says: those go to the person and into a compose box, where "Sam" and "sam" are not the
+     * same name. No model sees either one; this is the request as it was said.
+     */
+    private fun spelledTarget(original: String): Pair<String, String?>? {
+        val text = original.trim().trim('"', '“', '”').trimEnd('.', '!', '?')
+            .replace(Regex("^pip[, ]+", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("^please ", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("^(?:can|could|would) you ", RegexOption.IGNORE_CASE), "")
+            .replace(Regex(",? please$", RegexOption.IGNORE_CASE), "")
+        val openedFirst = spelledOpen.matchEntire(text)
+        val command = openedFirst?.groupValues?.get(2)?.removePrefix("then ")?.removePrefix("Then ") ?: text
+        val message = messageStart.matchEntire(command)
+        val send = if (message == null) sendToPerson.matchEntire(command) else null
+        val call = if (message == null && send == null) callStart.matchEntire(command) else null
+        val target = (message ?: call)?.groupValues?.get(1)
+            ?: send?.let { it.groupValues[1] + it.groupValues[2] } ?: return null
+        val mark = bodyStart.find(target)
+        val head = target.substring(0, mark?.range?.first ?: target.length)
+        val recipient = head.replace(Regex(" (?:on|via|using|in) .+$", RegexOption.IGNORE_CASE), "").trim()
+        val body = mark?.let { target.substring(it.range.last + 1) }
+            ?.replace(Regex("^(?:say|tell|wish|saying|telling)\\s+", RegexOption.IGNORE_CASE), "")
+            ?.trim()?.trim('"', '“', '”')?.trim()?.takeIf { it.isNotEmpty() }
+        return recipient.takeIf { it.isNotEmpty() }?.let { it to body }
     }
 
     // Communication jobs are pinned to the app requested by the user, not the model.
