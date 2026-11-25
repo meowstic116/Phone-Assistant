@@ -675,11 +675,32 @@ object Screen {
         }?.takeIf { it.isNotBlank() && it != ctx.packageName }
     }.getOrNull()
 
-    internal fun openCommunication(ctx: Context, pkg: String, kind: JobProgress.CommunicationKind, app: AppRef?): Boolean {
+    /**
+     * Opens the conversation or dialer, with the message filled in and the number dialled when
+     * there is one. The words ride in the intent, the same way Android's own share sheet sends
+     * them: no screen is read and no model sees the app's contents on the way.
+     */
+    internal fun openCommunication(ctx: Context, pkg: String, kind: JobProgress.CommunicationKind,
+        app: AppRef?, recipient: String? = null, body: String? = null): Boolean {
+        val number = recipient?.takeIf {
+            kind == JobProgress.CommunicationKind.CALL &&
+                it.isNotEmpty() && it.all { c -> c.isDigit() || c == ' ' || c == '-' || c == '+' || c == '(' || c == ')' }
+        }
+        val carried = when {
+            kind == JobProgress.CommunicationKind.MESSAGE && body != null ->
+                Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, body).setPackage(pkg)
+            number != null ->
+                Intent(Intent.ACTION_DIAL, Uri.parse("tel:${number.filter { c -> c != ' ' }}")).setPackage(pkg)
+            else -> null
+        }
+        if (carried != null && runCatching {
+                ctx.startActivity(carried.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+            }.getOrDefault(false)) return true
         if (app != null) return open(ctx, app)
         // A role holder without a launcher icon can still expose the standard entry point.
         val entry = when (kind) {
             JobProgress.CommunicationKind.MESSAGE -> Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:"))
+                .putExtra("sms_body", body ?: "")
             JobProgress.CommunicationKind.CALL -> Intent(Intent.ACTION_DIAL, Uri.parse("tel:"))
         }.setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return runCatching { ctx.startActivity(entry); true }.getOrDefault(false)

@@ -257,13 +257,29 @@ object Agent {
                 if (!alive()) return
                 if (Screen.inFront() != commPackage) {
                     val opened = Screen.openCommunication(ctx, commPackage, communication.kind,
-                        apps.firstOrNull { it.packageName == commPackage })
+                        apps.firstOrNull { it.packageName == commPackage },
+                        communication.recipient, communication.body)
                     Diag.jobStep(mine, "open communication app", if (opened) "$commLabel opened" else "launch failed", opened)
                     if (!opened) {
                         finish("I couldn't open $commLabel.", "communication app launch failed")
                         return
                     }
                     awaitApp(commPackage)
+                }
+                // A conversation app is finished by handing it over: the privacy rule keeps
+                // message text out of the model, so the compose opens with the words in it and
+                // the send is the person's to press. Nothing inside is read or typed blind.
+                if (PrivateMessageRead.messagingPackage(ctx, commPackage)) {
+                    val line = when {
+                        communication.kind == JobProgress.CommunicationKind.CALL ->
+                            "$commLabel is open for your call to ${communication.recipient ?: "them"}."
+                        communication.body != null && communication.recipient != null ->
+                            "$commLabel is open with your message to ${communication.recipient} — check it and press send."
+                        else -> "$commLabel is open — write your message there and press send."
+                    }
+                    Diag.jobStep(mine, "hand off communication", "$commLabel left to the person", true)
+                    finish(line, "handed to $commLabel for send")
+                    return
                 }
             }
             val named = if (communication == null && playlist == null) Screen.appInRequest(apps, request) else null
@@ -290,13 +306,33 @@ object Agent {
             }
 
             val expectedPackage = commPackage ?: SpotifyQuickPlan.PACKAGE.takeIf { playlist != null }
+            var leftPip = false
             while (alive()) {
+                // His own screens are never model context, so a job that begins on one begins
+                // at the home screen instead — readable, neutral, and where a task is expected
+                // to start anyway. One press: if it does not take, the normal failure speaks.
+                if (!leftPip && Screen.inFront() == ctx.packageName) {
+                    leftPip = true
+                    Diag.jobStep(mine, "leave Pip's screen", "job began on Pip's own window", Screen.home())
+                    SystemClock.sleep(READ_WAIT_MS)
+                    continue
+                }
                 val read = readScreen(web = web.followUp && communication == null,
                     expectedApp = expectedPackage, active = ::alive)
                 val screen = read.screen
                 if (screen == null) {
                     val hands = Screen.available()
                     val looks = "${read.looks} look" + if (read.looks == 1) "" else "s"
+                    // A conversation or mail app that keeps its text private is not a screen
+                    // that failed to arrive: say so plainly instead of "I can't see the screen".
+                    val front = Screen.inFront()
+                    if (hands && front != null && front != ctx.packageName &&
+                        PrivateMessageRead.messagingPackage(ctx, front)) {
+                        val label = Screen.appLabel(ctx, front) ?: "That app"
+                        finish("$label keeps its messages private to me, so I can’t work inside it.",
+                            "privacy-locked app in front: $front")
+                        return
+                    }
                     if (commPackage != null && hands) {
                         finish("I couldn't see $commLabel, so I stopped without switching apps.", "communication app not readable")
                         return
