@@ -6,6 +6,7 @@ import android.app.Person
 import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.media.MediaMetadata
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
@@ -190,10 +191,31 @@ class PipMediaAccess : NotificationListenerService() {
                     ?: return unavailable("I couldn’t reach Android’s media controls.")
                 // During a call the car may be using the phone's audio path; an empty Spotify
                 // list is worth saying plainly instead of a generic failure.
-                val sessions = manager.getActiveSessions(component(ctx)).filter {
-                    it.playbackInfo?.playbackType == android.media.session.MediaController.PlaybackInfo.PLAYBACK_TYPE_LOCAL
+                fun localSessions() = runCatching {
+                    manager.getActiveSessions(component(ctx)).filter {
+                        it.playbackInfo?.playbackType == android.media.session.MediaController.PlaybackInfo.PLAYBACK_TYPE_LOCAL
+                    }
+                }.getOrDefault(emptyList())
+                var sessions = localSessions()
+                var spotify = sessions.firstOrNull { it.packageName == SpotifyQuickPlan.PACKAGE }
+                // "Play something" from cold is the normal ask. Starting content opens
+                // Spotify and waits for its session instead of refusing a request the
+                // phone can still do; a pause or skip with nothing running still says so.
+                if (spotify == null && (action is CarCommand.SpotifyPlaylist || action == CarCommand.Spotify.PLAY)) {
+                    val launch = runCatching {
+                        ctx.packageManager.getLaunchIntentForPackage(SpotifyQuickPlan.PACKAGE)
+                    }.getOrNull()
+                    if (launch != null) {
+                        runCatching { ctx.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        var waits = 0
+                        while (spotify == null && waits < 15) {
+                            android.os.SystemClock.sleep(200)
+                            waits++
+                            sessions = localSessions()
+                            spotify = sessions.firstOrNull { it.packageName == SpotifyQuickPlan.PACKAGE }
+                        }
+                    }
                 }
-                val spotify = sessions.firstOrNull { it.packageName == SpotifyQuickPlan.PACKAGE }
                 // A transport request rides on whatever is playing: in the car it may well be
                 // another app. Starting content is different — that stays Spotify's search.
                 val target = when (action) {

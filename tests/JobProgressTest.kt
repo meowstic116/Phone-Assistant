@@ -1082,6 +1082,15 @@ fun main() {
     check(CarCommand.parse("skip this track") == CarCommand.Spotify.NEXT)
     check(CarCommand.parse("play jazz and then navigate home") == null)
     check(CarCommand.parse("play something with me") == null)
+    // A comma is part of a song's name, not a second task.
+    check(CarCommand.parse("play Hey, Soul Sister") == CarCommand.SpotifyPlaylist("Hey, Soul Sister", namedPlaylist = false))
+    // An ask that names nothing to find starts music instead of searching for "a".
+    check(CarCommand.parse("play a playlist") == CarCommand.Spotify.PLAY)
+    check(CarCommand.parse("play a song or playlist") == CarCommand.Spotify.PLAY)
+    check(CarCommand.parse("play a song from my playlist") == CarCommand.Spotify.PLAY)
+    check(CarCommand.parse("play some songs") == CarCommand.Spotify.PLAY)
+    check(CarCommand.parse("play some music please") == CarCommand.Spotify.PLAY)
+    check(CarCommand.parse("play a song for me") == CarCommand.Spotify.PLAY)
     check(CarCommand.parse("play jazz for me") == CarCommand.SpotifyPlaylist("jazz", namedPlaylist = false))
     // Reading the shade is a spoken local answer: not a driving command and not a job.
     check(CarCommand.parse("read me my notifications") == null)

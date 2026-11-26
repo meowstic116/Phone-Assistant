@@ -134,6 +134,16 @@ internal sealed interface CarCommand {
         private val songWrapper = Regex("""^play (?:me )?(?:the |my |a )?(?:song|album|track) (?:called |named |by )?(.+)$""",
             RegexOption.IGNORE_CASE)
 
+        // A request that names nothing to find — "play a playlist", "play a song or
+        // playlist", "play some songs" — is an ask to start music, not a search for the
+        // word "a". The exact map takes the common ones; this takes the rest.
+        private val fillerWords = setOf("a", "an", "the", "my", "please", "song", "songs", "music",
+            "playlist", "playlists", "album", "albums", "for", "me", "from", "of", "or",
+            "some", "any", "something")
+        private fun fillerTitle(title: String): Boolean =
+            title.lowercase(java.util.Locale.ROOT).split(whitespace)
+                .all { it.trim('"', '“', '”') in fillerWords }
+
         /** The title and whether the words named a playlist or mix; a plain name is searched free. */
         private fun playlist(text: String): Pair<String, Boolean>? {
             val titleRequest = text.replace(spotifySuffix, "")
@@ -147,8 +157,10 @@ internal sealed interface CarCommand {
             } else null
             val (raw, named) = explicit?.let { it to true } ?: wrapper?.let { it to false } ?: bare ?: return null
             return raw.trim().trim('"', '“', '”').trim().takeIf {
+                // A comma is a song's own ("Hey, Soul Sister"), not a second task: only a
+                // backslash is kept out of the search box.
                 it.length in 1..120 && it.any(Char::isLetterOrDigit) && !it.contains("://") &&
-                    it.none { char -> char in ";,\\" } && !additionalTask.containsMatchIn(it) &&
+                    it.none { char -> char.code == 92 } && !additionalTask.containsMatchIn(it) &&
                     !playWithSomeone.containsMatchIn(it)
             }?.let { it to named }
         }
@@ -159,10 +171,12 @@ internal sealed interface CarCommand {
             // One lowercase, then both lookups on it: the offline media path runs while driving
             // and allocates twice otherwise.
             val media = spoken.lowercase(java.util.Locale.ROOT).removePrefix("please ")
+                .removeSuffix(" please").trim()
             val exact = spotify[media]
             if (exact != null) return exact
             spotify[media.removeSuffix(" on spotify")]?.let { return it }
             playlist(spoken.replace(Regex("^please ", RegexOption.IGNORE_CASE), ""))?.let {
+            if (fillerTitle(it.first)) return Spotify.PLAY
             return SpotifyPlaylist(it.first, it.second)
         }
             if (home.matches(spoken)) return Navigate("home")
