@@ -1693,7 +1693,9 @@ fun main() {
     check(ChatWindow.forReply(window, "next").takeLast(2) == listOf(userTurn, Msg("user", "next")))
     check(ChatWindow.forReply(emptyList(), "next") == listOf(Msg("user", "next")))
     val long = List(ChatWindow.MAX_MESSAGES + 3) { Msg("user", "$it") }
-    check(ChatWindow.forReply(long, "end").size == ChatWindow.MAX_MESSAGES)
+    // The history keeps 50 — 25 from each side — while each reply still travels with 24.
+    check(ChatWindow.MAX_MESSAGES == 50)
+    check(ChatWindow.forReply(long, "end").size == ChatWindow.CONTEXT_MESSAGES)
     check(ChatWindow.forReply(emptyList(), over).single().content.length == ChatWindow.MAX_MESSAGE_CHARS)
 
     // Saved logins match by host, however the site was entered (Vault.host delegates here).

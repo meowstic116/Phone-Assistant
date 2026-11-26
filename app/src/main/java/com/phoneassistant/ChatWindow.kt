@@ -10,7 +10,10 @@ data class Msg(val role: String, val content: String)
  */
 internal object ChatWindow {
 
-    const val MAX_MESSAGES = 24
+    /** How much conversation is kept and shown: 25 from the user, 25 from Pip. */
+    const val MAX_MESSAGES = 50
+    /** How much of it travels with each model request — cost per reply, not memory. */
+    const val CONTEXT_MESSAGES = 24
     const val MAX_MESSAGE_CHARS = 4096
 
     /**
@@ -29,6 +32,6 @@ internal object ChatWindow {
     fun forReply(history: List<Msg>, current: String): List<Msg> {
         val latest = Msg("user", bounded(current))
         return if (history.lastOrNull() == latest) history
-        else history.takeLast(MAX_MESSAGES - 1) + latest
+        else history.takeLast(CONTEXT_MESSAGES - 1) + latest
     }
 }
